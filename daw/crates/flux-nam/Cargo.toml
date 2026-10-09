@@ -1,0 +1,17 @@
+[package]
+name = "flux-nam"
+description = "Guitar and bass rigs: Neural Amp Modeler (.nam) inference, cabinet IRs and the rig insert chain."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+hound = "3.5.1"
+realfft = "3.5.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"

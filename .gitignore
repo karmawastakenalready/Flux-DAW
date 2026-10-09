@@ -1,0 +1,33 @@
+# python
+.venv/
+__pycache__/
+
+# downloaded assets (re-fetch with: flux assets fetch --all)
+instruments/
+tools/sfizz/
+tools/fluidsynth/
+tools/_dl/
+
+# intermediate renders
+build/
+
+# third-party plugins (VST3)
+plugins/
+
+# reference tracks for reference_match (other people's music: never committed or shipped)
+refs/
+
+# Rust build output (the DAW)
+daw/target/
+
+# test and screenshot output (README images are curated into docs/images/)
+daw/tests/out/
+**/__pycache__/
+
+# saved plugin states: they hold third-party preset data (Vital's EULA forbids sharing it)
+plugin-states/
+
+# songs stay out of the repository: renders, song projects and their build scripts, the pipeline's pieces
+output/
+daw/projects/
+pieces/

@@ -1,0 +1,627 @@
+{
+ "name": "temporal_shift/horn",
+ "slug": "temporal-shift-horn",
+ "sfz": "build/sfz/temporal_shift/horn.sfz",
+ "about": "generated multi-articulation instrument 'horn' - keyswitches: 120=sus, 121=stac",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   }
+  ],
+  "all_in_licenses_md": true
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   33,
+   77
+  ],
+  "main_names": "A1-F5",
+  "ranges": [
+   [
+    33,
+    77
+   ]
+  ],
+  "count": 45,
+  "span": [
+   33,
+   77
+  ],
+  "gaps": [],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 84,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": {
+  "keys": {
+   "120": "",
+   "121": ""
+  },
+  "default": 120
+ },
+ "per_key": {
+  "33": {
+   "level_db": -40.1,
+   "ap": 0.04,
+   "f0": 54.48,
+   "note": 33,
+   "cents": -16.5
+  },
+  "34": {
+   "level_db": -40.0,
+   "ap": 0.05,
+   "f0": 57.82,
+   "note": 34,
+   "cents": -13.3
+  },
+  "35": {
+   "level_db": -44.1,
+   "ap": 0.01,
+   "f0": 61.7,
+   "note": 35,
+   "cents": -1.0
+  },
+  "36": {
+   "level_db": -44.0,
+   "ap": 0.01,
+   "f0": 65.39,
+   "note": 36,
+   "cents": -0.4
+  },
+  "37": {
+   "level_db": -43.9,
+   "ap": 0.02,
+   "f0": 69.26,
+   "note": 37,
+   "cents": -0.8
+  },
+  "38": {
+   "level_db": -38.3,
+   "ap": 0.01,
+   "f0": 73.5,
+   "note": 38,
+   "cents": 1.9
+  },
+  "39": {
+   "level_db": -38.2,
+   "ap": 0.01,
+   "f0": 77.85,
+   "note": 39,
+   "cents": 1.4
+  },
+  "40": {
+   "level_db": -38.1,
+   "ap": 0.01,
+   "f0": 82.46,
+   "note": 40,
+   "cents": 1.0
+  },
+  "41": {
+   "level_db": -41.1,
+   "ap": 0.07,
+   "f0": 82.99,
+   "note": 40,
+   "cents": 12.2
+  },
+  "42": {
+   "level_db": -41.1,
+   "ap": 0.07,
+   "f0": 88.08,
+   "note": 41,
+   "cents": 15.3
+  },
+  "43": {
+   "level_db": -41.2,
+   "ap": 0.07,
+   "f0": 93.5,
+   "note": 42,
+   "cents": 18.6
+  },
+  "44": {
+   "level_db": -41.2,
+   "ap": 0.06,
+   "f0": 99.46,
+   "note": 43,
+   "cents": 25.6
+  },
+  "45": {
+   "level_db": -47.8,
+   "ap": 0.06,
+   "f0": 109.2,
+   "note": 45,
+   "cents": -12.7
+  },
+  "46": {
+   "level_db": -47.7,
+   "ap": 0.04,
+   "f0": 115.71,
+   "note": 46,
+   "cents": -12.4
+  },
+  "47": {
+   "level_db": -47.5,
+   "ap": 0.02,
+   "f0": 122.75,
+   "note": 47,
+   "cents": -10.1
+  },
+  "48": {
+   "level_db": -37.6,
+   "ap": 0.0,
+   "f0": 130.6,
+   "note": 48,
+   "cents": -2.8
+  },
+  "49": {
+   "level_db": -37.4,
+   "ap": 0.0,
+   "f0": 138.37,
+   "note": 49,
+   "cents": -2.8
+  },
+  "50": {
+   "level_db": -37.3,
+   "ap": 0.0,
+   "f0": 146.59,
+   "note": 50,
+   "cents": -2.8
+  },
+  "51": {
+   "level_db": -37.2,
+   "ap": 0.0,
+   "f0": 155.31,
+   "note": 51,
+   "cents": -2.8
+  },
+  "52": {
+   "level_db": -40.9,
+   "ap": 0.01,
+   "f0": 163.84,
+   "note": 52,
+   "cents": -10.2
+  },
+  "53": {
+   "level_db": -40.7,
+   "ap": 0.01,
+   "f0": 173.59,
+   "note": 53,
+   "cents": -10.2
+  },
+  "54": {
+   "level_db": -40.7,
+   "ap": 0.0,
+   "f0": 184.05,
+   "note": 54,
+   "cents": -8.9
+  },
+  "55": {
+   "level_db": -36.4,
+   "ap": 0.0,
+   "f0": 195.43,
+   "note": 55,
+   "cents": -5.0
+  },
+  "56": {
+   "level_db": -36.3,
+   "ap": 0.0,
+   "f0": 207.15,
+   "note": 56,
+   "cents": -4.2
+  },
+  "57": {
+   "level_db": -36.3,
+   "ap": 0.0,
+   "f0": 219.36,
+   "note": 57,
+   "cents": -5.1
+  },
+  "58": {
+   "level_db": -36.2,
+   "ap": 0.0,
+   "f0": 232.35,
+   "note": 58,
+   "cents": -5.5
+  },
+  "59": {
+   "level_db": -35.4,
+   "ap": 0.0,
+   "f0": 246.42,
+   "note": 59,
+   "cents": -3.7
+  },
+  "60": {
+   "level_db": -35.2,
+   "ap": 0.0,
+   "f0": 261.11,
+   "note": 60,
+   "cents": -3.4
+  },
+  "61": {
+   "level_db": -35.2,
+   "ap": 0.0,
+   "f0": 276.65,
+   "note": 61,
+   "cents": -3.4
+  },
+  "62": {
+   "level_db": -35.1,
+   "ap": 0.0,
+   "f0": 293.13,
+   "note": 62,
+   "cents": -3.2
+  },
+  "63": {
+   "level_db": -35.0,
+   "ap": 0.0,
+   "f0": 310.58,
+   "note": 63,
+   "cents": -3.0
+  },
+  "64": {
+   "level_db": -34.9,
+   "ap": 0.0,
+   "f0": 329.05,
+   "note": 64,
+   "cents": -3.0
+  },
+  "65": {
+   "level_db": -34.8,
+   "ap": 0.0,
+   "f0": 348.6,
+   "note": 65,
+   "cents": -3.1
+  },
+  "66": {
+   "level_db": -34.8,
+   "ap": 0.0,
+   "f0": 369.39,
+   "note": 66,
+   "cents": -2.8
+  },
+  "67": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 391.87,
+   "note": 67,
+   "cents": -0.6
+  },
+  "68": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 415.0,
+   "note": 68,
+   "cents": -1.3
+  },
+  "69": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 439.69,
+   "note": 69,
+   "cents": -1.2
+  },
+  "70": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 465.86,
+   "note": 70,
+   "cents": -1.1
+  },
+  "71": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 493.62,
+   "note": 71,
+   "cents": -0.9
+  },
+  "72": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 523.07,
+   "note": 72,
+   "cents": -0.6
+  },
+  "73": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 554.32,
+   "note": 73,
+   "cents": -0.1
+  },
+  "74": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 587.48,
+   "note": 74,
+   "cents": 0.4
+  },
+  "75": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 622.65,
+   "note": 75,
+   "cents": 1.1
+  },
+  "76": {
+   "level_db": -25.7,
+   "ap": 0.0,
+   "f0": 659.13,
+   "note": 76,
+   "cents": -0.3
+  },
+  "77": {
+   "level_db": -25.4,
+   "ap": 0.0,
+   "f0": 698.31,
+   "note": 77,
+   "cents": -0.4
+  }
+ },
+ "pitch": {
+  "kind": "pitched",
+  "confident_keys": 45,
+  "offset": 0,
+  "offset_share": 0.91,
+  "offset_outliers": {
+   "41": -1,
+   "42": -1,
+   "43": -1,
+   "44": -1
+  },
+  "worst_cents": -87.8,
+  "worst_key": 41,
+  "median_abs_cents": 3.0,
+  "out_of_tune": {
+   "33": -16.5,
+   "41": -87.8,
+   "42": -84.7,
+   "43": -81.4,
+   "44": -74.4
+  }
+ },
+ "level": {
+  "median_db": -36.4,
+  "std_db": 6.7,
+  "min_db": -47.8,
+  "max_db": -25.4,
+  "max_jump_db": 9.9,
+  "max_jump_keys": [
+   47,
+   48
+  ],
+  "jumps_over_6db": 3
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   44,
+   66
+  ],
+  "main": {
+   "hi3k_db": -67.2,
+   "centroid_hz": 488.0,
+   "attack_db": -4.9,
+   "onset_ms": 19.2
+  },
+  "median": {
+   "hi3k_db": -57.5,
+   "centroid_hz": 483.0,
+   "attack_db": -4.9,
+   "onset_ms": 20.0
+  },
+  "octaves": {
+   "C1": {
+    "hi3k_db": -49.3,
+    "centroid_hz": 478.0,
+    "attack_db": -3.7,
+    "onset_ms": 11.7
+   },
+   "C2": {
+    "hi3k_db": -47.4,
+    "centroid_hz": 483.0,
+    "attack_db": -0.4,
+    "onset_ms": 16.7
+   },
+   "C3": {
+    "hi3k_db": -67.9,
+    "centroid_hz": 407.0,
+    "attack_db": -4.9,
+    "onset_ms": 18.4
+   },
+   "C4": {
+    "hi3k_db": -68.5,
+    "centroid_hz": 479.0,
+    "attack_db": -17.0,
+    "onset_ms": 34.4
+   },
+   "C5": {
+    "hi3k_db": -53.2,
+    "centroid_hz": 672.0,
+    "attack_db": -20.5,
+    "onset_ms": 131.2
+   }
+  },
+  "notes": [
+   {
+    "key": 33,
+    "hi3k_db": -49.3,
+    "centroid_hz": 478.0,
+    "attack_db": -3.7,
+    "onset_ms": 11.7
+   },
+   {
+    "key": 36,
+    "hi3k_db": -44.7,
+    "centroid_hz": 483.0,
+    "attack_db": 1.4,
+    "onset_ms": 12.8
+   },
+   {
+    "key": 40,
+    "hi3k_db": -57.5,
+    "centroid_hz": 458.0,
+    "attack_db": -0.6,
+    "onset_ms": 16.7
+   },
+   {
+    "key": 44,
+    "hi3k_db": -47.4,
+    "centroid_hz": 515.0,
+    "attack_db": -0.4,
+    "onset_ms": 18.2
+   },
+   {
+    "key": 48,
+    "hi3k_db": -67.9,
+    "centroid_hz": 407.0,
+    "attack_db": -4.9,
+    "onset_ms": 8.8
+   },
+   {
+    "key": 52,
+    "hi3k_db": -66.6,
+    "centroid_hz": 497.0,
+    "attack_db": -2.9,
+    "onset_ms": 20.0
+   },
+   {
+    "key": 56,
+    "hi3k_db": -68.6,
+    "centroid_hz": 395.0,
+    "attack_db": -4.9,
+    "onset_ms": 18.4
+   },
+   {
+    "key": 60,
+    "hi3k_db": -70.6,
+    "centroid_hz": 479.0,
+    "attack_db": -17.0,
+    "onset_ms": 34.4
+   },
+   {
+    "key": 64,
+    "hi3k_db": -63.1,
+    "centroid_hz": 599.0,
+    "attack_db": -8.5,
+    "onset_ms": 27.3
+   },
+   {
+    "key": 68,
+    "hi3k_db": -68.5,
+    "centroid_hz": 420.0,
+    "attack_db": -19.6,
+    "onset_ms": 35.4
+   },
+   {
+    "key": 72,
+    "hi3k_db": -57.0,
+    "centroid_hz": 530.0,
+    "attack_db": -11.9,
+    "onset_ms": 28.1
+   },
+   {
+    "key": 76,
+    "hi3k_db": -52.9,
+    "centroid_hz": 672.0,
+    "attack_db": -20.5,
+    "onset_ms": 139.0
+   },
+   {
+    "key": 77,
+    "hi3k_db": -53.2,
+    "centroid_hz": 712.0,
+    "attack_db": -20.7,
+    "onset_ms": 131.2
+   }
+  ]
+ },
+ "sustain": {
+  "key": 55,
+  "kind": "sustained",
+  "peak_at_s": 0.32,
+  "t40_s": null,
+  "level_at_2s_db": -2.2,
+  "usable_max_note_s": null,
+  "release_s": 0.54,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 55,
+  "levels": {
+   "30": {
+    "rms_db": -52.1,
+    "hi3k_db": -69.0,
+    "centroid_hz": 396.0,
+    "attack_db": -18.1,
+    "onset_ms": 55.7
+   },
+   "70": {
+    "rms_db": -37.9,
+    "hi3k_db": -68.9,
+    "centroid_hz": 374.0,
+    "attack_db": -4.8,
+    "onset_ms": 19.5
+   },
+   "110": {
+    "rms_db": -32.9,
+    "hi3k_db": -37.6,
+    "centroid_hz": 441.0,
+    "attack_db": -1.0,
+    "onset_ms": 13.7
+   }
+  },
+  "range_db": 19.2,
+  "hi3k_change_db": 31.4,
+  "kind": "level and timbre (layers or filter)"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "uneven": "9.9 dB jump between keys 47 and 48 (3 jumps > 6.0 dB); even it out with tools/sfz_even.py",
+  "out of tune": "5 keys > 15.0 cents, worst -87.8 at key 41"
+ },
+ "used_by": [
+  "temporal_shift/horn",
+  "makima/horn"
+ ],
+ "aliases": [
+  "build/sfz/makima/horn.sfz"
+ ],
+ "seconds": 1.3
+}

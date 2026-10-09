@@ -1,0 +1,452 @@
+# Written by `flux assets fetch` / `flux assets lock`. Do not edit by hand.
+# Per-file checksums are in assets.lock.d/<id>.tsv.
+
+schema = 1
+
+[[asset]]
+id = "cithara-barbarica"
+path = "instruments/cithara-barbarica"
+method = "adopt"
+locked_at = "2026-10-09T01:14:13Z"
+spec_sha256 = "7387c0b50fa105cd3c13c40dfe9bfa60d38f34df46b6ffbfc3d73d39b0d9a9de"
+files = 115
+bytes = 76990390
+tree_sha256 = "8bb800aaf52c091ef15bcde7911a56c2ee173130247dbe8a41cd957f5af5d63b"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/cithara-barbarica"
+rev = "a47c10dc4a26538a8a56d31d3436488138292ca2"
+files = 115
+verified = "40 of 115 checked-out files match their git blob ids; 75 differ only by CRLF line endings"
+
+[[asset]]
+id = "decentsampler-bottles"
+path = "instruments/decentsampler-bottles"
+method = "fetch"
+locked_at = "2026-10-09T04:50:24Z"
+spec_sha256 = "64b870168652d5c463c92a6a9d4fb89852c84775bfb468d5079a3faa5166cd7e"
+files = 109
+bytes = 50859654
+tree_sha256 = "8b32a8f163893c84c1772a48359a2de6a38f03281dad86f539ba7b6dc27a25bf"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/Botskiz/decentsampler-bottles"
+rev = "bbea69269996bd8b825df69b81e0b3cae0b35b8f"
+files = 109
+verified = "109 checked-out files match their git blob ids"
+
+[[asset]]
+id = "dexed"
+path = "plugins/dexed"
+method = "adopt"
+locked_at = "2026-10-09T01:14:34Z"
+spec_sha256 = "bcfc7dbbe9b95e0eda4c305e7442c94b6f487215fd77ba168d214f4c93c4d779"
+files = 5
+bytes = 7264984
+tree_sha256 = "a577d42b35dd72773405df1506e4d9ea4746e147ecf125bb93df0efbbd214515"
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/asb2m10/dexed/releases/download/v1.0.1/Dexed-1.0.1-win.zip"
+sha256 = "1f118445f2c5c411636bb41ddf8b456db09af74cd38f9ede8a93a01020505f05"
+size = 9742538
+files = 5
+verified = "archive sha256 checked; 5 files extracted and checked against the archive, 4 left out by include"
+
+[[asset]]
+id = "fluidsynth"
+path = "tools/fluidsynth"
+method = "adopt"
+locked_at = "2026-10-09T01:14:34Z"
+spec_sha256 = "f133875fb5c5e6d9321e0a938437a0ac54a02dc950e862def2aed84c5ba6253a"
+files = 28
+bytes = 6420376
+tree_sha256 = "e8c7bde772c1de35b6a5f0dd36c2ab453229088fd5a0e73cfb7e2b7bbc044ef1"
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/FluidSynth/fluidsynth/releases/download/v2.6.1/fluidsynth-v2.6.1-win10-x64-cpp11.zip"
+sha256 = "fab7a2e4b85675b66970f97a39bbc239729c5e0f237198b5922a6a73cbc8677c"
+size = 2727529
+files = 28
+verified = "archive sha256 checked; 28 files extracted and checked against the archive"
+
+[[asset]]
+id = "flux-ui-fonts"
+path = "daw/crates/flux/assets/fonts"
+method = "adopt"
+locked_at = "2026-10-09T03:41:30Z"
+spec_sha256 = "65e9d6f27cd4e1d758aa949718563b0f2ab8d1f76da27ba54672ee75230edadd"
+files = 6
+bytes = 1531323
+tree_sha256 = "bdf9e15a46cf2ece2272253cac63c79c2ddc30ad332f73e216a5e8d792a86688"
+
+[[asset.source]]
+type = "vendored"
+files = 6
+verified = "6 files match their pinned sha256"
+
+[[asset]]
+id = "generaluser-gs"
+path = "instruments/GeneralUser-GS"
+method = "adopt"
+locked_at = "2026-10-09T01:14:20Z"
+spec_sha256 = "9a8237df4ac452e27893e8b3292cc64aab9cdcd212bde957b0a52c5f31d61833"
+files = 3
+bytes = 32322762
+tree_sha256 = "2cd9ec8a06c50559c610e30557d775a7e252c7e3f95c46cf444f48db0742934f"
+
+[[asset.source]]
+type = "files"
+url = "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/684543d5e5efaef08d02be50dcda8d552478fa60"
+files = 3
+verified = "3 files match their pinned sha256"
+
+[[asset]]
+id = "hungarian-zither"
+path = "instruments/hungarian_zither"
+method = "adopt"
+locked_at = "2026-10-09T01:14:14Z"
+spec_sha256 = "56c284644999a7c72c750964685fe3883a099410440d0d82a329e0785c9c04b2"
+files = 219
+bytes = 178323476
+tree_sha256 = "96299a9beb17bbd241484c14a6db2f3871bd2c1e9050d868690c8ac0edff494b"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/hungarian_zither"
+rev = "973d9445ba890661a4f4cd8e417d36134fb5f337"
+files = 219
+verified = "216 of 219 checked-out files match their git blob ids; 3 differ only by CRLF line endings"
+
+[[asset]]
+id = "karoryfer-bigcat-cello"
+path = "instruments/karoryfer-bigcat.cello"
+method = "adopt"
+locked_at = "2026-10-09T01:14:14Z"
+spec_sha256 = "c62e286938e31201321c9d1f8ce35be961d93589596cbdff893f5df05d0552ca"
+files = 535
+bytes = 145431470
+tree_sha256 = "73cd37a876a9b4c1e4f9edd03880f765b54da3f9408e03ea74560186589c8986"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer-bigcat.cello.git"
+rev = "6fd75fbfc1dbb3109bf26220ba1adea46188a18b"
+files = 535
+verified = "489 of 535 checked-out files match their git blob ids; 46 differ only by CRLF line endings"
+
+[[asset]]
+id = "karoryfer-black-and-green-guitars"
+path = "instruments/karoryfer.black-and-green-guitars"
+method = "adopt"
+locked_at = "2026-10-09T01:14:15Z"
+spec_sha256 = "9d394f2351c8d49a4f52ac59cb8de5b16a5ced5febca1a67b36fe49e90666b00"
+files = 947
+bytes = 224573614
+tree_sha256 = "9b90a5b2f8bae1c6c57ddd9cacd19387841c800a79b356f3cfa41d4a40e6442a"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.black-and-green-guitars"
+rev = "b3b3249d37dc977a1a297bd2dc053e6d9b6b805c"
+files = 947
+verified = "947 of 947 checked-out files match their git blob ids"
+
+[[asset]]
+id = "karoryfer-caveman-cosmonaut"
+path = "instruments/karoryfer.caveman-cosmonaut"
+method = "adopt"
+locked_at = "2026-10-09T01:14:15Z"
+spec_sha256 = "141035316f435f058c57d202deb2713aafd14261e8ed9f3c3b08e5adc2723d1b"
+files = 428
+bytes = 109193769
+tree_sha256 = "11c9fb2b7c96bd41e5f08d859de926ab1cc70e340d23b3735699536af20998d1"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.caveman-cosmonaut"
+rev = "9de9bcfcbc6d2b20bea5c1116cd07a310febc339"
+files = 428
+verified = "427 of 428 checked-out files match their git blob ids; 1 differ only by CRLF line endings"
+
+[[asset]]
+id = "karoryfer-cowsynth"
+path = "instruments/karoryfer.cowsynth"
+method = "adopt"
+locked_at = "2026-10-09T01:14:15Z"
+spec_sha256 = "5b5c5998827daa4e5fdb55e0dcc2631755f9d1c18d97413317264446c1c31fd2"
+files = 59
+bytes = 14839346
+tree_sha256 = "9f91125e2b50ade07b56b945275f327b1c00ec21f0cc0e57445257dc240b3813"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.cowsynth"
+rev = "5a5b5afc2dabbe54cf9d75ab64711ce01862b42c"
+files = 59
+verified = "40 of 59 checked-out files match their git blob ids; 19 differ only by CRLF line endings"
+
+[[asset]]
+id = "karoryfer-growlybass"
+path = "instruments/karoryfer.growlybass"
+method = "adopt"
+locked_at = "2026-10-09T01:14:16Z"
+spec_sha256 = "289a4826e91718177b433c172975b0dd98171ee6c4cf7a5f3ece6f48260527a4"
+files = 389
+bytes = 190779719
+tree_sha256 = "f83758efad22ef690f80b41345217fc91f54c52a80fbe5fe4146aa004cd73299"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.growlybass.git"
+rev = "4f483268fc66b5a6d5781d421c0d11b8d08d3fc6"
+files = 389
+verified = "380 of 389 checked-out files match their git blob ids; 9 differ only by CRLF line endings"
+
+[[asset]]
+id = "karoryfer-horse-pulse"
+path = "instruments/karoryfer.horse-pulse"
+method = "adopt"
+locked_at = "2026-10-09T01:14:16Z"
+spec_sha256 = "555d35231c48d1e13702be05a87571e70f7522157886b091093aa925296cd386"
+files = 576
+bytes = 191424761
+tree_sha256 = "b0af7797b66a24b03d7ff5ae1fcbcae3183a4770bc19c735963cd3d86ef4ed19"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/Karoryfer.HorsePulse"
+rev = "6f4749d54512d762098ca726a3cbd13444562904"
+files = 576
+verified = "572 of 576 checked-out files match their git blob ids; 4 differ only by CRLF line endings"
+
+[[asset]]
+id = "legato-vocal-tutorial"
+path = "instruments/legato_vocal_tutorial"
+method = "adopt"
+locked_at = "2026-10-09T01:14:17Z"
+spec_sha256 = "e3d8f25777dfb271555fe27553563f13eabef67b501a57480d884964390aa2e9"
+files = 759
+bytes = 172500810
+tree_sha256 = "5c852c7668be67457f6cb1c248300c165437adb4da21b399b2cd991ff65dd028"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/legato_vocal_tutorial"
+rev = "fac6461ee4c7f498b23246eced644616fa58d2ec"
+files = 759
+verified = "511 of 759 checked-out files match their git blob ids; 248 differ only by CRLF line endings"
+
+[[asset]]
+id = "metal-gtx"
+path = "instruments/unreal.metal-gtx"
+method = "adopt"
+locked_at = "2026-10-09T01:14:27Z"
+spec_sha256 = "2bdafdb0c04b86977c7a0f745bd78b86257ec9adfbcfb2bbb74e98494236c458"
+files = 3391
+bytes = 1339119178
+tree_sha256 = "0c21caffb47239a5c875ddf7489211eb765c11ab98201514034d2969d1b5e751"
+
+[[asset.source]]
+type = "archive"
+url = "https://drive.google.com/uc?id=1FurY3_x_tog_56irX1VDNyRCUt5JD7bO&export=download"
+sha256 = "c5756f95fcc30ac680f6034bb2e54c636e67fd0b53b1d40babada7257e782e73"
+size = 1343285011
+files = 3391
+verified = "archive sha256 checked; 3391 files extracted and checked against the archive, 4 entries with unreadable names skipped"
+
+[[asset]]
+id = "nam-jp-5150-mesa"
+path = "instruments/nam/jp-5150-mesa-fullrig"
+method = "adopt"
+locked_at = "2026-10-09T01:14:27Z"
+spec_sha256 = "3daaea447d2625c7a9b211b870d307cde4415ef3c6abbfb9d427af1bc51f56c7"
+files = 6
+bytes = 1475763
+tree_sha256 = "e48ef4889be540754461772e35c2c384b21d55dc64605161ac516998884cbd3b"
+
+[[asset.source]]
+type = "manual"
+url = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868"
+files = 5
+verified = "5 files match their pinned sha256"
+
+[[asset.source]]
+type = "vendored"
+files = 1
+verified = "1 files match their pinned sha256"
+
+[[asset]]
+id = "nam-ob1-5150iii"
+path = "instruments/nam/ob1-5150iii-fullrig"
+method = "adopt"
+locked_at = "2026-10-09T01:14:27Z"
+spec_sha256 = "1dd7d23df8fd33382cb356756d0bd35d61ad9a386cc0fdf079b802c60c10c4af"
+files = 5
+bytes = 1175452
+tree_sha256 = "6df028037e4ed1288b9f39e2a9229eb15de6dc668b952cf6b5fe71b0e05241d6"
+
+[[asset.source]]
+type = "manual"
+url = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247"
+files = 4
+verified = "4 files match their pinned sha256"
+
+[[asset.source]]
+type = "vendored"
+files = 1
+verified = "1 files match their pinned sha256"
+
+[[asset]]
+id = "salamander-grand-piano"
+path = "instruments/SalamanderGrandPiano"
+method = "adopt"
+locked_at = "2026-10-09T01:14:09Z"
+spec_sha256 = "0e5552b9914f51eb69bdfe4ba5ac0f769ed17f7c6263dfcabe6b3e8d22cac5e1"
+files = 668
+bytes = 748451483
+tree_sha256 = "4aa638cdefa67e5bb5358caf2de5f90338fb0a9d8bdf741210e137b93fe1295a"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/SalamanderGrandPiano"
+rev = "3382bf9496bba2486f5ab0de55a264d1dfc38404"
+files = 668
+verified = "668 of 668 checked-out files match their git blob ids"
+
+[[asset]]
+id = "sfizz"
+path = "tools/sfizz"
+method = "adopt"
+locked_at = "2026-10-09T01:14:34Z"
+spec_sha256 = "724a8d1ae8e14d55fe9c3cb9d91aa18497ea9853c881c32e53bd67fa7c156237"
+files = 59
+bytes = 31087639
+tree_sha256 = "afb216020fe0fbb2844a5cfaa721c3d9442948552cc6c9cd81e6a6e63255545a"
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/sfztools/sfizz/releases/download/1.2.3/sfizz-1.2.3-win64.zip"
+sha256 = "7431cbe9b7f2e71a9ff4b12fbbe82c766dbf75b1eedecca627e7506cb06a9fcc"
+size = 8286178
+files = 59
+verified = "archive sha256 checked; 59 files extracted and checked against the archive"
+
+[[asset]]
+id = "sonic-pi-samples"
+path = "instruments/sonic-pi-samples"
+method = "adopt"
+locked_at = "2026-10-09T01:14:19Z"
+spec_sha256 = "15f5cd8d644d018188da623f4ca388c78d86ba82d1f80bbc206495e23ecddc39"
+files = 208
+bytes = 35059202
+tree_sha256 = "e6dad409f1cad9355382ca10ccb4390f388f552cf94fbea32354263d276b4f6b"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sonic-pi-net/sonic-pi"
+rev = "7ec6e5df11a5c13f383926e69c8f133e3a6cc34f"
+files = 208
+verified = "206 of 208 checked-out files match their git blob ids; 2 differ only by CRLF line endings"
+
+[[asset]]
+id = "surge-xt"
+path = "instruments/vst/surge-xt"
+method = "adopt"
+locked_at = "2026-10-09T01:14:34Z"
+spec_sha256 = "3fed7da5b764a45dd0e068ad54106d793225b6cc09a89cb40d75b8aef93472fa"
+files = 4561
+bytes = 499343824
+tree_sha256 = "557754ff3343fbf4ed9a5244ff6f75d8e9893f211d9e381c66cc608383c70d8f"
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4-portable-install.zip"
+sha256 = "a5f2376702ad218c0382640ed0c7b9ebb222ba2410a210879899c0f726859d8e"
+size = 301759660
+files = 4561
+verified = "archive sha256 checked; 4561 files extracted and checked against the archive"
+
+[[asset]]
+id = "surge-xt-vst3"
+path = "plugins/surge-xt"
+method = "adopt"
+locked_at = "2026-10-09T01:14:34Z"
+spec_sha256 = "7e202d52c28e6fde905a86a4ef11809b89901b9e86ea3249933e4116d70ca070"
+files = 3
+bytes = 21124046
+tree_sha256 = "fc87099207fa6963e68f07a751186cf34e66877eccf6c00f39cb2c94179655fd"
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4-pluginsonly.zip"
+sha256 = "564e162c560af07ad4ed47fe1bfcd827cf97a575de30d06c48249aad2e7c35e6"
+size = 49093875
+files = 3
+verified = "archive sha256 checked; 3 files extracted and checked against the archive, 8 left out by include"
+
+[[asset]]
+id = "vcsl"
+path = "instruments/VCSL"
+method = "adopt"
+locked_at = "2026-10-09T01:14:12Z"
+spec_sha256 = "cc7e523ee8ac63dd882d48152388d0cd685eb7cddf49ae1a463996137801b9cb"
+files = 285
+bytes = 352918824
+tree_sha256 = "670e089fb72ef18d00da3326d20c285ff950e8d32d54374081b5b0570ce63d74"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sgossner/VCSL"
+rev = "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e"
+files = 275
+verified = "273 of 275 checked-out files match their git blob ids; 2 differ only by CRLF line endings"
+
+[[asset.source]]
+type = "files"
+url = "https://raw.githubusercontent.com/sgossner/VCSL/dfcf4a4918771eee884b96ad4493de82ef84daf6"
+files = 10
+verified = "10 files match their pinned sha256"
+
+[[asset]]
+id = "virtuosity-drums"
+path = "instruments/virtuosity_drums"
+method = "adopt"
+locked_at = "2026-10-09T01:14:19Z"
+spec_sha256 = "96751486b9d4e3b33156334b1a213563e7889020cd29788fbfa23d140e25d4bb"
+files = 3633
+bytes = 825427366
+tree_sha256 = "2831c775493ca55876a0932a69471d43a3f1b6afd8908ba24e4a947a61967cfc"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/virtuosity_drums.git"
+rev = "9f04cf9a734527edfbb0a4eee1f674e45bbf71bc"
+files = 3633
+verified = "3255 of 3633 checked-out files match their git blob ids; 378 differ only by CRLF line endings"
+
+[[asset]]
+id = "vsco-2-ce"
+path = "instruments/VSCO-2-CE"
+method = "adopt"
+locked_at = "2026-10-09T01:14:11Z"
+spec_sha256 = "a2552feedfe586bd6f742090aa150b8022f20e8e100307a32e3ec3fd78e50f7e"
+files = 1764
+bytes = 1635504071
+tree_sha256 = "cd23ea2eb3de515eec6d403ac69dc3b24c8ca1ab8286962602cbcd8b7572ebd1"
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sgossner/VSCO-2-CE"
+rev = "440300901dfe9275fd84e0b7763af1f8443ae62e"
+files = 1713
+verified = "1709 of 1713 checked-out files match their git blob ids; 4 differ only by CRLF line endings"
+
+[[asset.source]]
+type = "files"
+url = "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/6dd651d55dde97fd4028699be9d4481f26917891"
+files = 51
+verified = "51 files match their pinned sha256"

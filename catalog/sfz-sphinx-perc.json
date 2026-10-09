@@ -1,0 +1,571 @@
+{
+ "name": "sfz/sphinx_perc",
+ "slug": "sfz-sphinx-perc",
+ "sfz": "sfz/sphinx_perc.sfz",
+ "about": "Sphinx Strut hand percussion: a darbuka-style kit (dum, tek, ka) from CC0 samples. VCSL frame drums, VSCO 2 CE quinto / conga / tumba / tambourine, Sonic Pi tabla strokes (freesound, CC0). 36 (C2)  dum: large frame drum, open hit           ",
+ "measured": "2026-10-09",
+ "generator": "flux-analysis 0.1.0",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VCSL",
+    "license": "CC0 1.0",
+    "file": "instruments/VCSL/LICENSE",
+    "licenses_md": "not listed",
+    "agrees": false
+   },
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   },
+   {
+    "library": "sonic-pi-samples",
+    "license": "CC0 1.0",
+    "file": "instruments/sonic-pi-samples/LICENSE.md",
+    "licenses_md": "not listed",
+    "agrees": false
+   }
+  ],
+  "all_in_licenses_md": false
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   36,
+   53
+  ],
+  "main_names": "C2-F3",
+  "ranges": [
+   [
+    36,
+    47
+   ],
+   [
+    49,
+    53
+   ]
+  ],
+  "count": 17,
+  "span": [
+   36,
+   53
+  ],
+  "gaps": [
+   48
+  ],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 66,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": null,
+ "per_key": {
+  "36": {
+   "level_db": -44.4,
+   "ap": 0.04,
+   "f0": 82.64,
+   "note": 40,
+   "cents": 4.8,
+   "drift_cents": -158.4
+  },
+  "37": {
+   "level_db": -50.8,
+   "ap": 0.2,
+   "f0": 94.43,
+   "note": 42,
+   "cents": 35.8
+  },
+  "38": {
+   "level_db": -53.8,
+   "ap": 0.07,
+   "f0": 71.82,
+   "note": 38,
+   "cents": -38.0
+  },
+  "39": {
+   "level_db": -92.3,
+   "ap": 0.66,
+   "f0": 28.72,
+   "note": 22,
+   "cents": -25.0
+  },
+  "40": {
+   "level_db": -53.1,
+   "ap": 0.05,
+   "f0": 83.06,
+   "note": 40,
+   "cents": 13.6
+  },
+  "41": {
+   "level_db": -90.6,
+   "ap": 0.65,
+   "f0": 26.72,
+   "note": 21,
+   "cents": -49.8
+  },
+  "42": {
+   "level_db": -57.8,
+   "ap": 0.64,
+   "f0": 70.76,
+   "note": 37,
+   "cents": 36.3
+  },
+  "43": {
+   "level_db": -62.5,
+   "ap": 0.12,
+   "f0": 69.39,
+   "note": 37,
+   "cents": 2.4
+  },
+  "44": {
+   "level_db": -67.0,
+   "ap": 0.7,
+   "f0": 48.11,
+   "note": 31,
+   "cents": -31.6
+  },
+  "45": {
+   "level_db": -58.1,
+   "ap": 0.18,
+   "f0": 108.39,
+   "note": 45,
+   "cents": -25.5,
+   "drift_cents": 5.5
+  },
+  "46": {
+   "level_db": -63.3,
+   "ap": 0.65,
+   "f0": 539.84,
+   "note": 73,
+   "cents": -46.0
+  },
+  "47": {
+   "level_db": -58.2,
+   "ap": 0.38,
+   "f0": 109.27,
+   "note": 45,
+   "cents": -11.5
+  },
+  "49": {
+   "level_db": -26.8,
+   "ap": 0.01,
+   "f0": 93.53,
+   "note": 42,
+   "cents": 19.2,
+   "drift_cents": -331.2
+  },
+  "50": {
+   "level_db": -31.5,
+   "ap": 0.08,
+   "f0": 302.05,
+   "note": 62,
+   "cents": 48.8,
+   "drift_cents": 2.8
+  },
+  "51": {
+   "level_db": -42.6,
+   "ap": 0.94,
+   "f0": 251.89,
+   "note": 59,
+   "cents": 34.4
+  },
+  "52": {
+   "level_db": -36.7,
+   "ap": 0.75,
+   "f0": 174.87,
+   "note": 53,
+   "cents": 2.6
+  },
+  "53": {
+   "level_db": -26.3,
+   "ap": 0.0,
+   "f0": 315.48,
+   "note": 63,
+   "cents": 24.1,
+   "drift_cents": 0.2
+  }
+ },
+ "pitch": {
+  "kind": "unpitched",
+  "confident_keys": 9,
+  "offsets": {
+   "0": 3,
+   "4": 1,
+   "5": 1,
+   "-6": 1
+  }
+ },
+ "level": {
+  "median_db": -53.8,
+  "std_db": 18.4,
+  "min_db": -92.3,
+  "max_db": -26.3,
+  "max_jump_db": 39.2,
+  "max_jump_keys": [
+   39,
+   40
+  ],
+  "jumps_over_6db": 9,
+  "holes": {
+   "39": 38.5,
+   "41": 32.6,
+   "51": 11.1
+  }
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   36,
+   53
+  ],
+  "main": {
+   "hi3k_db": -45.3,
+   "centroid_hz": 172.0,
+   "attack_db": 9.8,
+   "onset_ms": 1.1
+  },
+  "median": {
+   "hi3k_db": -45.3,
+   "centroid_hz": 172.0,
+   "attack_db": 9.8,
+   "onset_ms": 1.1
+  },
+  "octaves": {
+   "C2": {
+    "hi3k_db": -44.8,
+    "centroid_hz": 163.0,
+    "attack_db": 10.6,
+    "onset_ms": 5.1
+   },
+   "C3": {
+    "hi3k_db": -47.1,
+    "centroid_hz": 181.0,
+    "attack_db": 9.1,
+    "onset_ms": 0.7
+   }
+  },
+  "notes": [
+   {
+    "key": 36,
+    "hi3k_db": -45.8,
+    "centroid_hz": 160.0,
+    "attack_db": 10.6,
+    "onset_ms": 5.1
+   },
+   {
+    "key": 40,
+    "hi3k_db": -44.8,
+    "centroid_hz": 163.0,
+    "attack_db": 18.2,
+    "onset_ms": 0.6
+   },
+   {
+    "key": 44,
+    "hi3k_db": -0.0,
+    "centroid_hz": 8765.0,
+    "attack_db": -1.2,
+    "onset_ms": 27.3
+   },
+   {
+    "key": 49,
+    "hi3k_db": -47.1,
+    "centroid_hz": 77.0,
+    "attack_db": 8.8,
+    "onset_ms": 1.6
+   },
+   {
+    "key": 52,
+    "hi3k_db": -25.9,
+    "centroid_hz": 181.0,
+    "attack_db": 37.2,
+    "onset_ms": 0.2
+   },
+   {
+    "key": 53,
+    "hi3k_db": -63.0,
+    "centroid_hz": 316.0,
+    "attack_db": 9.1,
+    "onset_ms": 0.7
+   }
+  ]
+ },
+ "sustain": {
+  "key": 53,
+  "kind": "decaying",
+  "peak_at_s": 0.02,
+  "t40_s": 1.6,
+  "level_at_2s_db": -49.0,
+  "usable_max_note_s": 1.6,
+  "release_s": 1.7,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 53,
+  "levels": {
+   "30": {
+    "rms_db": -32.5,
+    "hi3k_db": -62.3,
+    "centroid_hz": 315.0,
+    "attack_db": 9.0,
+    "onset_ms": 6.7
+   },
+   "70": {
+    "rms_db": -27.6,
+    "hi3k_db": -62.6,
+    "centroid_hz": 316.0,
+    "attack_db": 8.3,
+    "onset_ms": 1.0
+   },
+   "110": {
+    "rms_db": -24.8,
+    "hi3k_db": -62.3,
+    "centroid_hz": 315.0,
+    "attack_db": 9.0,
+    "onset_ms": 6.7
+   }
+  },
+  "range_db": 7.7,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 1.3,
+   "hi3k_change_db": -2.3,
+   "silent_at_0": false,
+   "changes_level": true,
+   "changes_timbre": true
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "round_robin": {
+  "key": 53,
+  "velocity": 90,
+  "levels_db": [
+   -26.8,
+   -26.3,
+   -26.8,
+   -26.3,
+   -26.8,
+   -25.5
+  ],
+  "level_spread_db": 1.3,
+  "onsets_ms": [
+   6.7,
+   0.7,
+   6.7,
+   0.7,
+   6.7,
+   1.0
+  ],
+  "onset_spread_ms": 6.0,
+  "distinct": 3,
+  "cycle": null,
+  "random": true
+ },
+ "velocity_curve": {
+  "key": 53,
+  "velocities": [
+   1,
+   16,
+   32,
+   48,
+   64,
+   80,
+   96,
+   112,
+   127
+  ],
+  "rms_db": [
+   -32.2,
+   -32.8,
+   -32.4,
+   -29.7,
+   -29.0,
+   -26.5,
+   -24.9,
+   -24.1,
+   -22.6
+  ],
+  "hi3k_db": [
+   -65.1,
+   -64.9,
+   -62.8,
+   -65.1,
+   -64.9,
+   -65.1,
+   -65.1,
+   -64.9,
+   -64.9
+  ],
+  "monotonic": false,
+  "range_db": 9.6
+ },
+ "cc_curves": {
+  "1": {
+   "key": 53,
+   "values": [
+    0,
+    8,
+    16,
+    24,
+    32,
+    40,
+    48,
+    56,
+    64,
+    70,
+    72,
+    80,
+    88,
+    96,
+    100,
+    104,
+    112,
+    120,
+    127
+   ],
+   "rms_db": [
+    -26.8,
+    -26.3,
+    -25.5,
+    -26.8,
+    -26.3,
+    -26.3,
+    -25.5,
+    -26.8,
+    -25.5,
+    -25.5,
+    -25.5,
+    -25.5,
+    -26.8,
+    -26.8,
+    -26.8,
+    -26.3,
+    -26.3,
+    -26.8,
+    -26.3
+   ],
+   "hi3k_db": [
+    -62.8,
+    -64.9,
+    -65.1,
+    -62.8,
+    -64.9,
+    -64.9,
+    -65.1,
+    -62.8,
+    -65.1,
+    -65.1,
+    -65.1,
+    -65.1,
+    -62.8,
+    -62.8,
+    -62.8,
+    -64.9,
+    -64.9,
+    -62.8,
+    -64.9
+   ],
+   "silent_at": [],
+   "dropout": false
+  },
+  "11": {
+   "key": 53,
+   "values": [
+    0,
+    8,
+    16,
+    24,
+    32,
+    40,
+    48,
+    56,
+    64,
+    70,
+    72,
+    80,
+    88,
+    96,
+    100,
+    104,
+    112,
+    120,
+    127
+   ],
+   "rms_db": [
+    -120.0,
+    -74.4,
+    -62.8,
+    -54.4,
+    -50.8,
+    -45.6,
+    -43.2,
+    -40.6,
+    -37.4,
+    -37.2,
+    -35.3,
+    -34.8,
+    -31.9,
+    -30.3,
+    -31.0,
+    -29.8,
+    -28.5,
+    -26.5,
+    -26.3
+   ],
+   "hi3k_db": [
+    null,
+    -64.9,
+    -62.8,
+    -65.1,
+    -62.8,
+    -65.1,
+    -64.9,
+    -64.9,
+    -65.1,
+    -62.8,
+    -65.1,
+    -62.8,
+    -65.1,
+    -65.1,
+    -62.8,
+    -64.9,
+    -64.9,
+    -65.1,
+    -64.9
+   ],
+   "silent_at": [
+    0,
+    8
+   ],
+   "dropout": false
+  }
+ },
+ "flags": {},
+ "seconds": 0.8
+}

@@ -1,0 +1,128 @@
+# Instrument set "capital_city" (draft generated from instruments.py by sets_to_toml.py).
+# Capital City (medieval capital): solo winds, harp, lyre, string sections, piano, percussion.
+#
+# Paths are relative to the project root (the folder that holds instruments/), like paths in Flux projects.
+# `flux sfz build capital_city` writes the wrappers to build/sfz/capital_city/ (see [set] output); wrap = "none"
+# instruments are played from their source directly. Ranges and test notes are MIDI keys (note names such as
+# "C4" also work). gm = [bank, program] is the General MIDI fallback.
+
+[set]
+description = "Capital City (medieval capital): solo winds, harp, lyre, string sections, piano, percussion."
+
+[instruments.flute]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/FluteSusVib.sfz"
+wrap = "expr"
+range = [62, 93]
+test_note = 74
+max_note_s = 4.4
+gm = [0, 73]
+channel = 0
+
+[instruments.horn]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/FHornSus.sfz"
+wrap = "expr"
+range = [38, 77]
+test_note = 62
+max_note_s = 3.8
+gm = [0, 60]
+channel = 1
+
+[instruments.lyre]
+library = "cithara-barbarica"
+source = "instruments/cithara-barbarica/Programs/02-cithara_barbarica_finger.sfz"
+wrap = "none"
+range = [52, 72]
+test_note = 62
+gm = [0, 24]
+channel = 2
+
+[instruments.harp]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/Harp.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "3.5" }
+range = [28, 101]
+test_note = 62
+gm = [0, 46]
+channel = 3
+
+[instruments.violins]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/ViolinEnsSusVib.sfz"
+wrap = "strings"
+range = [55, 86]
+test_note = 74
+max_note_s = 8.0
+gm = [0, 49]
+channel = 4
+
+[instruments.violas]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/ViolaEnsSusVib.sfz"
+wrap = "strings"
+range = [48, 81]
+test_note = 62
+max_note_s = 7.0
+gm = [0, 49]
+channel = 5
+
+[instruments.cellos]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/CelloEnsSusVib.sfz"
+wrap = "strings"
+range = [36, 72]
+test_note = 50
+max_note_s = 6.0
+gm = [0, 48]
+channel = 6
+
+[instruments.basses]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/ContrabassSusNV.sfz"
+wrap = "strings"
+range = [26, 55]
+test_note = 38
+max_note_s = 6.0
+gm = [0, 43]
+channel = 7
+
+[instruments.piano]
+library = "SalamanderGrandPiano"
+source = "instruments/SalamanderGrandPiano/Salamander Grand Piano V3.sfz"
+wrap = "none"
+range = [21, 108]
+test_note = 50
+gm = [0, 0]
+channel = 8
+
+[instruments.percussion]
+library = "VSCO-2-CE"
+source = "sfz/medieval_perc.sfz"
+wrap = "none"
+range = [36, 54]
+test_note = 36
+test_notes = [36, 38, 52, 54]
+gm = [128, 48]
+channel = 9
+
+[instruments.timpani]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/Timpani.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "3" }
+range = [38, 50]
+test_note = 38
+gm = [0, 47]
+channel = 10
+
+[instruments.bells]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/TubularBells.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "7" }
+range = [60, 79]
+test_note = 74
+gm = [0, 14]
+channel = 11

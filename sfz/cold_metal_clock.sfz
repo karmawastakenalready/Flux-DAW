@@ -1,0 +1,16 @@
+// Cold Metal clock: the steady 4/4 "metronome" layer (Sonic Pi samples CC0, VSCO-2-CE percussion CC0).
+//   60 tick (elec_tick, ~1 kHz click)   59 tock (same click a fourth lower)   62 claves   64 snap   65 tap
+<global>
+ampeg_attack=0.0005
+ampeg_release=0.08
+amp_veltrack=70
+loop_mode=one_shot
+
+<region> key=60 sample=../instruments/sonic-pi-samples/etc/samples/elec_tick.flac volume=-3
+<region> key=59 sample=../instruments/sonic-pi-samples/etc/samples/elec_tick.flac pitch_keycenter=64 volume=-2
+<region> key=62 lovel=1 hivel=63 seq_length=2 seq_position=1 sample=../instruments/VSCO-2-CE/Percussion/Claves1_Hit_v1_rr1_Sum.wav volume=16
+<region> key=62 lovel=1 hivel=63 seq_length=2 seq_position=2 sample=../instruments/VSCO-2-CE/Percussion/Claves1_Hit_v1_rr2_Sum.wav volume=16
+<region> key=62 lovel=64 hivel=127 seq_length=2 seq_position=1 sample=../instruments/VSCO-2-CE/Percussion/Claves1_Hit_v2_rr1_Sum.wav volume=14
+<region> key=62 lovel=64 hivel=127 seq_length=2 seq_position=2 sample=../instruments/VSCO-2-CE/Percussion/Claves1_Hit_v2_rr2_Sum.wav volume=14
+<region> key=64 sample=../instruments/sonic-pi-samples/etc/samples/perc_snap.flac volume=-6
+<region> key=65 sample=../instruments/sonic-pi-samples/etc/samples/tbd_perc_tap_2.flac volume=-2

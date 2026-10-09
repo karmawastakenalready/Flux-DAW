@@ -1,0 +1,588 @@
+{
+ "name": "temporal_shift/cellos",
+ "slug": "temporal-shift-cellos",
+ "sfz": "build/sfz/temporal_shift/cellos.sfz",
+ "about": "generated multi-articulation instrument 'cellos' - keyswitches: 120=sus, 121=spic, 122=pizz",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   }
+  ],
+  "all_in_licenses_md": true
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   36,
+   77
+  ],
+  "main_names": "C2-F5",
+  "ranges": [
+   [
+    36,
+    77
+   ]
+  ],
+  "count": 42,
+  "span": [
+   36,
+   77
+  ],
+  "gaps": [],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 130,
+ "cc_labels": {
+  "1": "Unnamed CC 1"
+ },
+ "key_labels": {},
+ "keyswitches": {
+  "keys": {
+   "120": "",
+   "121": "",
+   "122": ""
+  },
+  "default": 120
+ },
+ "per_key": {
+  "36": {
+   "level_db": -29.3,
+   "ap": 0.05,
+   "f0": 65.28,
+   "note": 36,
+   "cents": -3.3
+  },
+  "37": {
+   "level_db": -29.4,
+   "ap": 0.04,
+   "f0": 69.16,
+   "note": 37,
+   "cents": -3.4
+  },
+  "38": {
+   "level_db": -29.5,
+   "ap": 0.05,
+   "f0": 73.29,
+   "note": 38,
+   "cents": -3.0
+  },
+  "39": {
+   "level_db": -29.4,
+   "ap": 0.04,
+   "f0": 77.64,
+   "note": 39,
+   "cents": -3.2
+  },
+  "40": {
+   "level_db": -29.2,
+   "ap": 0.04,
+   "f0": 82.21,
+   "note": 40,
+   "cents": -4.1
+  },
+  "41": {
+   "level_db": -29.1,
+   "ap": 0.03,
+   "f0": 87.09,
+   "note": 41,
+   "cents": -4.3
+  },
+  "42": {
+   "level_db": -24.0,
+   "ap": 0.01,
+   "f0": 92.35,
+   "note": 42,
+   "cents": -2.7
+  },
+  "43": {
+   "level_db": -24.0,
+   "ap": 0.01,
+   "f0": 97.77,
+   "note": 43,
+   "cents": -4.1
+  },
+  "44": {
+   "level_db": -24.0,
+   "ap": 0.01,
+   "f0": 103.59,
+   "note": 44,
+   "cents": -3.9
+  },
+  "45": {
+   "level_db": -25.1,
+   "ap": 0.02,
+   "f0": 109.85,
+   "note": 45,
+   "cents": -2.4
+  },
+  "46": {
+   "level_db": -25.0,
+   "ap": 0.01,
+   "f0": 116.43,
+   "note": 46,
+   "cents": -1.7
+  },
+  "47": {
+   "level_db": -25.0,
+   "ap": 0.01,
+   "f0": 123.31,
+   "note": 47,
+   "cents": -2.2
+  },
+  "48": {
+   "level_db": -25.0,
+   "ap": 0.01,
+   "f0": 130.67,
+   "note": 48,
+   "cents": -1.8
+  },
+  "49": {
+   "level_db": -25.0,
+   "ap": 0.01,
+   "f0": 138.68,
+   "note": 49,
+   "cents": 1.1
+  },
+  "50": {
+   "level_db": -25.1,
+   "ap": 0.01,
+   "f0": 146.84,
+   "note": 50,
+   "cents": 0.1
+  },
+  "51": {
+   "level_db": -25.2,
+   "ap": 0.01,
+   "f0": 155.6,
+   "note": 51,
+   "cents": 0.4
+  },
+  "52": {
+   "level_db": -31.2,
+   "ap": 0.06,
+   "f0": 164.95,
+   "note": 52,
+   "cents": 1.4
+  },
+  "53": {
+   "level_db": -31.0,
+   "ap": 0.06,
+   "f0": 174.72,
+   "note": 53,
+   "cents": 1.0
+  },
+  "54": {
+   "level_db": -30.9,
+   "ap": 0.06,
+   "f0": 185.04,
+   "note": 54,
+   "cents": 0.4
+  },
+  "55": {
+   "level_db": -28.6,
+   "ap": 0.02,
+   "f0": 195.77,
+   "note": 55,
+   "cents": -2.0
+  },
+  "56": {
+   "level_db": -28.4,
+   "ap": 0.01,
+   "f0": 207.4,
+   "note": 56,
+   "cents": -2.1
+  },
+  "57": {
+   "level_db": -28.3,
+   "ap": 0.01,
+   "f0": 219.84,
+   "note": 57,
+   "cents": -1.2
+  },
+  "58": {
+   "level_db": -28.3,
+   "ap": 0.01,
+   "f0": 232.92,
+   "note": 58,
+   "cents": -1.2
+  },
+  "59": {
+   "level_db": -26.8,
+   "ap": 0.02,
+   "f0": 246.65,
+   "note": 59,
+   "cents": -2.0
+  },
+  "60": {
+   "level_db": -26.5,
+   "ap": 0.02,
+   "f0": 261.53,
+   "note": 60,
+   "cents": -0.6
+  },
+  "61": {
+   "level_db": -26.2,
+   "ap": 0.02,
+   "f0": 277.31,
+   "note": 61,
+   "cents": 0.8
+  },
+  "62": {
+   "level_db": -26.6,
+   "ap": 0.03,
+   "f0": 293.12,
+   "note": 62,
+   "cents": -3.2
+  },
+  "63": {
+   "level_db": -26.7,
+   "ap": 0.02,
+   "f0": 310.63,
+   "note": 63,
+   "cents": -2.8
+  },
+  "64": {
+   "level_db": -26.7,
+   "ap": 0.02,
+   "f0": 329.08,
+   "note": 64,
+   "cents": -2.9
+  },
+  "65": {
+   "level_db": -26.4,
+   "ap": 0.02,
+   "f0": 348.49,
+   "note": 65,
+   "cents": -3.7
+  },
+  "66": {
+   "level_db": -28.9,
+   "ap": 0.01,
+   "f0": 369.48,
+   "note": 66,
+   "cents": -2.4
+  },
+  "67": {
+   "level_db": -28.8,
+   "ap": 0.01,
+   "f0": 391.39,
+   "note": 67,
+   "cents": -2.7
+  },
+  "68": {
+   "level_db": -28.9,
+   "ap": 0.01,
+   "f0": 413.95,
+   "note": 68,
+   "cents": -5.6
+  },
+  "69": {
+   "level_db": -34.4,
+   "ap": 0.02,
+   "f0": 442.25,
+   "note": 69,
+   "cents": 8.8
+  },
+  "70": {
+   "level_db": -34.2,
+   "ap": 0.03,
+   "f0": 467.97,
+   "note": 70,
+   "cents": 6.7
+  },
+  "71": {
+   "level_db": -34.0,
+   "ap": 0.03,
+   "f0": 495.42,
+   "note": 71,
+   "cents": 5.4
+  },
+  "72": {
+   "level_db": -33.9,
+   "ap": 0.02,
+   "f0": 524.66,
+   "note": 72,
+   "cents": 4.6
+  },
+  "73": {
+   "level_db": -33.2,
+   "ap": 0.02,
+   "f0": 553.74,
+   "note": 73,
+   "cents": -2.0
+  },
+  "74": {
+   "level_db": -33.0,
+   "ap": 0.02,
+   "f0": 586.6,
+   "note": 74,
+   "cents": -2.2
+  },
+  "75": {
+   "level_db": -32.8,
+   "ap": 0.02,
+   "f0": 621.4,
+   "note": 75,
+   "cents": -2.4
+  },
+  "76": {
+   "level_db": -34.1,
+   "ap": 0.02,
+   "f0": 651.23,
+   "note": 76,
+   "cents": -21.2
+  },
+  "77": {
+   "level_db": -33.4,
+   "ap": 0.02,
+   "f0": 690.24,
+   "note": 77,
+   "cents": -20.5
+  }
+ },
+ "pitch": {
+  "kind": "pitched",
+  "confident_keys": 42,
+  "offset": 0,
+  "offset_share": 1.0,
+  "offset_outliers": {},
+  "worst_cents": -21.2,
+  "worst_key": 76,
+  "median_abs_cents": 2.5,
+  "out_of_tune": {
+   "76": -21.2,
+   "77": -20.5
+  }
+ },
+ "level": {
+  "median_db": -28.7,
+  "std_db": 3.2,
+  "min_db": -34.4,
+  "max_db": -24.0,
+  "max_jump_db": 6.0,
+  "max_jump_keys": [
+   51,
+   52
+  ],
+  "jumps_over_6db": 0
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   47,
+   66
+  ],
+  "main": {
+   "hi3k_db": -24.5,
+   "centroid_hz": 394.0,
+   "attack_db": -9.6,
+   "onset_ms": 26.6
+  },
+  "median": {
+   "hi3k_db": -23.6,
+   "centroid_hz": 480.0,
+   "attack_db": -8.7,
+   "onset_ms": 28.6
+  },
+  "octaves": {
+   "C2": {
+    "hi3k_db": -33.0,
+    "centroid_hz": 329.0,
+    "attack_db": -12.7,
+    "onset_ms": 33.9
+   },
+   "C3": {
+    "hi3k_db": -29.6,
+    "centroid_hz": 342.0,
+    "attack_db": -9.7,
+    "onset_ms": 26.6
+   },
+   "C4": {
+    "hi3k_db": -21.5,
+    "centroid_hz": 630.0,
+    "attack_db": -6.2,
+    "onset_ms": 21.5
+   },
+   "C5": {
+    "hi3k_db": -11.5,
+    "centroid_hz": 1462.0,
+    "attack_db": -3.2,
+    "onset_ms": 28.1
+   }
+  },
+  "notes": [
+   {
+    "key": 36,
+    "hi3k_db": -27.9,
+    "centroid_hz": 389.0,
+    "attack_db": -17.2,
+    "onset_ms": 48.0
+   },
+   {
+    "key": 40,
+    "hi3k_db": -33.0,
+    "centroid_hz": 329.0,
+    "attack_db": -12.7,
+    "onset_ms": 33.9
+   },
+   {
+    "key": 44,
+    "hi3k_db": -35.5,
+    "centroid_hz": 188.0,
+    "attack_db": -9.5,
+    "onset_ms": 29.8
+   },
+   {
+    "key": 48,
+    "hi3k_db": -30.7,
+    "centroid_hz": 316.0,
+    "attack_db": -9.7,
+    "onset_ms": 26.6
+   },
+   {
+    "key": 52,
+    "hi3k_db": -24.5,
+    "centroid_hz": 566.0,
+    "attack_db": -7.9,
+    "onset_ms": 24.7
+   },
+   {
+    "key": 56,
+    "hi3k_db": -29.6,
+    "centroid_hz": 342.0,
+    "attack_db": -19.0,
+    "onset_ms": 33.5
+   },
+   {
+    "key": 60,
+    "hi3k_db": -22.6,
+    "centroid_hz": 394.0,
+    "attack_db": -6.1,
+    "onset_ms": 20.4
+   },
+   {
+    "key": 64,
+    "hi3k_db": -21.5,
+    "centroid_hz": 630.0,
+    "attack_db": -9.6,
+    "onset_ms": 30.7
+   },
+   {
+    "key": 68,
+    "hi3k_db": -14.1,
+    "centroid_hz": 959.0,
+    "attack_db": -6.2,
+    "onset_ms": 21.5
+   },
+   {
+    "key": 72,
+    "hi3k_db": -9.2,
+    "centroid_hz": 1542.0,
+    "attack_db": 0.1,
+    "onset_ms": 19.3
+   },
+   {
+    "key": 76,
+    "hi3k_db": -11.5,
+    "centroid_hz": 1405.0,
+    "attack_db": -5.5,
+    "onset_ms": 28.1
+   },
+   {
+    "key": 77,
+    "hi3k_db": -11.6,
+    "centroid_hz": 1462.0,
+    "attack_db": -3.2,
+    "onset_ms": 29.0
+   }
+  ]
+ },
+ "sustain": {
+  "key": 56,
+  "kind": "sustained",
+  "peak_at_s": 2.66,
+  "t40_s": null,
+  "level_at_2s_db": -6.9,
+  "usable_max_note_s": null,
+  "release_s": 0.38,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 56,
+  "levels": {
+   "30": {
+    "rms_db": -31.0,
+    "hi3k_db": -29.6,
+    "centroid_hz": 342.0,
+    "attack_db": -19.0,
+    "onset_ms": 33.5
+   },
+   "70": {
+    "rms_db": -29.4,
+    "hi3k_db": -29.6,
+    "centroid_hz": 342.0,
+    "attack_db": -19.0,
+    "onset_ms": 33.5
+   },
+   "110": {
+    "rms_db": -27.2,
+    "hi3k_db": -29.6,
+    "centroid_hz": 342.0,
+    "attack_db": -19.0,
+    "onset_ms": 33.5
+   }
+  },
+  "range_db": 3.8,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 12.9,
+   "hi3k_change_db": 7.8,
+   "silent_at_0": false,
+   "changes_level": true,
+   "changes_timbre": true
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "harsh": "hi3k -24.5 dB in the main range (> -35.0)",
+  "out of tune": "2 keys > 15.0 cents, worst -21.2 at key 76"
+ },
+ "used_by": [
+  "temporal_shift/cellos",
+  "makima/cellos"
+ ],
+ "aliases": [
+  "build/sfz/makima/cellos.sfz"
+ ],
+ "seconds": 2.0
+}

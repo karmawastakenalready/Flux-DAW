@@ -1,0 +1,426 @@
+{
+ "name": "VCSL/Psaltery, Bowed and Plucked - LongBow",
+ "slug": "vcsl-psaltery-bowed-and-plucked-longbow",
+ "sfz": "instruments/VCSL/Chordophones/Zithers/Psaltery, Bowed and Plucked - LongBow.sfz",
+ "about": null,
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VCSL",
+    "license": "CC0 1.0",
+    "file": "instruments/VCSL/LICENSE",
+    "licenses_md": "not listed",
+    "agrees": false
+   }
+  ],
+  "all_in_licenses_md": false
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   67,
+   91
+  ],
+  "main_names": "G4-G6",
+  "ranges": [
+   [
+    67,
+    91
+   ]
+  ],
+  "count": 25,
+  "span": [
+   67,
+   91
+  ],
+  "gaps": [],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 11,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": null,
+ "per_key": {
+  "67": {
+   "level_db": -44.8,
+   "ap": 0.14,
+   "f0": 391.2,
+   "note": 67,
+   "cents": -3.5
+  },
+  "68": {
+   "level_db": -44.7,
+   "ap": 0.12,
+   "f0": 414.86,
+   "note": 68,
+   "cents": -1.9
+  },
+  "69": {
+   "level_db": -44.6,
+   "ap": 0.12,
+   "f0": 439.54,
+   "note": 69,
+   "cents": -1.8
+  },
+  "70": {
+   "level_db": -44.4,
+   "ap": 0.13,
+   "f0": 465.7,
+   "note": 70,
+   "cents": -1.7
+  },
+  "71": {
+   "level_db": -44.2,
+   "ap": 0.14,
+   "f0": 369.54,
+   "note": 66,
+   "cents": -2.1
+  },
+  "72": {
+   "level_db": -43.8,
+   "ap": 0.03,
+   "f0": 261.03,
+   "note": 60,
+   "cents": -4.0
+  },
+  "73": {
+   "level_db": -43.6,
+   "ap": 0.06,
+   "f0": 553.17,
+   "note": 73,
+   "cents": -3.7
+  },
+  "74": {
+   "level_db": -44.0,
+   "ap": 0.01,
+   "f0": 292.19,
+   "note": 62,
+   "cents": -8.7
+  },
+  "75": {
+   "level_db": -43.6,
+   "ap": 0.03,
+   "f0": 619.46,
+   "note": 75,
+   "cents": -7.8
+  },
+  "76": {
+   "level_db": -42.9,
+   "ap": 0.01,
+   "f0": 659.0,
+   "note": 76,
+   "cents": -0.7
+  },
+  "77": {
+   "level_db": -42.5,
+   "ap": 0.02,
+   "f0": 698.28,
+   "note": 77,
+   "cents": -0.4
+  },
+  "78": {
+   "level_db": -40.9,
+   "ap": 0.06,
+   "f0": 739.69,
+   "note": 78,
+   "cents": -0.7
+  },
+  "79": {
+   "level_db": -40.8,
+   "ap": 0.03,
+   "f0": 783.69,
+   "note": 79,
+   "cents": -0.7
+  },
+  "80": {
+   "level_db": -43.7,
+   "ap": 0.03,
+   "f0": 829.43,
+   "note": 80,
+   "cents": -2.5
+  },
+  "81": {
+   "level_db": -43.6,
+   "ap": 0.03,
+   "f0": 878.95,
+   "note": 81,
+   "cents": -2.1
+  },
+  "82": {
+   "level_db": -42.0,
+   "ap": 0.08,
+   "f0": 931.68,
+   "note": 82,
+   "cents": -1.2
+  },
+  "83": {
+   "level_db": -41.8,
+   "ap": 0.06,
+   "f0": 744.01,
+   "note": 78,
+   "cents": 9.4
+  },
+  "84": {
+   "level_db": -45.5,
+   "ap": 0.02,
+   "f0": 1045.61,
+   "note": 84,
+   "cents": -1.5
+  },
+  "85": {
+   "level_db": -45.3,
+   "ap": 0.02,
+   "f0": 1107.85,
+   "note": 85,
+   "cents": -1.4
+  },
+  "86": {
+   "level_db": -42.1,
+   "ap": 0.01,
+   "f0": 572.39,
+   "note": 74,
+   "cents": -44.6
+  },
+  "87": {
+   "level_db": -41.8,
+   "ap": 0.01,
+   "f0": 606.43,
+   "note": 75,
+   "cents": -44.6
+  },
+  "88": {
+   "level_db": -38.0,
+   "ap": 0.03,
+   "f0": 1319.52,
+   "note": 88,
+   "cents": 1.3
+  },
+  "89": {
+   "level_db": -37.8,
+   "ap": 0.04,
+   "f0": 1398.02,
+   "note": 89,
+   "cents": 1.4
+  },
+  "90": {
+   "level_db": -37.8,
+   "ap": 0.05,
+   "f0": 1479.65,
+   "note": 90,
+   "cents": -0.4
+  },
+  "91": {
+   "level_db": -37.8,
+   "ap": 0.02,
+   "f0": 1567.54,
+   "note": 91,
+   "cents": -0.5
+  }
+ },
+ "pitch": {
+  "kind": "pitched",
+  "confident_keys": 25,
+  "offset": 0,
+  "offset_share": 0.76,
+  "offset_outliers": {
+   "71": -5,
+   "72": -12,
+   "74": -12,
+   "83": -5,
+   "86": -12,
+   "87": -12
+  },
+  "worst_cents": -7.8,
+  "worst_key": 75,
+  "median_abs_cents": 1.4,
+  "out_of_tune": {}
+ },
+ "level": {
+  "median_db": -43.6,
+  "std_db": 2.4,
+  "min_db": -45.5,
+  "max_db": -37.8,
+  "max_jump_db": 3.8,
+  "max_jump_keys": [
+   87,
+   88
+  ],
+  "jumps_over_6db": 0
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   73,
+   85
+  ],
+  "main": {
+   "hi3k_db": -0.3,
+   "centroid_hz": 6710.0,
+   "attack_db": -2.0,
+   "onset_ms": 3.5
+  },
+  "median": {
+   "hi3k_db": -1.6,
+   "centroid_hz": 5522.0,
+   "attack_db": -3.0,
+   "onset_ms": 13.4
+  },
+  "octaves": {
+   "C4": {
+    "hi3k_db": -1.6,
+    "centroid_hz": 4971.0,
+    "attack_db": 6.2,
+    "onset_ms": 3.1
+   },
+   "C5": {
+    "hi3k_db": -0.3,
+    "centroid_hz": 6710.0,
+    "attack_db": -2.0,
+    "onset_ms": 3.5
+   },
+   "C6": {
+    "hi3k_db": -4.2,
+    "centroid_hz": 3147.0,
+    "attack_db": -5.1,
+    "onset_ms": 31.6
+   }
+  },
+  "notes": [
+   {
+    "key": 67,
+    "hi3k_db": -1.7,
+    "centroid_hz": 4779.0,
+    "attack_db": 6.1,
+    "onset_ms": 3.1
+   },
+   {
+    "key": 68,
+    "hi3k_db": -1.6,
+    "centroid_hz": 5163.0,
+    "attack_db": 6.3,
+    "onset_ms": 3.1
+   },
+   {
+    "key": 72,
+    "hi3k_db": -1.6,
+    "centroid_hz": 5880.0,
+    "attack_db": -6.8,
+    "onset_ms": 33.3
+   },
+   {
+    "key": 76,
+    "hi3k_db": -0.3,
+    "centroid_hz": 6710.0,
+    "attack_db": -0.1,
+    "onset_ms": 3.5
+   },
+   {
+    "key": 80,
+    "hi3k_db": -0.3,
+    "centroid_hz": 6953.0,
+    "attack_db": -2.0,
+    "onset_ms": 2.5
+   },
+   {
+    "key": 84,
+    "hi3k_db": -4.2,
+    "centroid_hz": 3008.0,
+    "attack_db": -3.9,
+    "onset_ms": 31.6
+   },
+   {
+    "key": 88,
+    "hi3k_db": -5.0,
+    "centroid_hz": 3147.0,
+    "attack_db": -5.1,
+    "onset_ms": 23.3
+   },
+   {
+    "key": 91,
+    "hi3k_db": -0.0,
+    "centroid_hz": 8521.0,
+    "attack_db": -9.7,
+    "onset_ms": 78.5
+   }
+  ]
+ },
+ "sustain": {
+  "key": 79,
+  "kind": "sustained, sample ends",
+  "peak_at_s": 1.92,
+  "t40_s": 4.98,
+  "level_at_2s_db": -6.2,
+  "usable_max_note_s": 3.12,
+  "release_s": 1.44,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 79,
+  "levels": {
+   "30": {
+    "rms_db": -59.9,
+    "hi3k_db": -0.5,
+    "centroid_hz": 6079.0,
+    "attack_db": -2.3,
+    "onset_ms": 14.2
+   },
+   "70": {
+    "rms_db": -45.2,
+    "hi3k_db": -0.5,
+    "centroid_hz": 6079.0,
+    "attack_db": -2.3,
+    "onset_ms": 14.2
+   },
+   "110": {
+    "rms_db": -37.4,
+    "hi3k_db": -0.5,
+    "centroid_hz": 6079.0,
+    "attack_db": -2.3,
+    "onset_ms": 14.2
+   }
+  },
+  "range_db": 22.5,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "harsh": "hi3k -0.3 dB in the main range (> -35.0)"
+ },
+ "used_by": [
+  "VCSL candidate"
+ ],
+ "aliases": [],
+ "seconds": 1.0
+}

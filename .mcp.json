@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "flux": {
+      "command": "daw/target/debug/flux.exe",
+      "args": ["mcp", "--gui"]
+    }
+  }
+}

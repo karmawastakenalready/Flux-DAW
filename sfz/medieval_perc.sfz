@@ -1,0 +1,59 @@
+// Processional percussion map built from the VSCO 2 CE (CC0) percussion samples we downloaded.
+// Keys follow GM where possible:
+//   36 (C2)  bass drum, soft mallet (used like a large frame drum)  7 vel layers x 2 RR
+//   38 (D2)  snare taps (used like a tabor)                          4 vel layers x 2 RR
+//   52 (E2)  gong                                                    4 dynamics
+//   54 (F#2) tambourine hit                                          2 vel layers x 2 RR
+
+<control>
+default_path=../instruments/VSCO-2-CE/Percussion/
+
+<global>
+ampeg_attack=0.001
+ampeg_dynamic=1
+loop_mode=one_shot
+
+// ---------- bass drum ----------
+<group> key=36 seq_length=2 seq_position=1 volume=2 pan=0 amp_veltrack=60
+<region> sample=BDrumNewhit_v1_rr1_Sum.wav lovel=0   hivel=18
+<region> sample=BDrumNewhit_v2_rr1_Sum.wav lovel=19  hivel=36
+<region> sample=BDrumNewhit_v3_rr1_Sum.wav lovel=37  hivel=54
+<region> sample=BDrumNewhit_v4_rr1_Sum.wav lovel=55  hivel=72
+<region> sample=BDrumNewhit_v5_rr1_Sum.wav lovel=73  hivel=90
+<region> sample=BDrumNewhit_v6_rr1_Sum.wav lovel=91  hivel=108
+<region> sample=BDrumNewhit_v7_rr1_Sum.wav lovel=109 hivel=127
+<group> key=36 seq_length=2 seq_position=2 volume=2 pan=0 amp_veltrack=60
+<region> sample=BDrumNewhit_v1_rr2_Sum.wav lovel=0   hivel=18
+<region> sample=BDrumNewhit_v2_rr2_Sum.wav lovel=19  hivel=36
+<region> sample=BDrumNewhit_v3_rr2_Sum.wav lovel=37  hivel=54
+<region> sample=BDrumNewhit_v4_rr2_Sum.wav lovel=55  hivel=72
+<region> sample=BDrumNewhit_v5_rr2_Sum.wav lovel=73  hivel=90
+<region> sample=BDrumNewhit_v6_rr2_Sum.wav lovel=91  hivel=108
+<region> sample=BDrumNewhit_v7_rr2_Sum.wav lovel=109 hivel=127
+
+// ---------- snare taps (tabor) ----------
+<group> key=38 seq_length=2 seq_position=1 volume=8 pan=-25 amp_veltrack=60
+<region> sample=Snare2-taps_v1_rr1_Sum.wav lovel=0  hivel=32
+<region> sample=Snare2-taps_v2_rr1_Sum.wav lovel=33 hivel=64
+<region> sample=Snare2-taps_v3_rr1_Sum.wav lovel=65 hivel=96
+<region> sample=Snare2-taps_v4_rr1_Sum.wav lovel=97 hivel=127
+<group> key=38 seq_length=2 seq_position=2 volume=8 pan=-25 amp_veltrack=60
+<region> sample=Snare2-taps_v1_rr2_Sum.wav lovel=0  hivel=32
+<region> sample=Snare2-taps_v2_rr2_Sum.wav lovel=33 hivel=64
+<region> sample=Snare2-taps_v3_rr2_Sum.wav lovel=65 hivel=96
+<region> sample=Snare2-taps_v4_rr2_Sum.wav lovel=97 hivel=127
+
+// ---------- gong ----------
+<group> key=52 volume=-2 pan=10 amp_veltrack=40
+<region> sample=gongHit_p.wav   lovel=0   hivel=50
+<region> sample=gongHit_mf.wav  lovel=51  hivel=85
+<region> sample=gongHit_f.wav   lovel=86  hivel=115
+<region> sample=gongHit_fff.wav lovel=116 hivel=127
+
+// ---------- tambourine ----------
+<group> key=54 seq_length=2 seq_position=1 volume=8 pan=30 amp_veltrack=70
+<region> sample=Tamb1-Hit_v1_rr1_Sum.wav lovel=0  hivel=64
+<region> sample=Tamb1-Hit_v2_rr1_Sum.wav lovel=65 hivel=127
+<group> key=54 seq_length=2 seq_position=2 volume=8 pan=30 amp_veltrack=70
+<region> sample=Tamb1-Hit_v1_rr2_Sum.wav lovel=0  hivel=64
+<region> sample=Tamb1-Hit_v2_rr2_Sum.wav lovel=65 hivel=127

@@ -1,0 +1,37 @@
+{
+  "about": "METAL-GTX DI into obijuan's EVH 5150 III red channel + Horizon Precision Drive full-rig NAM capture (TONE3000, T3K) for leads.",
+  "source": {
+    "sfz": "instruments/unreal.metal-gtx/UI_METAL-GTX/Programs/01-METAL-GTX Full.sfz",
+    "init_cc": {
+      "20": 0,
+      "21": 95,
+      "22": 51,
+      "32": 0,
+      "27": 8
+    },
+    "keyswitches": [
+      [
+        0,
+        29
+      ],
+      [
+        89,
+        127
+      ]
+    ],
+    "tune_cents": -5,
+    "default_ks": 17
+  },
+  "chain": [
+    {
+      "type": "highpass",
+      "hz": 60
+    },
+    {
+      "type": "nam",
+      "model": "instruments/nam/ob1-5150iii-fullrig/ofcsfj5mm7b_a2.nam",
+      "input_db": 0,
+      "output_db": -6
+    }
+  ]
+}

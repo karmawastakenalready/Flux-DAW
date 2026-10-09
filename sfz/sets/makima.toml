@@ -1,0 +1,143 @@
+# Instrument set "makima" (draft generated from instruments.py by sets_to_toml.py).
+# Makima boss fight: sampled synths, electronic kit and guitar, with piano, music box and orchestral layers taken from temporal_shift.
+#
+# Paths are relative to the project root (the folder that holds instruments/), like paths in Flux projects.
+# `flux sfz build makima` writes the wrappers to build/sfz/makima/ (see [set] output); wrap = "none"
+# instruments are played from their source directly. Ranges and test notes are MIDI keys (note names such as
+# "C4" also work). gm = [bank, program] is the General MIDI fallback.
+
+[set]
+description = "Makima boss fight: sampled synths, electronic kit and guitar, with piano, music box and orchestral layers taken from temporal_shift."
+
+[instruments.drums]
+library = "sonic-pi"
+source = "sfz/makima_kit.sfz"
+wrap = "none"
+range = [34, 58]
+test_note = 36
+test_notes = [36, 38, 42, 46, 49]
+gm = [128, 25]
+
+[instruments.sub808]
+library = "sonic-pi"
+source = "sfz/sonicpi_808.sfz"
+wrap = "none"
+range = [26, 40]
+test_note = 28
+gm = [0, 38]
+
+[instruments.synth_bass]
+library = "karoryfer.caveman-cosmonaut"
+source = "instruments/karoryfer.caveman-cosmonaut/Programs/main.sfz"
+wrap = "patch"
+range = [28, 52]
+test_note = 40
+gm = [0, 38]
+patch = [
+    { op = "replace", opcode = "loop_mode", value = "continuous", with = "loop_continuous" },
+    { op = "insert_after", opcode = "cutoff", value = "250", opcodes = { cutoff_oncc120 = "6000", fil_veltrack = "2400" } },
+    { op = "remove", opcodes = ["var01_*", "var02_*"] },
+]
+
+[instruments.synth_lead]
+library = "karoryfer.caveman-cosmonaut"
+source = "instruments/karoryfer.caveman-cosmonaut/Programs/main.sfz"
+wrap = "patch"
+range = [52, 88]
+test_note = 71
+gm = [0, 81]
+patch = [
+    { op = "replace", opcode = "loop_mode", value = "continuous", with = "loop_continuous" },
+    { op = "insert_after", opcode = "cutoff", value = "250", opcodes = { cutoff_oncc120 = "6000", fil_veltrack = "2400" } },
+    { op = "remove", opcodes = ["var01_*", "var02_*"] },
+]
+
+[instruments.synth_pad]
+library = "karoryfer.caveman-cosmonaut"
+source = "instruments/karoryfer.caveman-cosmonaut/Programs/main.sfz"
+wrap = "patch"
+range = [40, 84]
+test_note = 59
+gm = [0, 89]
+patch = [
+    { op = "replace", opcode = "loop_mode", value = "continuous", with = "loop_continuous" },
+    { op = "insert_after", opcode = "cutoff", value = "250", opcodes = { cutoff_oncc120 = "6000", fil_veltrack = "2400" } },
+    { op = "remove", opcodes = ["var01_*", "var02_*"] },
+]
+
+[instruments.eerie_pad]
+library = "karoryfer.cowsynth"
+source = "instruments/karoryfer.cowsynth/cowsynth_shifty_pad.sfz"
+wrap = "none"
+range = [40, 79]
+test_note = 59
+gm = [0, 94]
+
+[instruments.guitar]
+library = "karoryfer.black-and-green-guitars"
+source = "instruments/karoryfer.black-and-green-guitars/Programs/02-black_keyswitch.sfz"
+wrap = "none"
+range = [40, 76]
+test_note = 40
+gm = [0, 30]
+ks_map = { btb = 38, ord = 36, stac = 37 }
+
+[instruments.guitar_dbl]
+library = "karoryfer.black-and-green-guitars"
+source = "instruments/karoryfer.black-and-green-guitars/Programs/02-black_keyswitch.sfz"
+wrap = "none"
+range = [40, 76]
+test_note = 40
+gm = [0, 30]
+ks_map = { btb = 38, ord = 36, stac = 37 }
+
+[instruments.piano]
+library = "SalamanderGrandPiano"
+source = "instruments/SalamanderGrandPiano/Salamander Grand Piano V3.sfz"
+wrap = "none"
+range = [21, 108]
+test_note = 64
+gm = [0, 0]
+
+[instruments.glock]
+from = "temporal_shift/glock"
+
+[instruments.violins]
+from = "temporal_shift/violins"
+
+[instruments.cellos]
+from = "temporal_shift/cellos"
+
+[instruments.trombone]
+from = "temporal_shift/trombone"
+
+[instruments.horn]
+from = "temporal_shift/horn"
+
+[instruments.timpani]
+from = "temporal_shift/timpani"
+
+[instruments.chains]
+from = "temporal_shift/percussion"
+test_notes = [67, 68, 69, 82, 101]
+
+[instruments.fx]
+library = "sonic-pi"
+source = "sfz/makima_fx.sfz"
+wrap = "none"
+range = [28, 51]
+test_note = 28
+test_notes = [28, 29, 33, 40, 48]
+gm = [128, 56]
+
+[instruments.rev_fx]
+library = "sonic-pi"
+source = "sfz/makima_fx.sfz"
+wrap = "none"
+range = [28, 51]
+test_note = 28
+gm = [128, 56]
+reverse = true
+
+[instruments.rev_cymbal]
+from = "temporal_shift/rev_cymbal"

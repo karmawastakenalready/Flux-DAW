@@ -1,0 +1,16 @@
+// Cold Metal: Karoryfer "black" guitar staccato (Black & Green Guitars, CC0) with a short release,
+// so heavily amped palm-mute chugs stop dead and the gate gaps stay silent. Same sample map as 08-black_staccato.
+<control>
+default_path=../instruments/karoryfer.black-and-green-guitars/Programs/
+set_cc101=127
+set_cc114=40
+
+<global>
+#include "../instruments/karoryfer.black-and-green-guitars/Programs/modules/controls/vibrato.sfz"
+ampeg_release=0.035
+ampeg_attack=0.001
+bend_smooth=40
+
+<master>
+hicc118=63
+#include "../instruments/karoryfer.black-and-green-guitars/Programs/modules/maps_black/stac.sfz"

@@ -1,0 +1,16 @@
+Source: https://unreal-instruments.wixsite.com/unreal-instruments/about
+Page snapshot: 319608 bytes, sha256 64af00d394f9dc9315d8ab29bfcf43b3aae019edcabe962435f041014dfefd20
+Lines containing: フリー, 商用, クレジット, 二次配布, 加工
+
+尚、当サイトで公開しているサンプリング音源は全てフリーで使用可能です。
+商用利用可能です。
+その際、クレジット表記は不要です。
+音源内のデータを許可無く加工、二次配布する事を禁止します。
+当サイトへのリンクはフリーです。
+
+English (our translation, retrieved 2026-10-08):
+- All sampled instruments published on this site are free to use.
+- Commercial use is allowed (the full sentence on the page: works made with the instruments may be used commercially).
+- No credit is required.
+- Modifying the data inside the instruments, or redistributing it, without permission is forbidden.
+- Linking to this site is free.

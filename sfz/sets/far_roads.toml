@@ -1,0 +1,78 @@
+# Instrument set "far_roads" (draft generated from instruments.py by sets_to_toml.py).
+# Far Roads (open-world exploration, built in Flux by daw/projects/far_roads_build.py).
+#
+# Paths are relative to the project root (the folder that holds instruments/), like paths in Flux projects.
+# `flux sfz build far_roads` writes the wrappers to build/sfz/far_roads/ (see [set] output); wrap = "none"
+# instruments are played from their source directly. Ranges and test notes are MIDI keys (note names such as
+# "C4" also work). gm = [bank, program] is the General MIDI fallback.
+
+[set]
+description = "Far Roads (open-world exploration, built in Flux by daw/projects/far_roads_build.py)."
+
+[instruments.flute]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/FluteSusNV.sfz"
+wrap = "strings"
+range = [60, 93]
+
+[instruments.flute_vib]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/FluteExpVib.sfz"
+wrap = "strings"
+range = [60, 93]
+
+[instruments.oboe]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/OboeSusVib.sfz"
+wrap = "strings"
+range = [58, 86]
+
+[instruments.clarinet]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/ClarinetSus.sfz"
+wrap = "strings"
+range = [50, 86]
+
+[instruments.violins]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/ViolinEnsSusVib.sfz"
+wrap = "strings"
+range = [55, 86]
+
+[instruments.violas]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/ViolaEnsSusVib.sfz"
+wrap = "strings"
+range = [48, 81]
+
+[instruments.cellos]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/CelloEnsSusVib.sfz"
+wrap = "strings"
+range = [36, 72]
+
+[instruments.basses]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/ContrabassSusNV.sfz"
+wrap = "strings"
+range = [28, 55]
+
+[instruments.harp]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/Harp.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "3.5" }
+range = [28, 101]
+
+[instruments.horn]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/FHornSus.sfz"
+wrap = "expr"
+range = [38, 77]
+
+[instruments.timpani]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/Timpani.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "3" }
+range = [38, 50]

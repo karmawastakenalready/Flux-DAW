@@ -1,0 +1,632 @@
+{
+ "name": "sfz/cold_metal_black",
+ "slug": "sfz-cold-metal-black",
+ "sfz": "sfz/cold_metal_black.sfz",
+ "about": "Cold Metal guitar: Karoryfer \"black\" electric (Black & Green Guitars, CC0), sustained samples retuned per sample (tools/sfz_retune.py) plus the string-release noises. Same envelope controls as 07-black_twang: CC70 Muting: 0 = ringing, 127 =",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "karoryfer.black-and-green-guitars",
+    "license": "CC0 1.0",
+    "file": "instruments/karoryfer.black-and-green-guitars/LICENSE",
+    "licenses_md": "not listed",
+    "agrees": false
+   }
+  ],
+  "all_in_licenses_md": false
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   40,
+   86
+  ],
+  "main_names": "E2-D6",
+  "ranges": [
+   [
+    40,
+    86
+   ]
+  ],
+  "count": 47,
+  "span": [
+   40,
+   86
+  ],
+  "gaps": [],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 692,
+ "cc_labels": {
+  "27": "Release vol",
+  "70": "Muting",
+  "111": "Unnamed CC 111",
+  "112": "Unnamed CC 112",
+  "113": "Unnamed CC 113",
+  "114": "Unnamed CC 114",
+  "116": "Unnamed CC 116",
+  "117": "Unnamed CC 117"
+ },
+ "key_labels": {},
+ "keyswitches": null,
+ "per_key": {
+  "40": {
+   "level_db": -35.0,
+   "ap": 0.0,
+   "f0": 82.6,
+   "note": 40,
+   "cents": 4.1
+  },
+  "41": {
+   "level_db": -34.2,
+   "ap": 0.0,
+   "f0": 87.5,
+   "note": 41,
+   "cents": 3.8
+  },
+  "42": {
+   "level_db": -34.8,
+   "ap": 0.0,
+   "f0": 92.81,
+   "note": 42,
+   "cents": 5.8
+  },
+  "43": {
+   "level_db": -35.5,
+   "ap": 0.0,
+   "f0": 98.31,
+   "note": 43,
+   "cents": 5.5
+  },
+  "44": {
+   "level_db": -36.3,
+   "ap": 0.0,
+   "f0": 104.15,
+   "note": 44,
+   "cents": 5.3
+  },
+  "45": {
+   "level_db": -37.1,
+   "ap": 0.01,
+   "f0": 110.37,
+   "note": 45,
+   "cents": 5.8
+  },
+  "46": {
+   "level_db": -36.5,
+   "ap": 0.0,
+   "f0": 116.86,
+   "note": 46,
+   "cents": 4.8
+  },
+  "47": {
+   "level_db": -36.1,
+   "ap": 0.0,
+   "f0": 123.78,
+   "note": 47,
+   "cents": 4.4
+  },
+  "48": {
+   "level_db": -36.1,
+   "ap": 0.0,
+   "f0": 131.11,
+   "note": 48,
+   "cents": 3.9
+  },
+  "49": {
+   "level_db": -35.3,
+   "ap": 0.0,
+   "f0": 138.74,
+   "note": 49,
+   "cents": 1.9
+  },
+  "50": {
+   "level_db": -40.3,
+   "ap": 0.01,
+   "f0": 147.27,
+   "note": 50,
+   "cents": 5.2
+  },
+  "51": {
+   "level_db": -37.8,
+   "ap": 0.0,
+   "f0": 155.94,
+   "note": 51,
+   "cents": 4.2
+  },
+  "52": {
+   "level_db": -40.5,
+   "ap": 0.0,
+   "f0": 165.32,
+   "note": 52,
+   "cents": 5.3
+  },
+  "53": {
+   "level_db": -40.3,
+   "ap": 0.0,
+   "f0": 175.01,
+   "note": 53,
+   "cents": 3.9
+  },
+  "54": {
+   "level_db": -41.1,
+   "ap": 0.0,
+   "f0": 185.64,
+   "note": 54,
+   "cents": 6.0
+  },
+  "55": {
+   "level_db": -38.7,
+   "ap": 0.01,
+   "f0": 196.85,
+   "note": 55,
+   "cents": 7.5
+  },
+  "56": {
+   "level_db": -40.6,
+   "ap": 0.0,
+   "f0": 208.18,
+   "note": 56,
+   "cents": 4.4
+  },
+  "57": {
+   "level_db": -39.7,
+   "ap": 0.0,
+   "f0": 220.92,
+   "note": 57,
+   "cents": 7.3
+  },
+  "58": {
+   "level_db": -41.0,
+   "ap": 0.0,
+   "f0": 233.83,
+   "note": 58,
+   "cents": 5.5
+  },
+  "59": {
+   "level_db": -43.4,
+   "ap": 0.01,
+   "f0": 247.65,
+   "note": 59,
+   "cents": 4.9
+  },
+  "60": {
+   "level_db": -45.0,
+   "ap": 0.01,
+   "f0": 263.13,
+   "note": 60,
+   "cents": 9.9
+  },
+  "61": {
+   "level_db": -41.2,
+   "ap": 0.0,
+   "f0": 277.72,
+   "note": 61,
+   "cents": 3.4
+  },
+  "62": {
+   "level_db": -42.0,
+   "ap": 0.0,
+   "f0": 294.44,
+   "note": 62,
+   "cents": 4.6
+  },
+  "63": {
+   "level_db": -42.3,
+   "ap": 0.0,
+   "f0": 311.86,
+   "note": 63,
+   "cents": 4.1
+  },
+  "64": {
+   "level_db": -44.5,
+   "ap": 0.0,
+   "f0": 329.96,
+   "note": 64,
+   "cents": 1.8
+  },
+  "65": {
+   "level_db": -44.9,
+   "ap": 0.0,
+   "f0": 349.73,
+   "note": 65,
+   "cents": 2.5
+  },
+  "66": {
+   "level_db": -45.8,
+   "ap": 0.0,
+   "f0": 370.52,
+   "note": 66,
+   "cents": 2.5
+  },
+  "67": {
+   "level_db": -46.8,
+   "ap": 0.01,
+   "f0": 392.55,
+   "note": 67,
+   "cents": 2.5
+  },
+  "68": {
+   "level_db": -45.6,
+   "ap": 0.0,
+   "f0": 415.4,
+   "note": 68,
+   "cents": 0.4
+  },
+  "69": {
+   "level_db": -47.1,
+   "ap": 0.0,
+   "f0": 440.28,
+   "note": 69,
+   "cents": 1.1
+  },
+  "70": {
+   "level_db": -48.4,
+   "ap": 0.01,
+   "f0": 466.44,
+   "note": 70,
+   "cents": 1.0
+  },
+  "71": {
+   "level_db": -47.1,
+   "ap": 0.0,
+   "f0": 494.01,
+   "note": 71,
+   "cents": 0.5
+  },
+  "72": {
+   "level_db": -46.4,
+   "ap": 0.0,
+   "f0": 523.29,
+   "note": 72,
+   "cents": 0.1
+  },
+  "73": {
+   "level_db": -45.1,
+   "ap": 0.01,
+   "f0": 554.5,
+   "note": 73,
+   "cents": 0.4
+  },
+  "74": {
+   "level_db": -44.9,
+   "ap": 0.0,
+   "f0": 587.61,
+   "note": 74,
+   "cents": 0.8
+  },
+  "75": {
+   "level_db": -43.0,
+   "ap": 0.0,
+   "f0": 622.27,
+   "note": 75,
+   "cents": 0.0
+  },
+  "76": {
+   "level_db": -45.5,
+   "ap": 0.0,
+   "f0": 659.43,
+   "note": 76,
+   "cents": 0.5
+  },
+  "77": {
+   "level_db": -44.1,
+   "ap": 0.0,
+   "f0": 699.45,
+   "note": 77,
+   "cents": 2.5
+  },
+  "78": {
+   "level_db": -44.0,
+   "ap": 0.0,
+   "f0": 740.17,
+   "note": 78,
+   "cents": 0.4
+  },
+  "79": {
+   "level_db": -43.7,
+   "ap": 0.0,
+   "f0": 783.96,
+   "note": 79,
+   "cents": -0.1
+  },
+  "80": {
+   "level_db": -44.8,
+   "ap": 0.0,
+   "f0": 830.92,
+   "note": 80,
+   "cents": 0.6
+  },
+  "81": {
+   "level_db": -43.6,
+   "ap": 0.0,
+   "f0": 879.84,
+   "note": 81,
+   "cents": -0.3
+  },
+  "82": {
+   "level_db": -45.6,
+   "ap": 0.0,
+   "f0": 932.3,
+   "note": 82,
+   "cents": -0.1
+  },
+  "83": {
+   "level_db": -42.6,
+   "ap": 0.0,
+   "f0": 987.55,
+   "note": 83,
+   "cents": -0.4
+  },
+  "84": {
+   "level_db": -40.2,
+   "ap": 0.0,
+   "f0": 1046.63,
+   "note": 84,
+   "cents": 0.2
+  },
+  "85": {
+   "level_db": -41.2,
+   "ap": 0.0,
+   "f0": 1108.92,
+   "note": 85,
+   "cents": 0.3
+  },
+  "86": {
+   "level_db": -38.1,
+   "ap": 0.0,
+   "f0": 1174.73,
+   "note": 86,
+   "cents": 0.1
+  }
+ },
+ "pitch": {
+  "kind": "pitched",
+  "confident_keys": 47,
+  "offset": 0,
+  "offset_share": 1.0,
+  "offset_outliers": {},
+  "worst_cents": 9.9,
+  "worst_key": 60,
+  "median_abs_cents": 2.5,
+  "out_of_tune": {}
+ },
+ "level": {
+  "median_db": -42.0,
+  "std_db": 3.9,
+  "min_db": -48.4,
+  "max_db": -34.2,
+  "max_jump_db": 5.0,
+  "max_jump_keys": [
+   49,
+   50
+  ],
+  "jumps_over_6db": 0
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   52,
+   74
+  ],
+  "main": {
+   "hi3k_db": -30.9,
+   "centroid_hz": 550.0,
+   "attack_db": 8.9,
+   "onset_ms": 21.5
+  },
+  "median": {
+   "hi3k_db": -26.9,
+   "centroid_hz": 593.0,
+   "attack_db": 8.9,
+   "onset_ms": 21.3
+  },
+  "octaves": {
+   "C2": {
+    "hi3k_db": -43.8,
+    "centroid_hz": 164.0,
+    "attack_db": 9.2,
+    "onset_ms": 18.6
+   },
+   "C3": {
+    "hi3k_db": -46.4,
+    "centroid_hz": 292.0,
+    "attack_db": 8.9,
+    "onset_ms": 21.9
+   },
+   "C4": {
+    "hi3k_db": -23.5,
+    "centroid_hz": 601.0,
+    "attack_db": 9.2,
+    "onset_ms": 21.3
+   },
+   "C5": {
+    "hi3k_db": -25.8,
+    "centroid_hz": 696.0,
+    "attack_db": 6.7,
+    "onset_ms": 20.5
+   },
+   "C6": {
+    "hi3k_db": -24.0,
+    "centroid_hz": 1124.0,
+    "attack_db": 9.3,
+    "onset_ms": 21.0
+   }
+  },
+  "notes": [
+   {
+    "key": 40,
+    "hi3k_db": -40.0,
+    "centroid_hz": 182.0,
+    "attack_db": 9.8,
+    "onset_ms": 14.7
+   },
+   {
+    "key": 44,
+    "hi3k_db": -47.6,
+    "centroid_hz": 146.0,
+    "attack_db": 8.5,
+    "onset_ms": 22.6
+   },
+   {
+    "key": 48,
+    "hi3k_db": -57.2,
+    "centroid_hz": 276.0,
+    "attack_db": 10.2,
+    "onset_ms": 22.9
+   },
+   {
+    "key": 52,
+    "hi3k_db": -42.9,
+    "centroid_hz": 292.0,
+    "attack_db": 8.9,
+    "onset_ms": 21.3
+   },
+   {
+    "key": 56,
+    "hi3k_db": -46.4,
+    "centroid_hz": 439.0,
+    "attack_db": 8.9,
+    "onset_ms": 21.9
+   },
+   {
+    "key": 60,
+    "hi3k_db": -35.9,
+    "centroid_hz": 506.0,
+    "attack_db": 9.7,
+    "onset_ms": 21.6
+   },
+   {
+    "key": 64,
+    "hi3k_db": -23.5,
+    "centroid_hz": 621.0,
+    "attack_db": 9.2,
+    "onset_ms": 9.2
+   },
+   {
+    "key": 68,
+    "hi3k_db": -18.3,
+    "centroid_hz": 601.0,
+    "attack_db": 8.7,
+    "onset_ms": 21.3
+   },
+   {
+    "key": 72,
+    "hi3k_db": -25.8,
+    "centroid_hz": 593.0,
+    "attack_db": 6.7,
+    "onset_ms": 22.5
+   },
+   {
+    "key": 76,
+    "hi3k_db": -20.7,
+    "centroid_hz": 696.0,
+    "attack_db": 7.2,
+    "onset_ms": 20.5
+   },
+   {
+    "key": 80,
+    "hi3k_db": -26.9,
+    "centroid_hz": 837.0,
+    "attack_db": 5.9,
+    "onset_ms": 19.7
+   },
+   {
+    "key": 84,
+    "hi3k_db": -24.0,
+    "centroid_hz": 1062.0,
+    "attack_db": 8.5,
+    "onset_ms": 21.1
+   },
+   {
+    "key": 86,
+    "hi3k_db": -24.0,
+    "centroid_hz": 1185.0,
+    "attack_db": 10.1,
+    "onset_ms": 20.9
+   }
+  ]
+ },
+ "sustain": {
+  "key": 63,
+  "kind": "decaying",
+  "peak_at_s": 0.02,
+  "t40_s": 4.6,
+  "level_at_2s_db": -16.3,
+  "usable_max_note_s": 4.6,
+  "release_s": 0.46,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 63,
+  "levels": {
+   "30": {
+    "rms_db": -49.6,
+    "hi3k_db": -43.0,
+    "centroid_hz": 478.0,
+    "attack_db": 7.6,
+    "onset_ms": 22.2
+   },
+   "70": {
+    "rms_db": -40.3,
+    "hi3k_db": -34.3,
+    "centroid_hz": 541.0,
+    "attack_db": 10.3,
+    "onset_ms": 22.3
+   },
+   "110": {
+    "rms_db": -39.0,
+    "hi3k_db": -24.9,
+    "centroid_hz": 487.0,
+    "attack_db": 21.7,
+    "onset_ms": 21.6
+   }
+  },
+  "range_db": 10.6,
+  "hi3k_change_db": 18.1,
+  "kind": "level and timbre (layers or filter)"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": -0.7,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "harsh": "hi3k -30.9 dB in the main range (> -35.0)"
+ },
+ "used_by": [
+  "cold_metal: Gtr L",
+  "cold_metal: Gtr R",
+  "cold_metal: Dissonance",
+  "sfz/"
+ ],
+ "aliases": [],
+ "seconds": 1.9
+}

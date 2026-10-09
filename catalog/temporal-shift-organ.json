@@ -1,0 +1,760 @@
+{
+ "name": "temporal_shift/organ",
+ "slug": "temporal-shift-organ",
+ "sfz": "build/sfz/temporal_shift/organ.sfz",
+ "about": "generated multi-articulation instrument 'organ' - keyswitches: 120=quiet, 121=loud",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   }
+  ],
+  "all_in_licenses_md": true
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   36,
+   96
+  ],
+  "main_names": "C2-C7",
+  "ranges": [
+   [
+    36,
+    96
+   ]
+  ],
+  "count": 61,
+  "span": [
+   36,
+   96
+  ],
+  "gaps": [],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 42,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": {
+  "keys": {
+   "120": "",
+   "121": ""
+  },
+  "default": 120
+ },
+ "per_key": {
+  "36": {
+   "level_db": -61.7,
+   "ap": 0.07,
+   "f0": 65.48,
+   "note": 36,
+   "cents": 2.0
+  },
+  "37": {
+   "level_db": -61.5,
+   "ap": 0.06,
+   "f0": 69.32,
+   "note": 37,
+   "cents": 0.5
+  },
+  "38": {
+   "level_db": -50.1,
+   "ap": 0.02,
+   "f0": 220.94,
+   "note": 57,
+   "cents": 7.4
+  },
+  "39": {
+   "level_db": -49.9,
+   "ap": 0.02,
+   "f0": 234.07,
+   "note": 58,
+   "cents": 7.3
+  },
+  "40": {
+   "level_db": -49.8,
+   "ap": 0.02,
+   "f0": 247.76,
+   "note": 59,
+   "cents": 5.7
+  },
+  "41": {
+   "level_db": -51.6,
+   "ap": 0.02,
+   "f0": 88.56,
+   "note": 41,
+   "cents": 24.7
+  },
+  "42": {
+   "level_db": -51.7,
+   "ap": 0.02,
+   "f0": 93.76,
+   "note": 42,
+   "cents": 23.4
+  },
+  "43": {
+   "level_db": -51.9,
+   "ap": 0.01,
+   "f0": 99.07,
+   "note": 43,
+   "cents": 18.9
+  },
+  "44": {
+   "level_db": -40.0,
+   "ap": 0.0,
+   "f0": 103.92,
+   "note": 44,
+   "cents": 1.6
+  },
+  "45": {
+   "level_db": -39.8,
+   "ap": 0.0,
+   "f0": 110.07,
+   "note": 45,
+   "cents": 1.1
+  },
+  "46": {
+   "level_db": -39.6,
+   "ap": 0.0,
+   "f0": 116.6,
+   "note": 46,
+   "cents": 0.9
+  },
+  "47": {
+   "level_db": -38.5,
+   "ap": 0.01,
+   "f0": 123.94,
+   "note": 47,
+   "cents": 6.6
+  },
+  "48": {
+   "level_db": -38.3,
+   "ap": 0.01,
+   "f0": 131.27,
+   "note": 48,
+   "cents": 6.1
+  },
+  "49": {
+   "level_db": -38.2,
+   "ap": 0.01,
+   "f0": 139.08,
+   "note": 49,
+   "cents": 6.1
+  },
+  "50": {
+   "level_db": -44.5,
+   "ap": 0.01,
+   "f0": 147.43,
+   "note": 50,
+   "cents": 7.1
+  },
+  "51": {
+   "level_db": -44.4,
+   "ap": 0.01,
+   "f0": 156.26,
+   "note": 51,
+   "cents": 7.8
+  },
+  "52": {
+   "level_db": -44.3,
+   "ap": 0.01,
+   "f0": 165.4,
+   "note": 52,
+   "cents": 6.1
+  },
+  "53": {
+   "level_db": -35.8,
+   "ap": 0.0,
+   "f0": 175.41,
+   "note": 53,
+   "cents": 7.9
+  },
+  "54": {
+   "level_db": -35.5,
+   "ap": 0.0,
+   "f0": 185.76,
+   "note": 54,
+   "cents": 7.1
+  },
+  "55": {
+   "level_db": -35.1,
+   "ap": 0.0,
+   "f0": 196.89,
+   "note": 55,
+   "cents": 7.8
+  },
+  "56": {
+   "level_db": -47.6,
+   "ap": 0.0,
+   "f0": 208.23,
+   "note": 56,
+   "cents": 4.8
+  },
+  "57": {
+   "level_db": -47.6,
+   "ap": 0.0,
+   "f0": 220.65,
+   "note": 57,
+   "cents": 5.1
+  },
+  "58": {
+   "level_db": -47.6,
+   "ap": 0.0,
+   "f0": 233.68,
+   "note": 58,
+   "cents": 4.5
+  },
+  "59": {
+   "level_db": -49.5,
+   "ap": 0.01,
+   "f0": 247.21,
+   "note": 59,
+   "cents": 1.9
+  },
+  "60": {
+   "level_db": -49.6,
+   "ap": 0.01,
+   "f0": 261.86,
+   "note": 60,
+   "cents": 1.6
+  },
+  "61": {
+   "level_db": -49.7,
+   "ap": 0.01,
+   "f0": 277.42,
+   "note": 61,
+   "cents": 1.5
+  },
+  "62": {
+   "level_db": -42.2,
+   "ap": 0.0,
+   "f0": 293.89,
+   "note": 62,
+   "cents": 1.3
+  },
+  "63": {
+   "level_db": -42.0,
+   "ap": 0.0,
+   "f0": 311.35,
+   "note": 63,
+   "cents": 1.3
+  },
+  "64": {
+   "level_db": -41.8,
+   "ap": 0.0,
+   "f0": 329.86,
+   "note": 64,
+   "cents": 1.2
+  },
+  "65": {
+   "level_db": -39.7,
+   "ap": 0.0,
+   "f0": 349.25,
+   "note": 65,
+   "cents": 0.1
+  },
+  "66": {
+   "level_db": -39.6,
+   "ap": 0.0,
+   "f0": 370.07,
+   "note": 66,
+   "cents": 0.3
+  },
+  "67": {
+   "level_db": -39.6,
+   "ap": 0.0,
+   "f0": 392.01,
+   "note": 67,
+   "cents": 0.1
+  },
+  "68": {
+   "level_db": -48.0,
+   "ap": 0.0,
+   "f0": 414.03,
+   "note": 68,
+   "cents": -5.3
+  },
+  "69": {
+   "level_db": -47.9,
+   "ap": 0.0,
+   "f0": 438.64,
+   "note": 69,
+   "cents": -5.3
+  },
+  "70": {
+   "level_db": -48.0,
+   "ap": 0.0,
+   "f0": 464.7,
+   "note": 70,
+   "cents": -5.4
+  },
+  "71": {
+   "level_db": -48.3,
+   "ap": 0.0,
+   "f0": 492.26,
+   "note": 71,
+   "cents": -5.7
+  },
+  "72": {
+   "level_db": -48.1,
+   "ap": 0.0,
+   "f0": 521.56,
+   "note": 72,
+   "cents": -5.6
+  },
+  "73": {
+   "level_db": -47.9,
+   "ap": 0.0,
+   "f0": 552.59,
+   "note": 73,
+   "cents": -5.6
+  },
+  "74": {
+   "level_db": -42.6,
+   "ap": 0.0,
+   "f0": 585.95,
+   "note": 74,
+   "cents": -4.1
+  },
+  "75": {
+   "level_db": -42.5,
+   "ap": 0.0,
+   "f0": 620.88,
+   "note": 75,
+   "cents": -3.8
+  },
+  "76": {
+   "level_db": -42.4,
+   "ap": 0.0,
+   "f0": 657.9,
+   "note": 76,
+   "cents": -3.6
+  },
+  "77": {
+   "level_db": -41.9,
+   "ap": 0.0,
+   "f0": 698.85,
+   "note": 77,
+   "cents": 1.0
+  },
+  "78": {
+   "level_db": -42.0,
+   "ap": 0.0,
+   "f0": 740.37,
+   "note": 78,
+   "cents": 0.9
+  },
+  "79": {
+   "level_db": -42.1,
+   "ap": 0.0,
+   "f0": 784.36,
+   "note": 79,
+   "cents": 0.8
+  },
+  "80": {
+   "level_db": -44.5,
+   "ap": 0.0,
+   "f0": 831.06,
+   "note": 80,
+   "cents": 0.9
+  },
+  "81": {
+   "level_db": -44.1,
+   "ap": 0.0,
+   "f0": 880.43,
+   "note": 81,
+   "cents": 0.8
+  },
+  "82": {
+   "level_db": -43.9,
+   "ap": 0.0,
+   "f0": 932.72,
+   "note": 82,
+   "cents": 0.7
+  },
+  "83": {
+   "level_db": -40.0,
+   "ap": 0.0,
+   "f0": 986.14,
+   "note": 83,
+   "cents": -2.9
+  },
+  "84": {
+   "level_db": -40.0,
+   "ap": 0.0,
+   "f0": 1044.73,
+   "note": 84,
+   "cents": -2.9
+  },
+  "85": {
+   "level_db": -40.0,
+   "ap": 0.0,
+   "f0": 1106.81,
+   "note": 85,
+   "cents": -3.0
+  },
+  "86": {
+   "level_db": -44.0,
+   "ap": 0.0,
+   "f0": 1169.87,
+   "note": 86,
+   "cents": -7.1
+  },
+  "87": {
+   "level_db": -43.9,
+   "ap": 0.0,
+   "f0": 1239.35,
+   "note": 87,
+   "cents": -7.2
+  },
+  "88": {
+   "level_db": -43.8,
+   "ap": 0.0,
+   "f0": 1312.94,
+   "note": 88,
+   "cents": -7.3
+  },
+  "89": {
+   "level_db": -41.9,
+   "ap": 0.0,
+   "f0": 1394.04,
+   "note": 89,
+   "cents": -3.6
+  },
+  "90": {
+   "level_db": -41.9,
+   "ap": 0.0,
+   "f0": 1476.9,
+   "note": 90,
+   "cents": -3.6
+  },
+  "91": {
+   "level_db": -41.9,
+   "ap": 0.0,
+   "f0": 1564.7,
+   "note": 91,
+   "cents": -3.6
+  },
+  "92": {
+   "level_db": -45.7,
+   "ap": 0.01,
+   "f0": 1658.98,
+   "note": 92,
+   "cents": -2.3
+  },
+  "93": {
+   "level_db": -45.6,
+   "ap": 0.0,
+   "f0": 1757.57,
+   "note": 93,
+   "cents": -2.4
+  },
+  "94": {
+   "level_db": -45.3,
+   "ap": 0.0,
+   "f0": 1862.0,
+   "note": 94,
+   "cents": -2.5
+  },
+  "95": {
+   "level_db": -48.7,
+   "ap": 0.0,
+   "f0": 1974.5,
+   "note": 95,
+   "cents": -0.9
+  },
+  "96": {
+   "level_db": -48.8,
+   "ap": 0.0,
+   "f0": 2091.99,
+   "note": 96,
+   "cents": -0.8
+  }
+ },
+ "pitch": {
+  "kind": "pitched",
+  "confident_keys": 61,
+  "offset": 0,
+  "offset_share": 0.95,
+  "offset_outliers": {
+   "38": 19,
+   "39": 19,
+   "40": 19
+  },
+  "worst_cents": 24.7,
+  "worst_key": 41,
+  "median_abs_cents": 3.6,
+  "out_of_tune": {
+   "41": 24.7,
+   "42": 23.4,
+   "43": 18.9
+  }
+ },
+ "level": {
+  "median_db": -44.0,
+  "std_db": 5.2,
+  "min_db": -61.7,
+  "max_db": -35.1,
+  "max_jump_db": 12.5,
+  "max_jump_keys": [
+   55,
+   56
+  ],
+  "jumps_over_6db": 7
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   51,
+   81
+  ],
+  "main": {
+   "hi3k_db": -46.5,
+   "centroid_hz": 472.0,
+   "attack_db": -32.0,
+   "onset_ms": 54.5
+  },
+  "median": {
+   "hi3k_db": -43.7,
+   "centroid_hz": 472.0,
+   "attack_db": -32.7,
+   "onset_ms": 53.9
+  },
+  "octaves": {
+   "C2": {
+    "hi3k_db": -50.4,
+    "centroid_hz": 107.0,
+    "attack_db": -13.2,
+    "onset_ms": 54.0
+   },
+   "C3": {
+    "hi3k_db": -55.7,
+    "centroid_hz": 185.0,
+    "attack_db": -32.7,
+    "onset_ms": 71.4
+   },
+   "C4": {
+    "hi3k_db": -49.1,
+    "centroid_hz": 378.0,
+    "attack_db": -31.8,
+    "onset_ms": 56.6
+   },
+   "C5": {
+    "hi3k_db": -40.1,
+    "centroid_hz": 667.0,
+    "attack_db": -32.1,
+    "onset_ms": 51.5
+   },
+   "C6": {
+    "hi3k_db": -31.4,
+    "centroid_hz": 1315.0,
+    "attack_db": -38.2,
+    "onset_ms": 53.7
+   },
+   "C7": {
+    "hi3k_db": -26.6,
+    "centroid_hz": 2098.0,
+    "attack_db": -33.5,
+    "onset_ms": 47.0
+   }
+  },
+  "notes": [
+   {
+    "key": 36,
+    "hi3k_db": -40.7,
+    "centroid_hz": 97.0,
+    "attack_db": -6.2,
+    "onset_ms": 50.3
+   },
+   {
+    "key": 40,
+    "hi3k_db": -50.4,
+    "centroid_hz": 247.0,
+    "attack_db": -13.2,
+    "onset_ms": 54.0
+   },
+   {
+    "key": 44,
+    "hi3k_db": -62.9,
+    "centroid_hz": 107.0,
+    "attack_db": -34.5,
+    "onset_ms": 140.5
+   },
+   {
+    "key": 48,
+    "hi3k_db": -63.8,
+    "centroid_hz": 138.0,
+    "attack_db": -32.7,
+    "onset_ms": 71.4
+   },
+   {
+    "key": 52,
+    "hi3k_db": -55.7,
+    "centroid_hz": 185.0,
+    "attack_db": -28.4,
+    "onset_ms": 89.4
+   },
+   {
+    "key": 56,
+    "hi3k_db": -53.1,
+    "centroid_hz": 470.0,
+    "attack_db": -33.6,
+    "onset_ms": 60.2
+   },
+   {
+    "key": 60,
+    "hi3k_db": -49.1,
+    "centroid_hz": 373.0,
+    "attack_db": -31.8,
+    "onset_ms": 52.1
+   },
+   {
+    "key": 64,
+    "hi3k_db": -57.4,
+    "centroid_hz": 378.0,
+    "attack_db": -35.8,
+    "onset_ms": 85.7
+   },
+   {
+    "key": 68,
+    "hi3k_db": -44.0,
+    "centroid_hz": 475.0,
+    "attack_db": -30.5,
+    "onset_ms": 56.6
+   },
+   {
+    "key": 72,
+    "hi3k_db": -35.1,
+    "centroid_hz": 618.0,
+    "attack_db": -28.4,
+    "onset_ms": 42.4
+   },
+   {
+    "key": 76,
+    "hi3k_db": -40.1,
+    "centroid_hz": 667.0,
+    "attack_db": -34.5,
+    "onset_ms": 52.4
+   },
+   {
+    "key": 80,
+    "hi3k_db": -43.4,
+    "centroid_hz": 829.0,
+    "attack_db": -32.1,
+    "onset_ms": 51.5
+   },
+   {
+    "key": 84,
+    "hi3k_db": -40.0,
+    "centroid_hz": 1045.0,
+    "attack_db": -42.4,
+    "onset_ms": 52.5
+   },
+   {
+    "key": 88,
+    "hi3k_db": -31.4,
+    "centroid_hz": 1315.0,
+    "attack_db": -38.2,
+    "onset_ms": 64.5
+   },
+   {
+    "key": 92,
+    "hi3k_db": -30.2,
+    "centroid_hz": 1661.0,
+    "attack_db": -32.6,
+    "onset_ms": 53.7
+   },
+   {
+    "key": 96,
+    "hi3k_db": -26.6,
+    "centroid_hz": 2098.0,
+    "attack_db": -33.5,
+    "onset_ms": 47.0
+   }
+  ]
+ },
+ "sustain": {
+  "key": 66,
+  "kind": "sustained",
+  "peak_at_s": 1.3,
+  "t40_s": null,
+  "level_at_2s_db": -0.3,
+  "usable_max_note_s": null,
+  "release_s": 0.54,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 66,
+  "levels": {
+   "30": {
+    "rms_db": -58.7,
+    "hi3k_db": -58.0,
+    "centroid_hz": 376.0,
+    "attack_db": -35.5,
+    "onset_ms": 63.8
+   },
+   "70": {
+    "rms_db": -44.0,
+    "hi3k_db": -58.0,
+    "centroid_hz": 376.0,
+    "attack_db": -35.5,
+    "onset_ms": 63.8
+   },
+   "110": {
+    "rms_db": -36.1,
+    "hi3k_db": -58.0,
+    "centroid_hz": 376.0,
+    "attack_db": -35.5,
+    "onset_ms": 63.8
+   }
+  },
+  "range_db": 22.6,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "uneven": "12.5 dB jump between keys 55 and 56 (7 jumps > 6.0 dB); even it out with tools/sfz_even.py",
+  "out of tune": "3 keys > 15.0 cents, worst +24.7 at key 41"
+ },
+ "used_by": [
+  "temporal_shift/organ"
+ ],
+ "aliases": [],
+ "seconds": 1.7
+}

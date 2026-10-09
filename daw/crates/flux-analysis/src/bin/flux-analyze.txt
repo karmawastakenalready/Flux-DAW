@@ -1,0 +1,30 @@
+flux-analyze: measurements on rendered audio (WAV or FLAC). Prints JSON; --text prints readable tables.
+
+usage:
+  flux-analyze spectro OUT.png START_S END_S A.wav [B.wav ...] [--fft N] [--width W] [--height H]
+      log-frequency spectrogram, one band per file (30 Hz - 16 kHz, 80 dB, grid every second)
+  flux-analyze stems --meta output/<title>/<title>.json [--dir STEMS] [--no-fold]
+  flux-analyze stems --manifest SONG.layers.json
+  flux-analyze stems --sections FILE --dir STEMS [--loop-s S]
+      RMS per section of each stem (stems as they sound in the mix), loudest first
+  flux-analyze timefx --meta output/<title>/<title>.json [--audio FILE] [--step BARS]
+      time stop envelope (level and centroid) and the played tempo per block of bars
+  flux-analyze loudness PATH [PATH ...] [--recursive] [--target LUFS] [--tolerance LU] [--ceiling DBTP]
+                         [--max-bytes N] [-j N] [--no-loops]
+      game-wide loudness check of audio files, .layers.json manifests and directories of them. A file is
+      measured as a loop (wrap-around, seam check) when Flux's export report beside it (<name>.report.json)
+      says so, else when the pipeline's song metadata (<title>.json, same loop length) does, else when its
+      name contains "loop"; --no-loops measures every file as a one-shot. Manifests say whether their master
+      loops. Exit code 1 when a track has an error flag or a file is unreadable.
+  flux-analyze reference MIX REFERENCE [--sections FILE] [--ref-sections FILE] [--manifest X.layers.json |
+                          --stems DIR] [--max N]
+      ranked suggestions to bring MIX towards REFERENCE (at equal loudness), whole and per section
+  flux-analyze mix MIX [--manifest X.layers.json | --stems DIR] [--dry FILE] [--sections FILE] [--max N]
+      masking between stems, mud and harshness per section, reverb smearing, mono compatibility
+  flux-analyze profile FILE [--sections FILE]
+      the measured profile (loudness, dynamics, band balance, width, tone, mono)
+
+FILE for --sections / --ref-sections: a .layers.json manifest, the pipeline's <title>.json, or a JSON list
+[{"name": ..., "start_s": ..., "end_s": ...}, ...].
+
+Exit codes: 0 done, 1 loudness found an error, 2 bad arguments or unreadable input (message on stderr).

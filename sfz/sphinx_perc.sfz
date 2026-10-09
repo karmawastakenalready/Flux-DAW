@@ -1,0 +1,140 @@
+// Sphinx Strut hand percussion: a darbuka-style kit (dum, tek, ka) from CC0 samples.
+//   VCSL frame drums, VSCO 2 CE quinto / conga / tumba / tambourine, Sonic Pi tabla strokes (freesound, CC0).
+//   36 (C2)  dum: large frame drum, open hit             2 vel layers x 2 RR
+//   37 (C#2) large frame drum, muted hit                 2 vel layers x 2 RR
+//   38 (D2)  tek: quinto, open tone                      3 vel layers x 2 RR
+//   39 (D#2) ka: quinto, tap                             2 RR
+//   40 (E2)  conga, open tone                            3 vel layers x 2 RR
+//   41 (F2)  conga, tap                                  2 RR
+//   42 (F#2) tambourine hit                              2 vel layers x 2 RR
+//   43 (G2)  tumba (low conga), open tone                3 vel layers x 2 RR
+//   44 (G#2) tambourine shake                            2 RR
+//   45 (A2)  small frame drum, open hit                  2 vel layers x 2 RR
+//   46 (A#2) tambourine roll                             3 vel layers
+//   47 (B2)  small frame drum, muted hit                 2 vel layers x 2 RR
+//   49 (C#3) tabla ghe: bass stroke with a pitch bend    8 takes, random
+//   50 (D3)  tabla na: ringing rim                       3 takes, random
+//   51 (D#3) tabla te: closed                            2 takes, random
+//   52 (E3)  tabla ke: flat slap                         3 takes, random
+//   53 (F3)  tabla tun: open centre                      3 takes, random
+
+<control>
+default_path=../instruments/
+
+<global>
+ampeg_attack=0.001
+ampeg_release=0.3
+ampeg_dynamic=1
+loop_mode=one_shot
+
+// ---------- frame drums (VCSL) ----------
+<group> key=36 amp_veltrack=70 seq_length=2 seq_position=1
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v2_rr1_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v3_rr1_Sum.wav lovel=85 hivel=127
+<group> key=36 amp_veltrack=70 seq_length=2 seq_position=2
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v2_rr2_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v3_rr2_Sum.wav lovel=85 hivel=127
+
+<group> key=37 amp_veltrack=70 seq_length=2 seq_position=1
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v2_rr1_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v3_rr1_Sum.wav lovel=85 hivel=127
+<group> key=37 amp_veltrack=70 seq_length=2 seq_position=2
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v2_rr2_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumL_HitMuted_v3_rr2_Sum.wav lovel=85 hivel=127
+
+<group> key=45 amp_veltrack=70 seq_length=2 seq_position=1
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v2_rr1_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v3_rr1_Sum.wav lovel=85 hivel=127
+<group> key=45 amp_veltrack=70 seq_length=2 seq_position=2
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v2_rr2_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v3_rr2_Sum.wav lovel=85 hivel=127
+
+<group> key=47 amp_veltrack=70 seq_length=2 seq_position=1
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v2_rr1_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v3_rr1_Sum.wav lovel=85 hivel=127
+<group> key=47 amp_veltrack=70 seq_length=2 seq_position=2
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v2_rr2_Sum.wav lovel=0  hivel=84
+<region> sample=VCSL/Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v3_rr2_Sum.wav lovel=85 hivel=127
+
+// ---------- hand drums (VSCO 2 CE) ----------
+<group> key=38 amp_veltrack=60 seq_length=2 seq_position=1
+<region> sample=VSCO-2-CE/Percussion/Quinto-HitN_v1_rr1_Sum.wav lovel=0  hivel=60
+<region> sample=VSCO-2-CE/Percussion/Quinto-HitN_v2_rr1_Sum.wav lovel=61 hivel=100
+<region> sample=VSCO-2-CE/Percussion/Quinto-HitN_v3_rr1_Sum.wav lovel=101 hivel=127
+<group> key=38 amp_veltrack=60 seq_length=2 seq_position=2
+<region> sample=VSCO-2-CE/Percussion/Quinto-HitN_v1_rr2_Sum.wav lovel=0  hivel=60
+<region> sample=VSCO-2-CE/Percussion/Quinto-HitN_v2_rr2_Sum.wav lovel=61 hivel=100
+<region> sample=VSCO-2-CE/Percussion/Quinto-HitN_v3_rr2_Sum.wav lovel=101 hivel=127
+
+<group> key=39 amp_veltrack=70
+<region> sample=VSCO-2-CE/Percussion/Quinto-Tap1_v1_rr1_Sum.wav lorand=0   hirand=0.5
+<region> sample=VSCO-2-CE/Percussion/Quinto-Tap1_v1_rr2_Sum.wav lorand=0.5 hirand=1
+
+<group> key=40 amp_veltrack=60 seq_length=2 seq_position=1
+<region> sample=VSCO-2-CE/Percussion/Conga-HitN_v1_rr1_Sum.wav lovel=0  hivel=60
+<region> sample=VSCO-2-CE/Percussion/Conga-HitN_v2_rr1_Sum.wav lovel=61 hivel=100
+<region> sample=VSCO-2-CE/Percussion/Conga-HitN_v3_rr1_Sum.wav lovel=101 hivel=127
+<group> key=40 amp_veltrack=60 seq_length=2 seq_position=2
+<region> sample=VSCO-2-CE/Percussion/Conga-HitN_v1_rr2_Sum.wav lovel=0  hivel=60
+<region> sample=VSCO-2-CE/Percussion/Conga-HitN_v2_rr2_Sum.wav lovel=61 hivel=100
+<region> sample=VSCO-2-CE/Percussion/Conga-HitN_v3_rr2_Sum.wav lovel=101 hivel=127
+
+<group> key=41 amp_veltrack=70
+<region> sample=VSCO-2-CE/Percussion/Conga-Tap1_v1_rr1_Sum.wav lorand=0   hirand=0.5
+<region> sample=VSCO-2-CE/Percussion/Conga-Tap1_v1_rr2_Sum.wav lorand=0.5 hirand=1
+
+<group> key=43 amp_veltrack=60 seq_length=2 seq_position=1
+<region> sample=VSCO-2-CE/Percussion/Tumba-HitN_v1_rr1_Sum.wav lovel=0  hivel=60
+<region> sample=VSCO-2-CE/Percussion/Tumba-HitN_v2_rr1_Sum.wav lovel=61 hivel=100
+<region> sample=VSCO-2-CE/Percussion/Tumba-HitN_v3_rr1_Sum.wav lovel=101 hivel=127
+<group> key=43 amp_veltrack=60 seq_length=2 seq_position=2
+<region> sample=VSCO-2-CE/Percussion/Tumba-HitN_v1_rr2_Sum.wav lovel=0  hivel=60
+<region> sample=VSCO-2-CE/Percussion/Tumba-HitN_v2_rr2_Sum.wav lovel=61 hivel=100
+<region> sample=VSCO-2-CE/Percussion/Tumba-HitN_v3_rr2_Sum.wav lovel=101 hivel=127
+
+// ---------- tambourine (VSCO 2 CE) ----------
+<group> key=42 amp_veltrack=70 seq_length=2 seq_position=1
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Hit_v1_rr1_Sum.wav lovel=0  hivel=84
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Hit_v2_rr1_Sum.wav lovel=85 hivel=127
+<group> key=42 amp_veltrack=70 seq_length=2 seq_position=2
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Hit_v1_rr2_Sum.wav lovel=0  hivel=84
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Hit_v2_rr2_Sum.wav lovel=85 hivel=127
+
+<group> key=44 amp_veltrack=70
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Shake_v1_rr1_Sum.wav lorand=0   hirand=0.5
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Shake_v1_rr2_Sum.wav lorand=0.5 hirand=1
+
+<group> key=46 amp_veltrack=60
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Roll_v1_rr1_Sum.wav lovel=0  hivel=60
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Roll_v2_rr1_Sum.wav lovel=61 hivel=100
+<region> sample=VSCO-2-CE/Percussion/Tamb1-Roll_v3_rr1_Sum.wav lovel=101 hivel=127
+
+// ---------- tabla strokes (Sonic Pi samples, CC0) ----------
+<group> key=49 amp_veltrack=70
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe1.flac lorand=0     hirand=0.125
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe2.flac lorand=0.125 hirand=0.25
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe3.flac lorand=0.25  hirand=0.375
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe4.flac lorand=0.375 hirand=0.5
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe5.flac lorand=0.5   hirand=0.625
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe6.flac lorand=0.625 hirand=0.75
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe7.flac lorand=0.75  hirand=0.875
+<region> sample=sonic-pi-samples/etc/samples/tabla_ghe8.flac lorand=0.875 hirand=1
+
+<group> key=50 amp_veltrack=70
+<region> sample=sonic-pi-samples/etc/samples/tabla_na.flac   lorand=0     hirand=0.333
+<region> sample=sonic-pi-samples/etc/samples/tabla_na_o.flac lorand=0.333 hirand=0.667
+<region> sample=sonic-pi-samples/etc/samples/tabla_na_s.flac lorand=0.667 hirand=1
+
+<group> key=51 amp_veltrack=70
+<region> sample=sonic-pi-samples/etc/samples/tabla_te1.flac lorand=0   hirand=0.5
+<region> sample=sonic-pi-samples/etc/samples/tabla_te2.flac lorand=0.5 hirand=1
+
+<group> key=52 amp_veltrack=70
+<region> sample=sonic-pi-samples/etc/samples/tabla_ke1.flac lorand=0     hirand=0.333
+<region> sample=sonic-pi-samples/etc/samples/tabla_ke2.flac lorand=0.333 hirand=0.667
+<region> sample=sonic-pi-samples/etc/samples/tabla_ke3.flac lorand=0.667 hirand=1
+
+<group> key=53 amp_veltrack=70
+<region> sample=sonic-pi-samples/etc/samples/tabla_tun1.flac lorand=0     hirand=0.333
+<region> sample=sonic-pi-samples/etc/samples/tabla_tun2.flac lorand=0.333 hirand=0.667
+<region> sample=sonic-pi-samples/etc/samples/tabla_tun3.flac lorand=0.667 hirand=1

@@ -1,0 +1,19 @@
+{
+  "image_dir": "daw/tests/out/gui",
+  "calls": [
+    ["open", {"path": "output/makima_boss/makima_boss.json"}],
+    ["render", {}],
+    ["gui", {"action": "open"}],
+    ["transport", {"action": "seek", "bar": 21}],
+    ["gui", {"action": "focus", "panel": "mixer"}],
+    ["gui", {"action": "screenshot", "max_width": 1600}],
+    ["gui", {"action": "focus", "track": "synth_lead", "bar": 21, "panel": "track"}],
+    ["gui", {"action": "screenshot", "max_width": 1600}],
+    ["gui", {"action": "focus", "panel": "master"}],
+    ["gui", {"action": "screenshot", "max_width": 1600}],
+    ["gui", {"action": "focus", "panel": "analysis"}],
+    ["gui", {"action": "screenshot", "max_width": 1600}],
+    ["gui", {"action": "focus", "track": "synth_lead", "bar": 21, "panel": "piano_roll"}],
+    ["gui", {"action": "screenshot", "max_width": 1600}]
+  ]
+}

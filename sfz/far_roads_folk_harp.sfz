@@ -1,0 +1,578 @@
+// evened by tools/sfz_even.py from instruments/VCSL/Chordophones/Composite Chordophones/Folk Harp.sfz (per-key level matched to the median)
+<control>
+default_path=../instruments/VCSL/Chordophones/Composite Chordophones/
+
+// Generation Options: --crossfade --release 30 --volume 10
+
+<group>
+ampeg_attack=0.004000
+ampeg_release=1.8
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_C1_v2_RR1.wav
+pitch_keycenter=36
+lokey=36
+hikey=37
+tune=-7
+volume=26.73
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_C1_v3_RR1.wav
+pitch_keycenter=36
+lokey=36
+hikey=37
+tune=-41
+volume=7.99
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_D1_v2_RR1.wav
+pitch_keycenter=38
+lokey=38
+hikey=39
+tune=-4
+volume=8.95
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_D1_v3_RR1.wav
+pitch_keycenter=38
+lokey=38
+hikey=39
+tune=-11
+volume=6.47
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_E1_v2_RR1.wav
+pitch_keycenter=40
+lokey=40
+hikey=41
+tune=-8
+volume=4.26
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_E1_v3_RR1.wav
+pitch_keycenter=40
+lokey=40
+hikey=41
+tune=-19
+volume=-0.44
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#1_v2_RR1.wav
+pitch_keycenter=42
+lokey=42
+hikey=43
+tune=-2
+volume=9.63
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#1_v3_RR1.wav
+pitch_keycenter=42
+lokey=42
+hikey=43
+tune=-9
+volume=7.17
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#1_v2_RR1.wav
+pitch_keycenter=44
+lokey=44
+hikey=45
+tune=-1
+volume=16.97
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#1_v3_RR1.wav
+pitch_keycenter=44
+lokey=44
+hikey=45
+tune=-11
+volume=5.69
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#1_v2_RR1.wav
+pitch_keycenter=46
+lokey=46
+hikey=47
+volume=18.33
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#1_v3_RR1.wav
+pitch_keycenter=46
+lokey=46
+hikey=47
+tune=-5
+volume=2.86
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_C2_v2_RR1.wav
+pitch_keycenter=48
+lokey=48
+hikey=49
+volume=7.49
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_C2_v3_RR1.wav
+pitch_keycenter=48
+lokey=48
+hikey=49
+tune=-9
+volume=-5.32
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_D2_v2_RR1.wav
+pitch_keycenter=50
+lokey=50
+hikey=51
+volume=16.89
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_D2_v3_RR1.wav
+pitch_keycenter=50
+lokey=50
+hikey=51
+tune=-1
+volume=6.76
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_E2_v2_RR1.wav
+pitch_keycenter=52
+lokey=52
+hikey=53
+volume=19.72
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_E2_v3_RR1.wav
+pitch_keycenter=52
+lokey=52
+hikey=53
+tune=-8
+volume=9.45
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#2_v2_RR1.wav
+pitch_keycenter=54
+lokey=54
+hikey=55
+volume=17.78
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#2_v3_RR1.wav
+pitch_keycenter=54
+lokey=54
+hikey=55
+tune=-5
+volume=8.12
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#2_v2_RR1.wav
+pitch_keycenter=56
+lokey=56
+hikey=57
+tune=-2
+volume=15.08
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#2_v3_RR1.wav
+pitch_keycenter=56
+lokey=56
+hikey=57
+tune=-7
+volume=6.99
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#2_v2_RR1.wav
+pitch_keycenter=58
+lokey=58
+hikey=59
+volume=11.50
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#2_v3_RR1.wav
+pitch_keycenter=58
+lokey=58
+hikey=59
+tune=-6
+volume=4.80
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_C3_v2_RR1.wav
+pitch_keycenter=60
+lokey=60
+hikey=61
+tune=-2
+volume=19.01
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_C3_v3_RR1.wav
+pitch_keycenter=60
+lokey=60
+hikey=61
+tune=-4
+volume=1.28
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_D3_v2_RR1.wav
+pitch_keycenter=62
+lokey=62
+hikey=63
+tune=-1
+volume=22.14
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_D3_v3_RR1.wav
+pitch_keycenter=62
+lokey=62
+hikey=63
+tune=-3
+volume=0.05
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_E3_v2_RR1.wav
+pitch_keycenter=64
+lokey=64
+hikey=65
+tune=-3
+volume=9.87
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_E3_v3_RR1.wav
+pitch_keycenter=64
+lokey=64
+hikey=65
+tune=-6
+volume=-3.93
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#3_v2_RR1.wav
+pitch_keycenter=66
+lokey=66
+hikey=67
+tune=-7
+volume=19.95
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#3_v3_RR1.wav
+pitch_keycenter=66
+lokey=66
+hikey=67
+volume=1.11
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#3_v2_RR1.wav
+pitch_keycenter=68
+lokey=68
+hikey=69
+tune=-3
+volume=31.06
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#3_v3_RR1.wav
+pitch_keycenter=68
+lokey=68
+hikey=69
+tune=-6
+volume=8.20
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#3_v2_RR1.wav
+pitch_keycenter=70
+lokey=70
+hikey=71
+tune=-2
+volume=18.07
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#3_v3_RR1.wav
+pitch_keycenter=70
+lokey=70
+hikey=71
+tune=-4
+volume=15.15
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_C4_v2_RR1.wav
+pitch_keycenter=72
+lokey=72
+hikey=73
+volume=27.55
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_C4_v3_RR1.wav
+pitch_keycenter=72
+lokey=72
+hikey=73
+tune=3
+volume=8.99
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_D4_v2_RR1.wav
+pitch_keycenter=74
+lokey=74
+hikey=75
+tune=-3
+volume=30.43
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_D4_v3_RR1.wav
+pitch_keycenter=74
+lokey=74
+hikey=75
+tune=-5
+volume=6.80
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_E4_v2_RR1.wav
+pitch_keycenter=76
+lokey=76
+hikey=77
+tune=3
+volume=19.84
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_E4_v3_RR1.wav
+pitch_keycenter=76
+lokey=76
+hikey=77
+tune=2
+volume=4.40
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#4_v2_RR1.wav
+pitch_keycenter=78
+lokey=78
+hikey=79
+tune=-2
+volume=27.83
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#4_v3_RR1.wav
+pitch_keycenter=78
+lokey=78
+hikey=79
+tune=-4
+volume=9.37
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#4_v2_RR1.wav
+pitch_keycenter=80
+lokey=80
+hikey=81
+tune=-4
+volume=21.58
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#4_v3_RR1.wav
+pitch_keycenter=80
+lokey=80
+hikey=81
+tune=-11
+volume=16.48
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#4_v2_RR1.wav
+pitch_keycenter=82
+lokey=82
+hikey=83
+tune=1
+volume=27.12
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_A#4_v3_RR1.wav
+pitch_keycenter=82
+lokey=82
+hikey=83
+tune=-6
+volume=9.34
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_C5_v2_RR1.wav
+pitch_keycenter=84
+lokey=84
+hikey=85
+tune=-4
+volume=28.32
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_C5_v3_RR1.wav
+pitch_keycenter=84
+lokey=84
+hikey=85
+tune=-9
+volume=18.55
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_D5_v2_RR1.wav
+pitch_keycenter=86
+lokey=86
+hikey=87
+tune=-7
+volume=32.93
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_D5_v3_RR1.wav
+pitch_keycenter=86
+lokey=86
+hikey=87
+tune=-11
+volume=11.46
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_E5_v2_RR1.wav
+pitch_keycenter=88
+lokey=88
+hikey=89
+volume=22.59
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_E5_v3_RR1.wav
+pitch_keycenter=88
+lokey=88
+hikey=89
+volume=15.79
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#5_v2_RR1.wav
+pitch_keycenter=90
+lokey=90
+hikey=91
+volume=20.94
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_F#5_v3_RR1.wav
+pitch_keycenter=90
+lokey=90
+hikey=91
+tune=-4
+volume=10.27
+
+<region>
+xfout_lovel=70
+xfout_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#5_v2_RR1.wav
+pitch_keycenter=92
+lokey=92
+hikey=93
+volume=16.99
+
+<region>
+xfin_lovel=70
+xfin_hivel=100
+sample=Folk Harp/EWHarp_Normal_G#5_v3_RR1.wav
+pitch_keycenter=92
+lokey=92
+hikey=93
+tune=-5
+volume=7.13
+

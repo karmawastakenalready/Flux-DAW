@@ -1,0 +1,36 @@
+// Makima boss-fight kit, built from the Sonic Pi bundled samples (all CC0, sonic-pi-net/sonic-pi etc/samples).
+//   34 short 808 kick   35 house kick   36 techno kick (main)   37 ghost rim   38 dub snare   39 snap/clap
+//   40 zome snare   41/43/45 toms lo/mid/hi   42 closed hat (2 round-robins)   44 pedal hat   46 open hat
+//   47 snare roll   49 crash   52 metal open hat   55 splash   56/57/58 glitch hits
+<control>
+default_path=../instruments/sonic-pi-samples/etc/samples/
+
+<global>
+ampeg_attack=0.0005
+loop_mode=one_shot
+amp_veltrack=70
+
+<region> key=34 sample=bd_808.flac volume=-1
+<region> key=35 sample=bd_haus.flac volume=-3
+<region> key=36 sample=bd_tek.flac volume=-2
+<region> key=37 sample=elec_hi_snare.flac volume=-10
+<region> key=38 sample=sn_dub.flac volume=-4
+<region> key=39 sample=perc_snap.flac volume=-5
+<region> key=40 sample=sn_zome.flac volume=-4
+<region> key=41 sample=drum_tom_lo_hard.flac volume=-4
+<region> key=43 sample=drum_tom_mid_hard.flac volume=-4
+<region> key=45 sample=drum_tom_hi_hard.flac volume=-4
+<group> key=42 seq_length=2 seq_position=1 volume=-9
+<region> sample=hat_star.flac
+<group> key=42 seq_length=2 seq_position=2 volume=-9
+<region> sample=hat_zild.flac
+<group>
+<region> key=44 sample=hat_bdu.flac volume=-12
+<region> key=46 sample=hat_len.flac volume=-11
+<region> key=47 sample=drum_roll.flac volume=-8
+<region> key=49 sample=drum_cymbal_hard.flac volume=-7
+<region> key=52 sample=hat_metal.flac volume=-12
+<region> key=55 sample=drum_splash_hard.flac volume=-9
+<region> key=56 sample=glitch_perc1.flac volume=-9
+<region> key=57 sample=glitch_perc3.flac volume=-6
+<region> key=58 sample=glitch_perc5.flac volume=-8

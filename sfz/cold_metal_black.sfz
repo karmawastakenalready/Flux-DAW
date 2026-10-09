@@ -1,0 +1,28 @@
+// Cold Metal guitar: Karoryfer "black" electric (Black & Green Guitars, CC0), sustained samples retuned per sample
+// (tools/sfz_retune.py) plus the string-release noises. Same envelope controls as 07-black_twang:
+//   CC70 Muting: 0 = ringing, 127 = palm-muted (hold 0, decay ~0.3 s, no sustain)   CC27 release-noise level
+<control>
+default_path=../instruments/karoryfer.black-and-green-guitars/Programs/
+label_cc27=Release vol
+label_cc70=Muting
+set_cc27=31
+set_cc101=127
+set_cc114=40
+
+<global>
+#include "../instruments/karoryfer.black-and-green-guitars/Programs/modules/controls/vibrato.sfz"
+ampeg_release=0.25
+ampeg_attack=0.01
+bend_smooth=40
+
+<master>
+#include "../instruments/karoryfer.black-and-green-guitars/Programs/modules/controls/env.sfz"
+#include "cold_metal/black_ord_tuned.sfz"
+
+<master>
+trigger=release
+locc27=1
+ampeg_attack=0.03
+amplitude_cc27=100
+lfo01_pitch_oncc112=0
+#include "cold_metal/black_rel_tuned.sfz"

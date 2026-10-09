@@ -1,0 +1,15 @@
+[package]
+name = "flux-score"
+description = "Composing toolkit: melody notation, chords, voice leading, bass lines and phrasing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+flux-core = { version = "0.1.0", path = "../flux-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"

@@ -1,0 +1,229 @@
+# Instrument set "temporal_shift" (draft generated from instruments.py by sets_to_toml.py).
+# Temporal Shift: orchestral instruments; the string and brass sections switch articulations with keyswitches 120 and up (first articulation = default).
+#
+# Paths are relative to the project root (the folder that holds instruments/), like paths in Flux projects.
+# `flux sfz build temporal_shift` writes the wrappers to build/sfz/temporal_shift/ (see [set] output); wrap = "none"
+# instruments are played from their source directly. Ranges and test notes are MIDI keys (note names such as
+# "C4" also work). gm = [bank, program] is the General MIDI fallback.
+
+[set]
+description = "Temporal Shift: orchestral instruments; the string and brass sections switch articulations with keyswitches 120 and up (first articulation = default)."
+
+[instruments.violin_solo]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/SViolinVib.sfz", crossfade = true },
+    { name = "spic", source = "instruments/VSCO-2-CE/SViolinSpic.sfz" },
+    { name = "pizz", source = "instruments/VSCO-2-CE/SViolinPizz.sfz" },
+]
+range = [55, 93]
+test_note = 76
+max_note_s = 10.0
+gm = [0, 40]
+
+[instruments.violins]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/ViolinEnsSusVib.sfz", crossfade = true },
+    { name = "trem", source = "instruments/VSCO-2-CE/ViolinEnsTrem.sfz", crossfade = true },
+    { name = "spic", source = "instruments/VSCO-2-CE/ViolinEnsSpic.sfz" },
+    { name = "pizz", source = "instruments/VSCO-2-CE/ViolinEnsPizz.sfz" },
+]
+range = [55, 86]
+test_note = 74
+max_note_s = 7.0
+gm = [0, 48]
+
+[instruments.violas]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/ViolaEnsSusVib.sfz", crossfade = true },
+    { name = "trem", source = "instruments/VSCO-2-CE/ViolaEnsTrem.sfz", crossfade = true },
+    { name = "spic", source = "instruments/VSCO-2-CE/ViolaEnsSpic.sfz" },
+    { name = "pizz", source = "instruments/VSCO-2-CE/ViolaEnsPizz.sfz" },
+]
+range = [48, 81]
+test_note = 62
+max_note_s = 7.0
+gm = [0, 48]
+
+[instruments.cellos]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/CelloEnsSusVib.sfz", crossfade = true },
+    { name = "spic", source = "instruments/VSCO-2-CE/CelloEnsSpic.sfz" },
+    { name = "pizz", source = "instruments/VSCO-2-CE/CelloEnsPizz.sfz" },
+]
+range = [36, 72]
+test_note = 50
+max_note_s = 6.0
+gm = [0, 48]
+
+[instruments.basses]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/ContrabassSusNV.sfz", crossfade = true },
+    { name = "spic", source = "instruments/VSCO-2-CE/ContrabassSpic.sfz" },
+    { name = "pizz", source = "instruments/VSCO-2-CE/ContrabassPizz.sfz" },
+]
+range = [28, 55]
+test_note = 40
+max_note_s = 6.0
+gm = [0, 43]
+
+[instruments.trumpet]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/TrumpetSus.sfz" },
+    { name = "stac", source = "instruments/VSCO-2-CE/TrumpetStac.sfz" },
+]
+range = [54, 82]
+test_note = 71
+max_note_s = 5.0
+gm = [0, 56]
+
+[instruments.trombone]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/TromboneSus.sfz" },
+    { name = "stac", source = "instruments/VSCO-2-CE/TromboneStac.sfz" },
+]
+range = [34, 65]
+test_note = 47
+max_note_s = 4.0
+gm = [0, 57]
+
+[instruments.horn]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/FHornSus.sfz" },
+    { name = "stac", source = "instruments/VSCO-2-CE/FHornStac.sfz" },
+]
+range = [38, 77]
+test_note = 59
+max_note_s = 3.8
+gm = [0, 60]
+
+[instruments.flute]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "sus", source = "instruments/VSCO-2-CE/FluteSusVib.sfz" },
+    { name = "stac", source = "instruments/VSCO-2-CE/FluteStac.sfz" },
+]
+range = [62, 93]
+test_note = 78
+max_note_s = 4.4
+gm = [0, 73]
+
+[instruments.organ]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "quiet", source = "instruments/VSCO-2-CE/OrganQuiet.sfz" },
+    { name = "loud", source = "instruments/VSCO-2-CE/OrganLoud.sfz" },
+]
+range = [43, 86]
+test_note = 59
+max_note_s = 11.0
+gm = [0, 19]
+
+[instruments.organ_pedal]
+library = "VSCO-2-CE"
+wrap = "keyswitch"
+articulations = [
+    { name = "quiet", source = "instruments/VSCO-2-CE/OrganQuietPedal.sfz" },
+    { name = "loud", source = "instruments/VSCO-2-CE/OrganLoudPedal.sfz" },
+]
+range = [36, 55]
+test_note = 47
+max_note_s = 11.0
+gm = [0, 19]
+
+[instruments.piano]
+library = "SalamanderGrandPiano"
+source = "instruments/SalamanderGrandPiano/Salamander Grand Piano V3.sfz"
+wrap = "none"
+range = [21, 108]
+test_note = 59
+gm = [0, 0]
+
+[instruments.harp]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/Harp.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "3.5" }
+range = [28, 101]
+test_note = 59
+gm = [0, 46]
+
+[instruments.glock]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/Glockenspiel.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "4" }
+range = [67, 96]
+test_note = 78
+gm = [0, 9]
+
+[instruments.bells]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/TubularBells.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "7" }
+range = [60, 79]
+test_note = 71
+gm = [0, 14]
+
+[instruments.timpani]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/Timpani.sfz"
+wrap = "expr"
+extra_global = { ampeg_release = "3" }
+range = [38, 50]
+test_note = 40
+gm = [0, 47]
+
+[instruments.percussion]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/GM-StylePerc.sfz"
+wrap = "expr"
+range = [32, 104]
+test_note = 38
+test_notes = [36, 38, 49, 51, 101]
+gm = [128, 48]
+
+[instruments.clock]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/GM-StylePerc.sfz"
+wrap = "expr"
+range = [69, 77]
+test_note = 76
+test_notes = [69, 75, 76, 77]
+gm = [128, 48]
+
+[instruments.rev_cymbal]
+library = "VSCO-2-CE"
+source = "instruments/VSCO-2-CE/GM-StylePerc.sfz"
+wrap = "expr"
+range = [49, 51]
+test_note = 51
+gm = [128, 48]
+reverse = true
+
+[instruments.rev_piano]
+library = "SalamanderGrandPiano"
+source = "instruments/SalamanderGrandPiano/Salamander Grand Piano V3.sfz"
+wrap = "none"
+range = [21, 108]
+test_note = 59
+gm = [0, 0]
+reverse = true

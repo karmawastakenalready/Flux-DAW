@@ -1,0 +1,16 @@
+// Tuned 808-style sub bass from Sonic Pi's bd_boom (CC0). Measured fundamental 29.9 Hz = MIDI 22.46,
+// so pitch_keycenter=22 with tune=-46 cents plays in tune. Monophonic: each new note cuts the last.
+<control>
+default_path=../instruments/sonic-pi-samples/etc/samples/
+
+<global>
+loop_mode=no_loop
+ampeg_attack=0.002
+ampeg_release=0.09
+amp_veltrack=40
+note_polyphony=1
+bend_up=1200
+bend_down=-1200
+polyphony=1
+
+<region> sample=bd_boom.flac lokey=24 hikey=47 pitch_keycenter=22 tune=-46

@@ -1,0 +1,8 @@
+# versions tested on Windows 11 / Python 3.12
+pedalboard==0.9.26
+pretty_midi==0.2.11.post0
+mido==1.3.3
+numpy==2.5.3
+scipy==1.18.1
+soundfile==0.14.0
+pyloudnorm==0.2.0

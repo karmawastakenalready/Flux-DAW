@@ -1,0 +1,35 @@
+[package]
+name = "flux"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+flux-analysis = { version = "0.1.0", path = "../flux-analysis" }
+flux-assets = { version = "0.1.0", path = "../flux-assets" }
+flux-core = { version = "0.1.0", path = "../flux-core" }
+flux-engine = { version = "0.1.0", path = "../flux-engine" }
+flux-score = { version = "0.1.0", path = "../flux-score" }
+flux-sfz = { version = "0.1.0", path = "../flux-sfz" }
+flux-vst3 = { version = "0.1.0", path = "../flux-vst3" }
+cpal = "0.18.2"
+eframe = "0.36.2"
+libc = "0.2.190"
+parking_lot = "0.12.5"
+png = "0.18.1"
+raw-window-handle = "0.6.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# headless GUI snapshot tests (src/gui/tests.rs): the GUI drawn by wgpu's software adapter, no window
+egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot"] }
+
+[build-dependencies]
+# the Windows icon and version information (build.rs)
+embed-resource = "3"

@@ -1,0 +1,52 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/flux-core",
+    "crates/flux-engine",
+    "crates/flux",
+    "crates/flux-vst3",
+    "crates/flux-nam",
+    "crates/flux-assets",
+    "crates/flux-analysis",
+    "crates/flux-score",
+    "crates/flux-sfz",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.clippy]
+# DSP loops index several buffers in lock-step; iterator zips read worse there
+needless_range_loop = "allow"
+too_many_arguments = "allow"
+large_enum_variant = "allow"
+
+# DSP is slow unoptimised: keep dependencies optimised even in dev builds
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+# Our own DSP crates run per-sample loops; at opt-level 1 they are too slow to judge realtime behaviour in dev builds
+[profile.dev.package.flux-engine]
+opt-level = 3
+
+[profile.dev.package.flux-nam]
+opt-level = 3
+
+[profile.dev.package.flux-analysis]
+opt-level = 3
+
+[profile.dev.package.flux-vst3]
+opt-level = 3
+
+# parses whole sample libraries (instrument listings) and measures pitch and level of every sample
+[profile.dev.package.flux-sfz]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+debug = false

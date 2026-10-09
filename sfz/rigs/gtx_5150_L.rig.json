@@ -1,0 +1,35 @@
+{
+  "about": "METAL-GTX (Unreal Instruments, license free) DI into jp_is_out_of_tune's Peavey 5150 + OD808 + Mesa OS 4x12 full-rig NAM capture (TONE3000, T3K). Keyswitches: palm mute down 20 / up 21 / alt 22, sustain down 17 / up 18 / alt 19.",
+  "source": {
+    "sfz": "instruments/unreal.metal-gtx/UI_METAL-GTX/Programs/01-METAL-GTX Full.sfz",
+    "init_cc": {
+      "22": 51,
+      "32": 0,
+      "27": 8
+    },
+    "keyswitches": [
+      [
+        0,
+        29
+      ],
+      [
+        89,
+        127
+      ]
+    ],
+    "tune_cents": -5,
+    "default_ks": 17
+  },
+  "chain": [
+    {
+      "type": "highpass",
+      "hz": 45
+    },
+    {
+      "type": "nam",
+      "model": "instruments/nam/jp-5150-mesa-fullrig/0ff5x0ot7r6c_a2.nam",
+      "input_db": 0,
+      "output_db": -6
+    }
+  ]
+}

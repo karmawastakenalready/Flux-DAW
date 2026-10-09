@@ -1,0 +1,120 @@
+{
+ "input": "input.f32",
+ "samples": 3000,
+ "cases": [
+  {
+   "name": "wavenet_real_like",
+   "peak": 39.543861389160156,
+   "rms": 11.431893689616988,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_tanh_basic",
+   "peak": 0.8075741529464722,
+   "rms": 0.5951929851540081,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_gated",
+   "peak": 0.06884034723043442,
+   "rms": 0.02164771134140318,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_blended_bottleneck",
+   "peak": 0.707341194152832,
+   "rms": 0.11702512914506656,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_mixed_gating",
+   "peak": 0.9149528741836548,
+   "rms": 0.35402401759918867,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_groups_head1x1",
+   "peak": 1.1493141651153564,
+   "rms": 0.6927091352606887,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_grouped_head1x1",
+   "peak": 0.15595021843910217,
+   "rms": 0.024835712793059763,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_no_layer1x1",
+   "peak": 1.40634286403656,
+   "rms": 1.2516864601424633,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_film_all",
+   "peak": 0.22043590247631073,
+   "rms": 0.12770710401878063,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_film_gated",
+   "peak": 0.022018199786543846,
+   "rms": 0.01690123981484364,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_top_head",
+   "peak": 2.1720919609069824,
+   "rms": 1.4427269134422616,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "wavenet_three_arrays",
+   "peak": 0.03313189372420311,
+   "rms": 0.01647473169650512,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "lstm_1x6",
+   "peak": 0.32011276483535767,
+   "rms": 0.08504477710929198,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "lstm_2x5",
+   "peak": 0.06148269772529602,
+   "rms": 0.008640617925786298,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "linear_bias",
+   "peak": 1.699142575263977,
+   "rms": 0.243744344477147,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "linear_nobias",
+   "peak": 0.8527237772941589,
+   "rms": 0.1404497700808923,
+   "note": "torch, pad_start=True"
+  },
+  {
+   "name": "a1_gated",
+   "peak": 0.06884034723043442,
+   "rms": 0.02164771134140318,
+   "note": "A1 form of wavenet_gated (same reference)"
+  },
+  {
+   "name": "wavenet_head_scale_tail",
+   "peak": 1.211361289024353,
+   "rms": 0.8927895097553105,
+   "note": "weights tail overrides config head_scale"
+  },
+  {
+   "name": "container",
+   "peak": 4.340586185455322,
+   "rms": 1.7160680716295078,
+   "note": "largest submodel (index 1, 44.1 kHz)"
+  }
+ ]
+}

@@ -1,0 +1,32 @@
+[package]
+name = "flux-assets"
+description = "Instrument downloads (official sources, checksums), FLAC encoding and other file tooling."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+claxon = "0.4.3"
+flacenc = "0.5.1"
+flate2 = "1.1.10"
+hex = "0.4.3"
+hound = "3.5.1"
+lzma-rust2 = "0.21.0"
+md-5 = "0.10.6"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha1 = "0.11.0"
+sha2 = "0.11.0"
+tar = "0.4.46"
+tempfile = "3.27.0"
+toml = "1.1.7"
+ureq = { version = "3.4.2", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2", "deflate64"] }
+
+[dev-dependencies]
+flux-engine = { path = "../flux-engine" }

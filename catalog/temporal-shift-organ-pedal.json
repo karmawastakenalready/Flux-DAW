@@ -1,0 +1,474 @@
+{
+ "name": "temporal_shift/organ_pedal",
+ "slug": "temporal-shift-organ-pedal",
+ "sfz": "build/sfz/temporal_shift/organ_pedal.sfz",
+ "about": "generated multi-articulation instrument 'organ_pedal' - keyswitches: 120=quiet, 121=loud",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   }
+  ],
+  "all_in_licenses_md": true
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   36,
+   66
+  ],
+  "main_names": "C2-F#4",
+  "ranges": [
+   [
+    36,
+    66
+   ]
+  ],
+  "count": 31,
+  "span": [
+   36,
+   66
+  ],
+  "gaps": [],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 22,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": {
+  "keys": {
+   "120": "",
+   "121": ""
+  },
+  "default": 120
+ },
+ "per_key": {
+  "36": {
+   "level_db": -46.9,
+   "ap": 0.05,
+   "f0": 65.59,
+   "note": 36,
+   "cents": 4.8
+  },
+  "37": {
+   "level_db": -46.2,
+   "ap": 0.04,
+   "f0": 69.47,
+   "note": 37,
+   "cents": 4.2
+  },
+  "38": {
+   "level_db": -43.6,
+   "ap": 0.08,
+   "f0": 73.98,
+   "note": 38,
+   "cents": 13.3
+  },
+  "39": {
+   "level_db": -43.3,
+   "ap": 0.06,
+   "f0": 78.31,
+   "note": 39,
+   "cents": 11.8
+  },
+  "40": {
+   "level_db": -43.1,
+   "ap": 0.04,
+   "f0": 82.84,
+   "note": 40,
+   "cents": 9.0
+  },
+  "41": {
+   "level_db": -37.1,
+   "ap": 0.0,
+   "f0": 87.12,
+   "note": 41,
+   "cents": -3.8
+  },
+  "42": {
+   "level_db": -36.8,
+   "ap": 0.0,
+   "f0": 92.27,
+   "note": 42,
+   "cents": -4.3
+  },
+  "43": {
+   "level_db": -36.6,
+   "ap": 0.0,
+   "f0": 97.77,
+   "note": 43,
+   "cents": -4.1
+  },
+  "44": {
+   "level_db": -48.3,
+   "ap": 0.03,
+   "f0": 104.0,
+   "note": 44,
+   "cents": 3.0
+  },
+  "45": {
+   "level_db": -47.9,
+   "ap": 0.03,
+   "f0": 110.27,
+   "note": 45,
+   "cents": 4.3
+  },
+  "46": {
+   "level_db": -47.5,
+   "ap": 0.02,
+   "f0": 116.62,
+   "note": 46,
+   "cents": 1.2
+  },
+  "47": {
+   "level_db": -42.4,
+   "ap": 0.02,
+   "f0": 123.02,
+   "note": 47,
+   "cents": -6.3
+  },
+  "48": {
+   "level_db": -42.1,
+   "ap": 0.02,
+   "f0": 130.3,
+   "note": 48,
+   "cents": -6.8
+  },
+  "49": {
+   "level_db": -41.6,
+   "ap": 0.01,
+   "f0": 138.02,
+   "note": 49,
+   "cents": -7.1
+  },
+  "50": {
+   "level_db": -48.2,
+   "ap": 0.02,
+   "f0": 146.35,
+   "note": 50,
+   "cents": -5.7
+  },
+  "51": {
+   "level_db": -47.8,
+   "ap": 0.02,
+   "f0": 155.25,
+   "note": 51,
+   "cents": -3.5
+  },
+  "52": {
+   "level_db": -47.3,
+   "ap": 0.01,
+   "f0": 164.39,
+   "note": 52,
+   "cents": -4.4
+  },
+  "53": {
+   "level_db": -46.7,
+   "ap": 0.01,
+   "f0": 174.77,
+   "note": 53,
+   "cents": 1.6
+  },
+  "54": {
+   "level_db": -46.5,
+   "ap": 0.01,
+   "f0": 184.97,
+   "note": 54,
+   "cents": -0.3
+  },
+  "55": {
+   "level_db": -46.2,
+   "ap": 0.01,
+   "f0": 196.09,
+   "note": 55,
+   "cents": 0.8
+  },
+  "56": {
+   "level_db": -44.8,
+   "ap": 0.0,
+   "f0": 207.46,
+   "note": 56,
+   "cents": -1.6
+  },
+  "57": {
+   "level_db": -44.5,
+   "ap": 0.01,
+   "f0": 219.79,
+   "note": 57,
+   "cents": -1.6
+  },
+  "58": {
+   "level_db": -44.2,
+   "ap": 0.0,
+   "f0": 232.91,
+   "note": 58,
+   "cents": -1.3
+  },
+  "59": {
+   "level_db": -37.7,
+   "ap": 0.0,
+   "f0": 246.59,
+   "note": 59,
+   "cents": -2.5
+  },
+  "60": {
+   "level_db": -37.7,
+   "ap": 0.0,
+   "f0": 261.31,
+   "note": 60,
+   "cents": -2.1
+  },
+  "61": {
+   "level_db": -37.8,
+   "ap": 0.0,
+   "f0": 276.84,
+   "note": 61,
+   "cents": -2.1
+  },
+  "62": {
+   "level_db": -39.8,
+   "ap": 0.0,
+   "f0": 294.45,
+   "note": 62,
+   "cents": 4.6
+  },
+  "63": {
+   "level_db": -40.0,
+   "ap": 0.0,
+   "f0": 311.91,
+   "note": 63,
+   "cents": 4.4
+  },
+  "64": {
+   "level_db": -40.1,
+   "ap": 0.0,
+   "f0": 330.49,
+   "note": 64,
+   "cents": 4.5
+  },
+  "65": {
+   "level_db": -49.2,
+   "ap": 0.01,
+   "f0": 348.34,
+   "note": 65,
+   "cents": -4.4
+  },
+  "66": {
+   "level_db": -49.2,
+   "ap": 0.01,
+   "f0": 369.12,
+   "note": 66,
+   "cents": -4.1
+  }
+ },
+ "pitch": {
+  "kind": "pitched",
+  "confident_keys": 31,
+  "offset": 0,
+  "offset_share": 1.0,
+  "offset_outliers": {},
+  "worst_cents": 13.3,
+  "worst_key": 38,
+  "median_abs_cents": 4.2,
+  "out_of_tune": {}
+ },
+ "level": {
+  "median_db": -44.2,
+  "std_db": 4.0,
+  "min_db": -49.2,
+  "max_db": -36.6,
+  "max_jump_db": 11.7,
+  "max_jump_keys": [
+   43,
+   44
+  ],
+  "jumps_over_6db": 4
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   44,
+   58
+  ],
+  "main": {
+   "hi3k_db": -56.9,
+   "centroid_hz": 228.0,
+   "attack_db": -32.6,
+   "onset_ms": 78.1
+  },
+  "median": {
+   "hi3k_db": -56.1,
+   "centroid_hz": 290.0,
+   "attack_db": -33.4,
+   "onset_ms": 74.8
+  },
+  "octaves": {
+   "C2": {
+    "hi3k_db": -60.5,
+    "centroid_hz": 195.0,
+    "attack_db": -32.5,
+    "onset_ms": 67.9
+   },
+   "C3": {
+    "hi3k_db": -56.1,
+    "centroid_hz": 290.0,
+    "attack_db": -32.8,
+    "onset_ms": 87.1
+   },
+   "C4": {
+    "hi3k_db": -46.6,
+    "centroid_hz": 595.0,
+    "attack_db": -41.1,
+    "onset_ms": 74.8
+   }
+  },
+  "notes": [
+   {
+    "key": 36,
+    "hi3k_db": -60.5,
+    "centroid_hz": 195.0,
+    "attack_db": -33.4,
+    "onset_ms": 117.9
+   },
+   {
+    "key": 40,
+    "hi3k_db": -60.7,
+    "centroid_hz": 235.0,
+    "attack_db": -23.0,
+    "onset_ms": 67.9
+   },
+   {
+    "key": 44,
+    "hi3k_db": -57.6,
+    "centroid_hz": 165.0,
+    "attack_db": -32.5,
+    "onset_ms": 65.7
+   },
+   {
+    "key": 48,
+    "hi3k_db": -63.0,
+    "centroid_hz": 149.0,
+    "attack_db": -29.4,
+    "onset_ms": 98.9
+   },
+   {
+    "key": 52,
+    "hi3k_db": -56.1,
+    "centroid_hz": 290.0,
+    "attack_db": -32.8,
+    "onset_ms": 87.1
+   },
+   {
+    "key": 56,
+    "hi3k_db": -53.6,
+    "centroid_hz": 334.0,
+    "attack_db": -36.4,
+    "onset_ms": 69.1
+   },
+   {
+    "key": 60,
+    "hi3k_db": -54.7,
+    "centroid_hz": 475.0,
+    "attack_db": -48.6,
+    "onset_ms": 74.8
+   },
+   {
+    "key": 64,
+    "hi3k_db": -46.6,
+    "centroid_hz": 595.0,
+    "attack_db": -41.1,
+    "onset_ms": 91.4
+   },
+   {
+    "key": 66,
+    "hi3k_db": -35.3,
+    "centroid_hz": 684.0,
+    "attack_db": -38.0,
+    "onset_ms": 71.4
+   }
+  ]
+ },
+ "sustain": {
+  "key": 51,
+  "kind": "sustained",
+  "peak_at_s": 1.0,
+  "t40_s": null,
+  "level_at_2s_db": -3.5,
+  "usable_max_note_s": null,
+  "release_s": 0.5,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 51,
+  "levels": {
+   "30": {
+    "rms_db": -66.9,
+    "hi3k_db": -56.0,
+    "centroid_hz": 275.0,
+    "attack_db": -32.9,
+    "onset_ms": 92.3
+   },
+   "70": {
+    "rms_db": -52.2,
+    "hi3k_db": -56.0,
+    "centroid_hz": 275.0,
+    "attack_db": -32.9,
+    "onset_ms": 92.3
+   },
+   "110": {
+    "rms_db": -44.3,
+    "hi3k_db": -56.0,
+    "centroid_hz": 275.0,
+    "attack_db": -32.9,
+    "onset_ms": 92.3
+   }
+  },
+  "range_db": 22.6,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "uneven": "11.7 dB jump between keys 43 and 44 (4 jumps > 6.0 dB); even it out with tools/sfz_even.py"
+ },
+ "used_by": [
+  "temporal_shift/organ_pedal"
+ ],
+ "aliases": [],
+ "seconds": 1.0
+}

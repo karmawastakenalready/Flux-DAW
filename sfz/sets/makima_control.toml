@@ -1,0 +1,20 @@
+# Instrument set "makima_control" (draft generated from instruments.py by sets_to_toml.py).
+# The wrappers daw/projects/makima_control.flux.json loads from build/sfz/ directly: the same as capital_city's.
+#
+# Paths are relative to the project root (the folder that holds instruments/), like paths in Flux projects.
+# `flux sfz build makima_control` writes the wrappers to build/sfz/ (see [set] output); wrap = "none"
+# instruments are played from their source directly. Ranges and test notes are MIDI keys (note names such as
+# "C4" also work). gm = [bank, program] is the General MIDI fallback.
+
+[set]
+description = "Makima control: build/sfz/{violins,cellos,timpani}.sfz, as in capital_city"
+output = "build/sfz"
+
+[instruments.violins]
+from = "capital_city/violins"
+
+[instruments.cellos]
+from = "capital_city/cellos"
+
+[instruments.timpani]
+from = "capital_city/timpani"

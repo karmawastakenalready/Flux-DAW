@@ -1,0 +1,1171 @@
+# Third-party assets of the music project: where each one comes from, how to fetch and check it, and its license.
+# Read by `flux assets status|fetch|verify|lock|repair|licenses` (crate flux-assets). Proposed location: the repo
+# root (`assets.toml`); the lock (`assets.lock` + `assets.lock.d/`) is written next to it.
+#
+# Facts recorded here were taken from the installs on disk (git HEADs, sparse patterns, archive caches hashed with
+# SHA-256 and compared with upstream MD5 lists, SFZ-branch files matched byte-for-byte against GitHub tree listings)
+# on 2026-10-08. Licenses were read from the files on disk; see build/flux-assets_check/ for the evidence.
+
+schema = 1
+
+[policy]
+# Official sources only. Every redirect hop is checked against this list, and every download is pinned by SHA-256
+# (git: by commit id), so a host on this list cannot substitute other content.
+allowed_hosts = [
+    "github.com",
+    "codeload.github.com",
+    "*.githubusercontent.com",       # raw files and release assets (objects / release-assets)
+    "drive.google.com",              # METAL-GTX: the author's site links its downloads on Google Drive
+    "drive.usercontent.google.com",
+    "unreal-instruments.wixsite.com", # METAL-GTX author's site (terms page)
+    "www.tone3000.com",              # NAM capture pages (license terms)
+    "support.spectrasonics.net",     # Omnisphere license terms
+]
+approval_threshold = "2G"
+download_dir = "tools/_dl"
+usage_roots = [
+    "daw/projects/*.flux.json",     # Flux projects (followed into sfz/ wrappers and sfz/rigs/*.rig.json)
+    "pieces/*.py",                   # pipeline songs (string heuristic)
+    "instruments.py",                # instrument sets of the pipeline songs (string heuristic)
+]
+
+[credits]
+intro = """
+Every sound library, amp capture, plugin, tool and font the music project uses: where it comes from and under which
+license. Sound content that can end up in the game must allow commercial use (CC0, CC BY, MIT or similar);
+non-commercial and share-alike material is not used. Freeware and purchased licenses are used only with the owner's
+recorded approval."""
+
+[[license]]
+id = "LicenseRef-GeneralUser-GS-2.0"
+name = "GeneralUser GS License v2.0"
+family = "permissive"
+url = "https://github.com/mrbumpy409/GeneralUser-GS/blob/main/documentation/LICENSE.txt"
+match = ["GeneralUser GS", "License v2.0"]
+summary = "Free use for private or commercial music; may be modified and repackaged. The author cannot vouch for the origin of every sample."
+
+[[license]]
+id = "LicenseRef-UnrealInstruments-Free"
+name = "Unreal Instruments free-use terms"
+family = "freeware"
+url = "https://unreal-instruments.wixsite.com/unreal-instruments/about"
+summary = "All libraries are free to use; works made with them may be used commercially; no credit needed; the data may not be modified or redistributed without permission (About page, in Japanese)."
+
+[[license]]
+id = "LicenseRef-TONE3000-T3K"
+name = "TONE3000 T3K license"
+family = "freeware"
+url = "https://www.tone3000.com/"
+match = ["T3K"]
+summary = "Use the capture in software and publish the resulting audio without royalties or restrictions; do not upload, republish or distribute the capture file without the author's permission."
+
+[[license]]
+id = "LicenseRef-Spectrasonics-EULA"
+name = "Spectrasonics Omnisphere 2 license (purchased)"
+family = "proprietary"
+url = "https://support.spectrasonics.net/manual/Omnisphere/legal/all.htm"
+summary = "Sounds may be used inside original musical compositions, including game music. Not allowed: samples triggered directly by the game, sound effects, or multitrack releases that expose an Omnisphere part on its own."
+
+# ---------------------------------------------------------------------------------------------------------------
+# Sample libraries (scope = audio: their sound ends up in the game's music)
+# ---------------------------------------------------------------------------------------------------------------
+
+[[asset]]
+id = "salamander-grand-piano"
+name = "Salamander Grand Piano V3"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/SalamanderGrandPiano"
+version = "V3, SFZ edition (git 3382bf9, 2022-01-03)"
+authors = ["Alexander Holm", "SFZ mapping by kinwie"]
+homepage = "https://github.com/sfzinstruments/SalamanderGrandPiano"
+description = "Grand piano"
+license = { id = "CC-BY-3.0", file = "LICENSE" }
+credit = { role = "Piano samples", text = "Salamander Grand Piano V3 by Alexander Holm, licensed under CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)" }
+notes = ["Original recording: https://archive.org/details/SalamanderGrandPianoV3"]
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/SalamanderGrandPiano"
+rev = "3382bf9496bba2486f5ab0de55a264d1dfc38404"
+branch = "master"
+download_size = "750M"
+
+[[asset]]
+id = "vsco-2-ce"
+name = "VSCO 2 Community Edition"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/VSCO-2-CE"
+version = "samples git 4403009 (2020-08-04), SFZ maps git 6dd651d"
+authors = ["Versilian Studios (Sam Gossner)", "Simon Dalzell"]
+homepage = "https://github.com/sgossner/VSCO-2-CE"
+description = "Orchestral strings, winds, brass, organ and percussion (subset)"
+license = { id = "CC0-1.0", file = "LICENSE", note = "CC0, so no credit is required; the authors' readme asks for a credit and a link, and asks that the raw samples are not resold." }
+credit = { role = "Orchestral samples", text = "VSCO 2 Community Edition by Versilian Studios and Simon Dalzell, CC0 (https://vis.versilstudios.net/vsco-community.html)" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sgossner/VSCO-2-CE"
+rev = "440300901dfe9275fd84e0b7763af1f8443ae62e"
+branch = "master"
+download_size = "1.1G"
+sparse = [
+    "/LICENSE",
+    "/README.md",
+    "/Readme.txt",
+    "/Brass/F Horn/stac/",
+    "/Brass/F Horn/sus/",
+    "/Brass/Tenor Trombone/",
+    "/Brass/Trumpet/",
+    "/Keys/Organ/",
+    "/Percussion/",
+    "/Percussion/BDrumNewhit_*",
+    "/Percussion/Snare*-taps_*",
+    "/Percussion/TB_hit_*",
+    "/Percussion/Tamb*-Hit_*",
+    "/Percussion/Timpani/",
+    "/Percussion/gongHit_*",
+    "/Strings/Cello Section/pizzT/",
+    "/Strings/Cello Section/spic/",
+    "/Strings/Cello Section/susvib/",
+    "/Strings/Harp/",
+    "/Strings/Solo Contrabass/Pizz/",
+    "/Strings/Solo Contrabass/Spic/",
+    "/Strings/Solo Contrabass/SusNV/",
+    "/Strings/Solo Violin/",
+    "/Strings/Viola Section/pizz/",
+    "/Strings/Viola Section/spic/",
+    "/Strings/Viola Section/susvib/",
+    "/Strings/Viola Section/trem/",
+    "/Strings/Violin Section/Pizz/",
+    "/Strings/Violin Section/Spic/",
+    "/Strings/Violin Section/Trem/",
+    "/Strings/Violin Section/susVib/",
+    "/VSCO 1 Percussion/drums/other/ethnic/giant/hand/",
+    "/VSCO 1 Percussion/varWood/",
+    "/Woodwinds/Clarinet/susLong/",
+    "/Woodwinds/Flute/expvib/",
+    "/Woodwinds/Flute/stac/",
+    "/Woodwinds/Flute/susNV/",
+    "/Woodwinds/Flute/susvib/",
+    "/Woodwinds/Oboe/Sus/",
+    "/Woodwinds/Oboe/Vib/",
+]
+
+# The SFZ maps live on the repository's SFZ branch; these files come from that branch's commit.
+[[asset.source]]
+type = "files"
+base_url = "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/6dd651d55dde97fd4028699be9d4481f26917891"
+[[asset.source.file]]
+path = "CelloEnsPizz.sfz"
+sha256 = "84e586f7518b99c11da5efddb321a9ea4b9edc4149b96f3e9621f4c7e9fc3cca"
+size = 5637
+[[asset.source.file]]
+path = "CelloEnsSpic.sfz"
+sha256 = "00d1374a186802d63ed19173d16b48f30d5acd04f180a9439da2c24bf0029535"
+size = 5584
+[[asset.source.file]]
+path = "CelloEnsSusVib-Quiet.sfz"
+sha256 = "387a04fda4b56f2ddda0f402cb7093e092c3ae97edbbae1263eebbcce9ac5821"
+size = 1617
+[[asset.source.file]]
+path = "CelloEnsSusVib.sfz"
+sha256 = "276352639dda425dd12a4fdb3acdf545867fdb0ff4f89876319f4ec3cf12a19f"
+size = 2933
+[[asset.source.file]]
+path = "ClarinetSus.sfz"
+sha256 = "7e38b51122a750df7f2678f6f4ae39a41b35743e500577da1ca0f53662485ce5"
+size = 4053
+[[asset.source.file]]
+path = "ContrabassPizz.sfz"
+sha256 = "8559b4a439420adc035cb6f78bc15c6d1a9ca8d25275496bfa8f4f9d8b93a314"
+size = 4696
+[[asset.source.file]]
+path = "ContrabassSpic.sfz"
+sha256 = "319e22c472c6954a7cfc03633af38bd8e88dc45fca7ff951fcfab838a75f3dce"
+size = 4914
+[[asset.source.file]]
+path = "ContrabassSusNV.sfz"
+sha256 = "137172b02f0357f059816bd0ab197c38a5c06659cfc6e64fec11b35abac54fbb"
+size = 3296
+[[asset.source.file]]
+path = "FHornStac.sfz"
+sha256 = "cdb75af40a2fc88f0e4f311e46677e74346004f2946606fd8905323543ca9201"
+size = 6263
+[[asset.source.file]]
+path = "FHornSus.sfz"
+sha256 = "52a8ccef8baaf0dbea4b3e528b8096c89ffb5c8aafba2b69c4c38af1d64587a5"
+size = 3250
+[[asset.source.file]]
+path = "FluteExpVib.sfz"
+sha256 = "b0956b3d25498ef9083541999da408f569758d0dbd5f8b759639423334ba36f3"
+size = 1712
+[[asset.source.file]]
+path = "FluteStac.sfz"
+sha256 = "8036c112cd3a1614a40e7980bd8c8249ce18bc8df2e4fd8d3bed961b602c10fa"
+size = 5546
+[[asset.source.file]]
+path = "FluteSusNV.sfz"
+sha256 = "0c3e15abe738778c38f93aa69e1d994e3b6e32b68ab7977b9138c4e079f99661"
+size = 2246
+[[asset.source.file]]
+path = "FluteSusVib.sfz"
+sha256 = "26b0dedaa483b6f7f4201d144673b26ab1d0e4585493a97815d03904319a0734"
+size = 1605
+[[asset.source.file]]
+path = "GM-StylePerc.sfz"
+sha256 = "195c22cdfae069f36651c810189d94069489d6d5ceed36eec51c7061e7452297"
+size = 25687
+[[asset.source.file]]
+path = "Glockenspiel.sfz"
+sha256 = "04fc6e8ed652d919288605139c8adf04b02da8f7101145921a2f0c2bba5f3907"
+size = 790
+[[asset.source.file]]
+path = "Harp.sfz"
+sha256 = "25b553eb756a94f833b1cc1239fe3e6dced3ebc83335bac95d05c951589f7da9"
+size = 2475
+[[asset.source.file]]
+path = "How To Install.txt"
+sha256 = "e60b182a244f25170122229af6975f12791d7fabc0106292d2202b787f4534bb"
+size = 2538
+[[asset.source.file]]
+path = "Marimba.sfz"
+sha256 = "55eabdca01bd62b1da57471a3ae3da21d80c7b9197b4c4b661db61df30990bae"
+size = 1370
+[[asset.source.file]]
+path = "OboeSusNV.sfz"
+sha256 = "d3963e2b65ff608ee3728666ac0764fd680a6c51339c8ee858f426c5a94e51ee"
+size = 2105
+[[asset.source.file]]
+path = "OboeSusVib.sfz"
+sha256 = "ce1241e31c308283773c0f53c63f35b9321bef88b2a444ea2e6940dbbb1b77dd"
+size = 2112
+[[asset.source.file]]
+path = "OrganLoud.sfz"
+sha256 = "cacb639e29eea3fe719057d44ef20d25b1542f4e20e225de9977b3e570485037"
+size = 2352
+[[asset.source.file]]
+path = "OrganLoudPedal.sfz"
+sha256 = "2d32a8398b208f1677ae76df74390d37fcc3b4bb6d3ec0c670a78df426924f77"
+size = 1279
+[[asset.source.file]]
+path = "OrganQuiet.sfz"
+sha256 = "5f3b8ab5d81ec4b69e8faea9a4d468e6968abeb7b4a7dba94b48da6e48dabe15"
+size = 2504
+[[asset.source.file]]
+path = "OrganQuietPedal.sfz"
+sha256 = "58dac1cc948ed0c34b2dc6190721cc8dff97bfe23609e6746caebd67921d7127"
+size = 1414
+[[asset.source.file]]
+path = "SViolin-KS.sfz"
+sha256 = "f1132aa28f4956668f003d39f3c4f7b46e3bb367003010225a5557fc8dab91ea"
+size = 18637
+[[asset.source.file]]
+path = "SViolinPizz.sfz"
+sha256 = "bb4c2fe7892fea7d4081a52805f4f08902dda8d7c27fa4c18af7987a1cb3532c"
+size = 4973
+[[asset.source.file]]
+path = "SViolinSpic.sfz"
+sha256 = "d427568b0998f193be2145182d732ccf8507a75d8f933c1a47393e41107cd9c1"
+size = 6754
+[[asset.source.file]]
+path = "SViolinTrem.sfz"
+sha256 = "d82634898428a3174723c33b4e28d4fd784a38e4a56959c8f55059719756757f"
+size = 3126
+[[asset.source.file]]
+path = "SViolinVib.sfz"
+sha256 = "a2ca3611463547ac9371aa9d13a693af9cd10804f9232d2c602d65937387a992"
+size = 3366
+[[asset.source.file]]
+path = "Timpani.sfz"
+sha256 = "8debc0fa6da4344abb48b625cbaaa85ffcf3a7d0a946fe57ddbb16a49aab9fa5"
+size = 3415
+[[asset.source.file]]
+path = "TimpaniRolls.sfz"
+sha256 = "2f24f639d14f4690d92bac700655e6bc5a17ca991256bbda44849abd154f0726"
+size = 1336
+[[asset.source.file]]
+path = "TromboneStac.sfz"
+sha256 = "b3f0eb29f4106524f670dd6cf6109d633388e6cc8f613112296c7b814038a6db"
+size = 6403
+[[asset.source.file]]
+path = "TromboneSus.sfz"
+sha256 = "373f28cfaaeedcd2b21e404063fa80b3d40ee969abe0af74d4735ae10d5712bd"
+size = 3550
+[[asset.source.file]]
+path = "TromboneVib.sfz"
+sha256 = "9c77655235102365477ad91fd010726af6711e0647d71967a26352d1c4bffbac"
+size = 1480
+[[asset.source.file]]
+path = "TrumpetStac.sfz"
+sha256 = "089cc0a6e26a8ed2ce7967d585858cb9fa8922d0815a80ea7ca3c5f15fb56153"
+size = 7928
+[[asset.source.file]]
+path = "TrumpetSus.sfz"
+sha256 = "8dc5eca44087b0f0af782b3a54ee10a263520d7756f6ed497aa1e3111eea66a6"
+size = 2510
+[[asset.source.file]]
+path = "TrumpetSusVib.sfz"
+sha256 = "4663769f31fb00e00cf0182138d809c18259e69d2065e963e1da89358eaf3567"
+size = 2808
+[[asset.source.file]]
+path = "TubularBells.sfz"
+sha256 = "cde6e3ca00d3a0597f0c3caeba4912221953deb5ca19801aef790ed0efac6923"
+size = 621
+[[asset.source.file]]
+path = "ViolaEnsPizz.sfz"
+sha256 = "c175ad0189d09e0e26670796da7d28adba5a569ac0edc1ef96fc6f11268db4a9"
+size = 5374
+[[asset.source.file]]
+path = "ViolaEnsSpic.sfz"
+sha256 = "54d8e42e321e1fb594da144cae450c1c34820abc50fd91976c156f4d8200167a"
+size = 5514
+[[asset.source.file]]
+path = "ViolaEnsSusVib-Quiet.sfz"
+sha256 = "99ca4342aa259202d7fcaabf412ec48ac3a1feef21b988885c3d2de383f8585c"
+size = 1631
+[[asset.source.file]]
+path = "ViolaEnsSusVib.sfz"
+sha256 = "d62dc6b6bfa83d4ebe49a44f6f1337d0621a32d7f10c699e26fc98720a640871"
+size = 3063
+[[asset.source.file]]
+path = "ViolaEnsTrem.sfz"
+sha256 = "97a1c8b2d5fcffe70c678334a2154e4b40bb44e2a294e7b1c993a8111fc8e69e"
+size = 2793
+[[asset.source.file]]
+path = "ViolinEns-KS.sfz"
+sha256 = "10fffb7132132b902278bff6afc2dd37130276f420da05aa8646b8c32bbf1b53"
+size = 15431
+[[asset.source.file]]
+path = "ViolinEnsPizz.sfz"
+sha256 = "c94b1129e5a8c7e7f7a8e556f6d7c491dbe88875cc2080a0fd2794eb77f5b733"
+size = 5069
+[[asset.source.file]]
+path = "ViolinEnsSpic.sfz"
+sha256 = "3616554873bf3e0b6c6af0a4a593d519219d0774ab03af323daf9e70a098a847"
+size = 5085
+[[asset.source.file]]
+path = "ViolinEnsSusVib-Quiet.sfz"
+sha256 = "4716680aae0affbf427f55ab5d1301ced2a43245714db7bef4bc9f742de41734"
+size = 1368
+[[asset.source.file]]
+path = "ViolinEnsSusVib.sfz"
+sha256 = "4591e212cccf1cbcff0c78cf8429a8221bb0820b70cb7c8dd6685f470ace4eaa"
+size = 2538
+[[asset.source.file]]
+path = "ViolinEnsTrem.sfz"
+sha256 = "e41e15d50f77bd44375c0954bec5a8abd9507aaf58955829381a65cb94db571c"
+size = 2387
+[[asset.source.file]]
+path = "Xylophone.sfz"
+sha256 = "c46d614ff2277d663b373adcd99c7bf01c306369412f1c1f131abde79a9e3b09"
+size = 1065
+
+[[asset]]
+id = "vcsl"
+name = "Versilian Community Sample Library (VCSL)"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/VCSL"
+version = "samples git c1ea7bc (2026-01-14), SFZ maps git dfcf4a4"
+authors = ["Versilian Studios (Sam Gossner)"]
+homepage = "https://github.com/sgossner/VCSL"
+description = "Folk harp, strumstick, psaltery, recorders, frame drum, tambourine (subset)"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Folk instrument samples", text = "Versilian Community Sample Library by Versilian Studios, CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sgossner/VCSL"
+rev = "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e"
+branch = "master"
+download_size = "250M"
+sparse = [
+    "/LICENSE*",
+    "/README*",
+    "/Aerophones/Edge-blown Aerophones/Baroque Alto Recorder/",
+    "/Aerophones/Edge-blown Aerophones/Baroque Soprano Recorder/",
+    "/Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder/",
+    "/Chordophones/Composite Chordophones/Folk Harp/",
+    "/Chordophones/Composite Chordophones/Strumstick/",
+    "/Chordophones/Zithers/Psaltery, Bowed and Plucked/",
+    "/Idiophones/Struck Idiophones/Tambourine 1/",
+    "/Membranophones/Struck Membranophones/Frame Drum/",
+]
+
+# The SFZ maps live on the repository's sfz branch; these files come from that branch's commit.
+[[asset.source]]
+type = "files"
+base_url = "https://raw.githubusercontent.com/sgossner/VCSL/dfcf4a4918771eee884b96ad4493de82ef84daf6"
+[[asset.source.file]]
+path = "Aerophones/Edge-blown Aerophones/Baroque Alto Recorder - SusVib.sfz"
+sha256 = "b5429f30d2049daedfd5b3c0271e2dec268d815ba9033740c01442ec730a044e"
+size = 1904
+[[asset.source.file]]
+path = "Aerophones/Edge-blown Aerophones/Baroque Alto Recorder - Sustain.sfz"
+sha256 = "5e5477d23697a3e98efe6521a0ea682e8765daac26a248772366f02de6c1ab7d"
+size = 1847
+[[asset.source.file]]
+path = "Aerophones/Edge-blown Aerophones/Baroque Soprano Recorder - Sustain.sfz"
+sha256 = "f56f6e1913e422a9d0acd439b03ba327848127e96614da8f1de2c7804a06e171"
+size = 2069
+[[asset.source.file]]
+path = "Aerophones/Edge-blown Aerophones/Baroque Tenor Recorder - SusVib.sfz"
+sha256 = "d14ea577435c9721bc2a906a8f8956db7758e6a0b83f1d3ab0267077cf1cc13c"
+size = 2232
+[[asset.source.file]]
+path = "Chordophones/Composite Chordophones/Folk Harp.sfz"
+sha256 = "51787cb61af7cf75b12cf780a4bc7dc4c8b27b26a6076e24a26156df22fb4eaf"
+size = 8551
+[[asset.source.file]]
+path = "Chordophones/Composite Chordophones/Strumstick.sfz"
+sha256 = "450e4ab1a58136191b51dadd2de5c3f0ddb01edacfbcb3fb28e8b619defd3a09"
+size = 8698
+[[asset.source.file]]
+path = "Chordophones/Zithers/Psaltery, Bowed and Plucked - LongBow.sfz"
+sha256 = "7b5ca2ba88ec736aacbe594701ae4ba3abc2563b2122be772e9b4cbbb22e4ab8"
+size = 1808
+[[asset.source.file]]
+path = "Chordophones/Zithers/Psaltery, Bowed and Plucked - Pluck.sfz"
+sha256 = "d173008e64f1b00fd42bae4b11c1151f6ff2ca9fb21c29d9c8fa66cc9bf6e071"
+size = 1698
+[[asset.source.file]]
+path = "Idiophones/Struck Idiophones/Tambourine 1.sfz"
+sha256 = "88b4ffd83e6533850e6ced123515cc46fe928f8ffc7de1740608f240a4170ce0"
+size = 1152
+[[asset.source.file]]
+path = "Membranophones/Struck Membranophones/Frame Drum.sfz"
+sha256 = "13173bcc33785f17a11d743286376d701aed1beaa2b0cd8a2f5fd629de0b6e0f"
+size = 2844
+
+[[asset]]
+id = "cithara-barbarica"
+name = "Cithara Barbarica"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/cithara-barbarica"
+version = "git a47c10d (2023-07-11)"
+authors = ["D. Smolken (Karoryfer Samples)"]
+homepage = "https://github.com/sfzinstruments/cithara-barbarica"
+description = "Medieval lyre, finger plucks (subset)"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Lyre samples", text = "Cithara Barbarica by Karoryfer Samples (D. Smolken), CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/cithara-barbarica"
+rev = "a47c10dc4a26538a8a56d31d3436488138292ca2"
+branch = "main"
+download_size = "58M"
+sparse = ["/LICENSE", "/readme.txt", "/Programs/", "/Samples/finger/"]
+
+[[asset]]
+id = "hungarian-zither"
+name = "Hungarian Zither"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/hungarian_zither"
+version = "git 973d944 (2022-09-26)"
+authors = ["D. Smolken (Karoryfer Samples)"]
+homepage = "https://github.com/sfzinstruments/hungarian_zither"
+description = "Hungarian prime zither in G, strums and melody strings"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Zither samples", text = "Hungarian Zither by Karoryfer Samples (D. Smolken), CC0" }
+notes = ["The author is taken from the repository's commit history; the files on disk do not name one."]
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/hungarian_zither"
+rev = "973d9445ba890661a4f4cd8e417d36134fb5f337"
+branch = "main"
+download_size = "177M"
+
+[[asset]]
+id = "karoryfer-bigcat-cello"
+name = "Karoryfer x bigcat cello"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/karoryfer-bigcat.cello"
+version = "git 6fd75fb (2022-11-04)"
+authors = ["Karoryfer Samples", "bigcat", "performed by Kamila Borowiak"]
+homepage = "https://github.com/sfzinstruments/karoryfer-bigcat.cello"
+description = "Solo cello"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Cello samples", text = "Karoryfer x bigcat cello (Karoryfer Samples, performed by Kamila Borowiak), CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer-bigcat.cello.git"
+rev = "6fd75fbfc1dbb3109bf26220ba1adea46188a18b"
+branch = "master"
+download_size = "133M"
+
+[[asset]]
+id = "karoryfer-black-and-green-guitars"
+name = "Black And Green Guitars"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/karoryfer.black-and-green-guitars"
+version = "git b3b3249 (2022-08-08)"
+authors = ["Karoryfer Samples", "recorded by Brian Wood"]
+homepage = "https://github.com/sfzinstruments/karoryfer.black-and-green-guitars"
+description = "Hofner Club electric guitar (the black guitar only)"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Guitar samples", text = "Black And Green Guitars by Karoryfer Samples (recorded by Brian Wood), CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.black-and-green-guitars"
+rev = "b3b3249d37dc977a1a297bd2dc053e6d9b6b805c"
+branch = "main"
+download_size = "181M"
+sparse = ["/LICENSE", "/readme.txt", "/Programs/", "/Samples/black/"]
+
+[[asset]]
+id = "karoryfer-caveman-cosmonaut"
+name = "Caveman Cosmonaut"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/karoryfer.caveman-cosmonaut"
+version = "git 9de9bcf (2022-11-04)"
+authors = ["Karoryfer Samples"]
+homepage = "https://github.com/sfzinstruments/karoryfer.caveman-cosmonaut"
+description = "Virtual analog synth from a Unitra B-11 transistor organ"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Synth samples", text = "Caveman Cosmonaut by Karoryfer Samples, CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.caveman-cosmonaut"
+rev = "9de9bcfcbc6d2b20bea5c1116cd07a310febc339"
+branch = "master"
+download_size = "98M"
+
+[[asset]]
+id = "karoryfer-cowsynth"
+name = "Cowsynth"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/karoryfer.cowsynth"
+version = "git 5a5b5af (2022-11-04)"
+authors = ["Karoryfer Samples"]
+homepage = "https://github.com/sfzinstruments/karoryfer.cowsynth"
+description = "Organ, pad and pluck synth sounds"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Synth samples", text = "Cowsynth by Karoryfer Samples, CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.cowsynth"
+rev = "5a5b5afc2dabbe54cf9d75ab64711ce01862b42c"
+branch = "master"
+download_size = "15M"
+
+[[asset]]
+id = "karoryfer-growlybass"
+name = "Growlybass"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/karoryfer.growlybass"
+version = "git 4f48326 (2022-11-04)"
+authors = ["Karoryfer Samples"]
+homepage = "https://github.com/sfzinstruments/karoryfer.growlybass"
+description = "Squier Jazz Bass, direct"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Bass samples", text = "Growlybass by Karoryfer Samples, CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/karoryfer.growlybass.git"
+rev = "4f483268fc66b5a6d5781d421c0d11b8d08d3fc6"
+branch = "master"
+download_size = "168M"
+
+[[asset]]
+id = "karoryfer-horse-pulse"
+name = "Horse Pulse"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/karoryfer.horse-pulse"
+version = "git 6f4749d (2022-03-31)"
+authors = ["Karoryfer Samples"]
+homepage = "https://github.com/sfzinstruments/Karoryfer.HorsePulse"
+description = "Bass tagelharpa, pizzicato"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Tagelharpa samples", text = "Horse Pulse by Karoryfer Samples, CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/Karoryfer.HorsePulse"
+rev = "6f4749d54512d762098ca726a3cbd13444562904"
+branch = "main"
+download_size = "143M"
+
+[[asset]]
+id = "legato-vocal-tutorial"
+name = "Legato vocal (sfz tutorial, from Hadzi-Fia)"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/legato_vocal_tutorial"
+version = "git fac6461 (2025-12-27)"
+authors = ["Karoryfer Samples"]
+homepage = "https://github.com/sfzinstruments/legato_vocal_tutorial"
+description = "Legato 'a' vowel"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Vocal samples", text = "Hadzi-Fia legato vocal by Karoryfer Samples, CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/legato_vocal_tutorial"
+rev = "fac6461ee4c7f498b23246eced644616fa58d2ec"
+branch = "main"
+download_size = "164M"
+
+[[asset]]
+id = "virtuosity-drums"
+name = "Virtuosity Drums"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/virtuosity_drums"
+version = "beta 0.924 (git 9f04cf9, 2026-04-21)"
+authors = ["Versilian Studios", "Karoryfer Samples", "performed by Austin McMahon"]
+homepage = "https://github.com/sfzinstruments/virtuosity_drums"
+description = "Jazz drum kit (kick, snare, overhead and percussion mics)"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Drum samples", text = "Virtuosity Drums by Versilian Studios and Karoryfer Samples (drums by Austin McMahon), CC0" }
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sfzinstruments/virtuosity_drums.git"
+rev = "9f04cf9a734527edfbb0a4eee1f674e45bbf71bc"
+branch = "master"
+download_size = "572M"
+cone = true
+sparse = ["GUI", "Programs", "Samples/kickmic", "Samples/oh", "Samples/perc", "Samples/snaremic"]
+
+[[asset]]
+id = "sonic-pi-samples"
+name = "Sonic Pi samples"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/sonic-pi-samples"
+version = "git 7ec6e5d (dev, 2026-10-06)"
+authors = ["Sonic Pi project (Sam Aaron and contributors); samples from freesound.org"]
+homepage = "https://github.com/sonic-pi-net/sonic-pi"
+description = "Drum, loop and ambient one-shots from etc/samples"
+license = { id = "CC0-1.0", file = "LICENSE.md", section = "Samples" }
+credit = { role = "Drum samples", text = "Sonic Pi samples (sonic-pi.net), CC0" }
+notes = ["Only etc/samples is checked out. The program itself (MIT and GPL parts, see LICENSE.md) is not used."]
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/sonic-pi-net/sonic-pi"
+rev = "7ec6e5df11a5c13f383926e69c8f133e3a6cc34f"
+branch = "dev"
+download_size = "40M"
+sparse = ["/LICENSE.md", "/etc/samples/"]
+
+[[asset]]
+id = "decentsampler-bottles"
+name = "Bottles - The Sound of Air, Glass and Water"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/decentsampler-bottles"
+version = "git bbea692 (2023-04-16)"
+authors = ["Botskiz"]
+homepage = "https://github.com/Botskiz/decentsampler-bottles"
+description = "Decent Sampler library: pads blown on water-filled glass bottles (two airflow voices, four round robins)"
+license = { id = "CC0-1.0", file = "LICENSE" }
+credit = { role = "Bottle pad samples", text = "Bottles by Botskiz, CC0 (https://github.com/Botskiz/decentsampler-bottles)" }
+notes = ["Played by the Decent Sampler VST3: load Bottles/Bottles.dspreset with plugins load_preset."]
+
+[[asset.source]]
+type = "git"
+url = "https://github.com/Botskiz/decentsampler-bottles"
+rev = "bbea69269996bd8b825df69b81e0b3cae0b35b8f"
+branch = "main"
+download_size = "54M"
+sparse = ["/LICENSE", "/README.md", "/Bottles/"]
+
+[[asset]]
+id = "generaluser-gs"
+name = "GeneralUser GS"
+kind = "soundfont"
+scope = "audio"
+path = "instruments/GeneralUser-GS"
+version = "2.0.3 (git 684543d)"
+authors = ["S. Christian Collins"]
+homepage = "https://github.com/mrbumpy409/GeneralUser-GS"
+description = "General MIDI SoundFont; fallback of the retired Python pipeline"
+optional = true
+license = { id = "LicenseRef-GeneralUser-GS-2.0", file = "LICENSE.txt", note = "Commercial music is allowed, but the author cannot be 100 % sure where every sample came from. Keep it out of shipped mixes unless the owner accepts that risk." }
+credit = { role = "General MIDI fallback", text = "GeneralUser GS by S. Christian Collins" }
+
+[[asset.source]]
+type = "files"
+base_url = "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/684543d5e5efaef08d02be50dcda8d552478fa60"
+
+[[asset.source.file]]
+path = "GeneralUser-GS.sf2"
+sha256 = "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe"
+size = 32319396
+
+[[asset.source.file]]
+path = "LICENSE.txt"
+url = "documentation/LICENSE.txt"
+sha256 = "7b32efefdf95ce38a043799f0659853ddc00fbaa14d8c50f0aca16b9b8b405be"
+size = 2317
+
+[[asset.source.file]]
+path = "README.md"
+sha256 = "f1a5d1ef99591763617689d064e57113b1db900a920e145233aa2789331e085a"
+size = 1049
+
+[[asset]]
+id = "metal-gtx"
+name = "METAL-GTX"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/unreal.metal-gtx"
+version = "UI_METAL-GTX.rar (Google Drive, Last-Modified 2019-07-06)"
+authors = ["Unreal Instruments"]
+homepage = "https://unreal-instruments.wixsite.com/unreal-instruments/metal-gtx"
+description = "6- and 8-string metal guitar DI (feeds the NAM amp rigs)"
+license = { id = "LicenseRef-UnrealInstruments-Free", text_url = "https://unreal-instruments.wixsite.com/unreal-instruments/about", note = "The archive carries no license file. The author's About page says (in Japanese) that all libraries are free to use, that works made with them may be used commercially, that no credit is needed, and that modifying or redistributing the data without permission is forbidden. Rendered music is fine under these terms; the samples themselves must never be shipped or shared. A snapshot of the terms is in licenses/terms/metal-gtx-terms.txt." }
+credit = { role = "Guitar samples", text = "METAL-GTX by Unreal Instruments", required = false }
+notes = [
+    "The operation manual is a separate download (METAL-GTX_Manual.rar, 65,636,514 bytes, sha256 d4496bd5533c8e5732cd60c8ed7bcedf6a87b22ccb9e0dd950d45b86ecf6eae5, Drive id 1iAVanIze4j_o2xVRysDHwmv23MmLts7P), cached in instruments/vst/_dl/metal_gtx/.",
+    "Fetching from Google Drive: files this large get a virus-scan confirmation page instead of the file, which the fetcher refuses (it never follows HTML). Download it by hand from the author's page into the cache path; `fetch` then checks the SHA-256 and installs from the cache.",
+]
+
+[[asset.source]]
+type = "archive"
+url = "https://drive.google.com/uc?id=1FurY3_x_tog_56irX1VDNyRCUt5JD7bO&export=download"
+page = "https://unreal-instruments.wixsite.com/unreal-instruments/metal-gtx"
+sha256 = "c5756f95fcc30ac680f6034bb2e54c636e67fd0b53b1d40babada7257e782e73"
+size = 1343285011
+format = "rar"
+cache = "instruments/vst/_dl/metal_gtx/METAL-GTX.bin"
+# Two documentation files in the archive have Shift-JIS names the system bsdtar cannot decode (plus their folders).
+skipped_entries = 4
+
+[[asset]]
+id = "nam-jp-5150-mesa"
+name = "Peavey 5150 + Mesa 4x12 full rig (NAM captures)"
+kind = "amp-capture"
+scope = "audio"
+path = "instruments/nam/jp-5150-mesa-fullrig"
+version = "TONE3000 tone 32868 (5 captures, a2)"
+authors = ["jp_is_out_of_tune"]
+homepage = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868"
+description = "Amp captures for the METAL-GTX rigs (sfz/rigs)"
+license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868", note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
+credit = { role = "Amp captures", text = "Peavey 5150 full rig captures by jp_is_out_of_tune (TONE3000)", required = false }
+
+[[asset.source]]
+type = "manual"
+page = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868"
+instructions = "Sign in to TONE3000, download the listed captures from the tone page and put the .nam files in this folder."
+
+[[asset.source.file]]
+path = "0ff5x0ot7r6c_a2.nam"
+sha256 = "e005e89a8b885b849a050fcee8183ddaa9ddd6f8a6e105a53a77547c28bba380"
+size = 295274
+
+[[asset.source.file]]
+path = "4gjmrwyacbq_a2.nam"
+sha256 = "c7ffc7af8501cb72691a208b48af86c1cd624cdeafe818ab41b643348900a845"
+size = 295117
+
+[[asset.source.file]]
+path = "ck11sqw4ued_a2.nam"
+sha256 = "a3f151932c4e7f197a21dd8996d5750dfd1657e5fd67a346be17c58dd4c2e2c7"
+size = 295061
+
+[[asset.source.file]]
+path = "lismqguuhn_a2.nam"
+sha256 = "c8577f07335f3db0d42011a02d395f40d487163b1f2d44f91b27a303de561d31"
+size = 294830
+
+[[asset.source.file]]
+path = "sjjldv8e8k_a2.nam"
+sha256 = "8e78f00d38843c074cbb5055f81f69d445e72d8685c8bd4ba87b5e7585251631"
+size = 294995
+
+[[asset.source]]
+type = "vendored"
+origin = "our download note"
+
+[[asset.source.file]]
+path = "SOURCE.txt"
+sha256 = "139191bb3907c51feaa78616d290a9efb4a9a6f8c4da43e34014a707e5dec5c4"
+size = 486
+
+[[asset]]
+id = "nam-ob1-5150iii"
+name = "5150 III full rig (NAM captures)"
+kind = "amp-capture"
+scope = "audio"
+path = "instruments/nam/ob1-5150iii-fullrig"
+version = "TONE3000 tone 30247 (4 captures, a2)"
+authors = ["obijuan"]
+homepage = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247"
+description = "Amp captures for the METAL-GTX rigs (sfz/rigs)"
+license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247", note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
+credit = { role = "Amp captures", text = "5150 III full rig captures by obijuan (TONE3000)", required = false }
+
+[[asset.source]]
+type = "manual"
+page = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247"
+instructions = "Sign in to TONE3000, download the listed captures from the tone page and put the .nam files in this folder."
+
+[[asset.source.file]]
+path = "82oordbgujm_a2.nam"
+sha256 = "3be71ec0506162d0b46658b6d6b61278517192fe80b3f8c868703f3b060ec12b"
+size = 293576
+
+[[asset.source.file]]
+path = "k8ufdvyk59m_a2.nam"
+sha256 = "26f2ded9193cf42997ac401b0960784b3ce192399895a4ea88d32dc830836b32"
+size = 293721
+
+[[asset.source.file]]
+path = "ofcsfj5mm7b_a2.nam"
+sha256 = "3c59cd9be9cdf15f14196a70ecc8e1f193addafc63df925bcd257ed6c26a4ee8"
+size = 294367
+
+[[asset.source.file]]
+path = "zqzege5008p_a2.nam"
+sha256 = "70c708db77d0cf581bd6f1d3be9b7e0202cf00698e0e19e0b554f51db5d406ac"
+size = 293459
+
+[[asset.source]]
+type = "vendored"
+origin = "our download note"
+
+[[asset.source.file]]
+path = "SOURCE.txt"
+sha256 = "fa4d368223d6c7864d1dc8e301b796dda52041314661033a1c8646590e68f215"
+size = 329
+
+[[asset]]
+id = "omnisphere"
+name = "Spectrasonics Omnisphere 2"
+kind = "plugin"
+scope = "audio"
+version = "2 (purchased license)"
+authors = ["Spectrasonics"]
+homepage = "https://www.spectrasonics.net/products/omnisphere/"
+description = "Commercial synth and sample library"
+optional = true
+license = { id = "LicenseRef-Spectrasonics-EULA", text_url = "https://support.spectrasonics.net/manual/Omnisphere/legal/all.htm", approved = "Owner bought the license (Oct 2026) as an explicit exception to the CC0/CC BY rule. Use only inside full mixes or layers mixed with other instruments; never export an Omnisphere part on its own stem or layer; never use it for sound effects.", note = "Layered game exports (base / melody / percussion uploaded separately) can expose a part on its own; ask Spectrasonics (info@spectrasonics.net) for written confirmation before shipping adaptive layers that contain it." }
+
+[[asset.source]]
+type = "external"
+page = "https://www.spectrasonics.net/products/omnisphere/"
+instructions = "Installed with the Spectrasonics installer under the owner's account; it cannot be downloaded by this tool."
+
+# ---------------------------------------------------------------------------------------------------------------
+# Plugins and tools (scope = tool: used to make the music, never shipped in the game)
+# ---------------------------------------------------------------------------------------------------------------
+
+[[asset]]
+id = "surge-xt"
+name = "Surge XT (portable, with factory data)"
+kind = "plugin"
+scope = "tool"
+path = "instruments/vst/surge-xt"
+version = "1.3.4"
+authors = ["Surge Synth Team"]
+homepage = "https://surge-synthesizer.github.io/"
+description = "Synth used by Flux projects (VST3 from this folder, with its SurgeXTData factory content)"
+license = { id = "GPL-3.0-or-later", text_url = "https://raw.githubusercontent.com/surge-synthesizer/surge/f7b97c682ade0b87da85ca5968b63d5c7c98e68d/LICENSE", text_sha256 = "d4c0fe570b3750d909691ce5f494c9cd11ee047bbbedda9a5d75cc548e4df06b", note = "GPL covers the program and its bundled data, not the audio it renders; never bundle or link the plugin into the game or Flux." }
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4-portable-install.zip"
+page = "https://github.com/surge-synthesizer/releases-xt/releases/tag/1.3.4"
+sha256 = "a5f2376702ad218c0382640ed0c7b9ebb222ba2410a210879899c0f726859d8e"
+size = 301759660
+format = "zip"
+cache = "instruments/vst/_dl/surge-xt-win64-1.3.4-portable-install.zip"
+upstream_md5 = "30023479e71252e91a7b7a9a59cbaa7d"
+
+[[asset]]
+id = "surge-xt-vst3"
+name = "Surge XT VST3 (plugin only)"
+kind = "plugin"
+scope = "tool"
+path = "plugins/surge-xt"
+version = "1.3.4"
+authors = ["Surge Synth Team"]
+homepage = "https://surge-synthesizer.github.io/"
+description = "VST3 used by the flux-vst3 host tests and examples"
+license = { id = "GPL-3.0-or-later", text_url = "https://raw.githubusercontent.com/surge-synthesizer/surge/f7b97c682ade0b87da85ca5968b63d5c7c98e68d/LICENSE", text_sha256 = "d4c0fe570b3750d909691ce5f494c9cd11ee047bbbedda9a5d75cc548e4df06b" }
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4-pluginsonly.zip"
+page = "https://github.com/surge-synthesizer/releases-xt/releases/tag/1.3.4"
+sha256 = "564e162c560af07ad4ed47fe1bfcd827cf97a575de30d06c48249aad2e7c35e6"
+size = 49093875
+format = "zip"
+cache = "tools/_dl/surge/surge-xt-win64-1.3.4-pluginsonly.zip"
+include = ["Surge XT.vst3/**"]
+upstream_md5 = "d318e95ca79a5ee70ddafec04313a00c"
+
+[[asset]]
+id = "dexed"
+name = "Dexed"
+kind = "plugin"
+scope = "tool"
+path = "plugins/dexed"
+version = "1.0.1"
+authors = ["Pascal Gauthier (asb2m10) and contributors"]
+homepage = "https://github.com/asb2m10/dexed"
+description = "FM synth VST3 used by the flux-vst3 host tests and examples"
+license = { id = "GPL-3.0", file = "LICENSE" }
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/asb2m10/dexed/releases/download/v1.0.1/Dexed-1.0.1-win.zip"
+page = "https://github.com/asb2m10/dexed/releases/tag/v1.0.1"
+sha256 = "1f118445f2c5c411636bb41ddf8b456db09af74cd38f9ede8a93a01020505f05"
+size = 9742538
+format = "zip"
+cache = "tools/_dl/dexed/Dexed-1.0.1-win.zip"
+include = ["Dexed.vst3/**", "LICENSE"]
+upstream_md5 = "f1d47cbee77a07f5bdb4848e8bcb078e"
+
+[[asset]]
+id = "aida-x"
+name = "AIDA-X"
+kind = "plugin"
+scope = "tool"
+path = "plugins/aida-x"
+version = "1.1.0"
+authors = ["AIDA DSP"]
+homepage = "https://github.com/AidaDSP/AIDA-X"
+description = "Neural amp-model plugin; downloaded for evaluation, not installed or used"
+optional = true
+license = { id = "GPL-3.0", text_url = "https://raw.githubusercontent.com/AidaDSP/AIDA-X/1027cdd1756505fd2ab1a4adb91a394a3af9df57/LICENSE", text_sha256 = "c61f12da7cdad526bdcbed47a4c0a603e60dbbfdaf8b66933cd088e9132c303f" }
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/AidaDSP/AIDA-X/releases/download/1.1.0/AIDA-X-1.1.0-win64.zip"
+page = "https://github.com/AidaDSP/AIDA-X/releases/tag/1.1.0"
+sha256 = "648612e80a598b17778374e42c54fdddd4199a844f7b290ad38f6b3256551425"
+size = 7620387
+format = "zip"
+cache = "instruments/vst/_dl/aida-x/AIDA-X-1.1.0-win64.zip"
+strip = 1
+include = ["AIDA-X.vst3/**"]
+
+[[asset]]
+id = "sfizz"
+name = "sfizz"
+kind = "tool"
+scope = "tool"
+path = "tools/sfizz"
+version = "1.2.3"
+authors = ["SFZTools"]
+homepage = "https://github.com/sfztools/sfizz"
+description = "SFZ sampler library; Flux loads tools/sfizz/bin/Release/sfizz.dll at runtime"
+license = { id = "BSD-2-Clause", text_url = "https://raw.githubusercontent.com/sfztools/sfizz/4e70dc0bef53b41f2853ed46e26f5911114c92d0/LICENSE", text_sha256 = "21b2105196b4e6a769cebc2534f66852c8efad3e28dbd3bbd1cc3058fba89e7d" }
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/sfztools/sfizz/releases/download/1.2.3/sfizz-1.2.3-win64.zip"
+page = "https://github.com/sfztools/sfizz/releases/tag/1.2.3"
+sha256 = "7431cbe9b7f2e71a9ff4b12fbbe82c766dbf75b1eedecca627e7506cb06a9fcc"
+size = 8286178
+format = "zip"
+cache = "tools/_dl/sfizz.zip"
+
+[[asset]]
+id = "fluidsynth"
+name = "FluidSynth"
+kind = "tool"
+scope = "tool"
+path = "tools/fluidsynth"
+version = "2.6.1"
+authors = ["FluidSynth developers"]
+homepage = "https://github.com/FluidSynth/fluidsynth"
+description = "SoundFont renderer; fallback of the retired Python pipeline"
+optional = true
+license = { id = "LGPL-2.1-or-later", text_url = "https://raw.githubusercontent.com/FluidSynth/fluidsynth/71e85b2ca6bf48641ba7e2261d8f2640ae473773/LICENSE", text_sha256 = "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95" }
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/FluidSynth/fluidsynth/releases/download/v2.6.1/fluidsynth-v2.6.1-win10-x64-cpp11.zip"
+page = "https://github.com/FluidSynth/fluidsynth/releases/tag/v2.6.1"
+sha256 = "fab7a2e4b85675b66970f97a39bbc239729c5e0f237198b5922a6a73cbc8677c"
+size = 2727529
+format = "zip"
+cache = "tools/_dl/fluidsynth.zip"
+
+[[asset]]
+id = "pedalboard"
+name = "pedalboard (Python)"
+kind = "python-package"
+scope = "tool"
+version = "0.9.26"
+authors = ["Spotify"]
+homepage = "https://github.com/spotify/pedalboard"
+description = "Effects and VST3 rendering in the retired Python pipeline (requirements.txt)"
+optional = true
+license = { id = "GPL-3.0", text_url = "https://raw.githubusercontent.com/spotify/pedalboard/05e8f0b3c4851e77485d7e842dc0355b44106471/LICENSE", text_sha256 = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986" }
+
+[[asset.source]]
+type = "external"
+page = "https://pypi.org/project/pedalboard/0.9.26/"
+instructions = "pip install -r requirements.txt (into .venv)"
+
+[[asset]]
+id = "pretty-midi"
+name = "pretty_midi (Python)"
+kind = "python-package"
+scope = "tool"
+version = "0.2.11.post0"
+authors = ["Colin Raffel"]
+homepage = "https://github.com/craffel/pretty-midi"
+description = "MIDI handling in the retired Python pipeline (requirements.txt)"
+optional = true
+license = { id = "MIT", text_url = "https://raw.githubusercontent.com/craffel/pretty-midi/646f7d3b938ba8216f9dd5c4d3f23d017fa0d22e/LICENSE.txt", text_sha256 = "220f461a41157a81832520a84d95bfa5c4616f553dbf3ef8ac1fb9562244c069" }
+
+[[asset.source]]
+type = "external"
+page = "https://pypi.org/project/pretty-midi/0.2.11.post0/"
+instructions = "pip install -r requirements.txt (into .venv)"
+
+[[asset]]
+id = "mido"
+name = "mido (Python)"
+kind = "python-package"
+scope = "tool"
+version = "1.3.3"
+homepage = "https://github.com/mido/mido"
+description = "MIDI files in the retired Python pipeline (requirements.txt)"
+optional = true
+license = { id = "MIT", text_url = "https://raw.githubusercontent.com/mido/mido/7313549206d95ab8e14d24f91b502fac0264a8e2/LICENSE", text_sha256 = "bd038e5ad24b8d703970b51c070669e8ab0d06f4efb008665261b0183af7eb1c" }
+
+[[asset.source]]
+type = "external"
+page = "https://pypi.org/project/mido/1.3.3/"
+instructions = "pip install -r requirements.txt (into .venv)"
+
+[[asset]]
+id = "numpy"
+name = "NumPy (Python)"
+kind = "python-package"
+scope = "tool"
+version = "2.5.3"
+homepage = "https://github.com/numpy/numpy"
+description = "Arrays for the retired Python pipeline and the reference scripts (requirements.txt)"
+optional = true
+license = { id = "BSD-3-Clause", text_url = "https://raw.githubusercontent.com/numpy/numpy/dd88c0c19b54ad9ed3533224221285bf0873249a/LICENSE.txt", text_sha256 = "1be1df33863f97a7bc1c4d67980bd6c69c9a6fef0a5ee76e6ad6cb91e56e8491", note = "Binary wheels also bundle other permissive libraries (OpenBLAS and others), listed in the wheel's license files." }
+
+[[asset.source]]
+type = "external"
+page = "https://pypi.org/project/numpy/2.5.3/"
+instructions = "pip install -r requirements.txt (into .venv)"
+
+[[asset]]
+id = "scipy"
+name = "SciPy (Python)"
+kind = "python-package"
+scope = "tool"
+version = "1.18.1"
+homepage = "https://github.com/scipy/scipy"
+description = "Signal processing in the retired Python pipeline (requirements.txt)"
+optional = true
+license = { id = "BSD-3-Clause", text_url = "https://raw.githubusercontent.com/scipy/scipy/e4e854eaa8f18d807cd3496028e257e36caa93cc/LICENSE.txt", text_sha256 = "221e59f5e910fd7f94e44f0dac77436a11338c285c6346232e4a850a50da0e94", note = "Binary wheels also bundle other permissive libraries, listed in the wheel's license files." }
+
+[[asset.source]]
+type = "external"
+page = "https://pypi.org/project/scipy/1.18.1/"
+instructions = "pip install -r requirements.txt (into .venv)"
+
+[[asset]]
+id = "soundfile"
+name = "python-soundfile"
+kind = "python-package"
+scope = "tool"
+version = "0.14.0"
+authors = ["Bastian Bechtold"]
+homepage = "https://github.com/bastibe/python-soundfile"
+description = "WAV/FLAC I/O in the retired Python pipeline, daw/bridge/to_flac.py and the reference scripts"
+optional = true
+license = { id = "BSD-3-Clause", text_url = "https://raw.githubusercontent.com/bastibe/python-soundfile/3162358d0315be769b97f3e4c12545fe18a676bc/LICENSE", text_sha256 = "0dd2e411fed553ba891845077e5a32c5b726d1bbc46ff31a2118ae1ccf816752", note = "The Windows wheel bundles libsndfile (LGPL-2.1-or-later) as a separate DLL." }
+
+[[asset.source]]
+type = "external"
+page = "https://pypi.org/project/soundfile/0.14.0/"
+instructions = "pip install -r requirements.txt (into .venv)"
+
+[[asset]]
+id = "pyloudnorm"
+name = "pyloudnorm (Python)"
+kind = "python-package"
+scope = "tool"
+version = "0.2.0"
+authors = ["Christian Steinmetz"]
+homepage = "https://github.com/csteinmetz1/pyloudnorm"
+description = "Loudness measurement in the retired Python pipeline (requirements.txt)"
+optional = true
+license = { id = "MIT", text_url = "https://raw.githubusercontent.com/csteinmetz1/pyloudnorm/b8d67bfd3ce5deef872f688fcfa491a0ca69fddd/LICENSE", text_sha256 = "1616faebaa2add8b57d4f76403c0c4aa427fdb0d241d8e52b7a12dce4906beaa" }
+
+[[asset.source]]
+type = "external"
+page = "https://pypi.org/project/pyloudnorm/0.2.0/"
+instructions = "pip install -r requirements.txt (into .venv)"
+
+# ---------------------------------------------------------------------------------------------------------------
+# Bundled with Flux (scope = app)
+# ---------------------------------------------------------------------------------------------------------------
+
+[[asset]]
+id = "flux-ui-fonts"
+name = "Inter and JetBrains Mono (Flux UI fonts)"
+kind = "font"
+scope = "app"
+path = "daw/crates/flux/assets/fonts"
+version = "Inter 4.001 (git 9221bee), JetBrains Mono 2.304"
+authors = ["The Inter Project Authors", "The JetBrains Mono Project Authors"]
+homepage = "https://github.com/rsms/inter"
+license = { id = "OFL-1.1", file = "Inter-LICENSE.txt", note = "JetBrains Mono's copy of the OFL is JetBrainsMono-OFL.txt in the same folder." }
+
+[[asset.source]]
+type = "vendored"
+origin = "https://github.com/rsms/inter/releases and https://github.com/JetBrains/JetBrainsMono/releases"
+
+[[asset.source.file]]
+path = "Inter-LICENSE.txt"
+sha256 = "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+size = 4380
+
+[[asset.source.file]]
+path = "Inter-Medium.ttf"
+sha256 = "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872"
+size = 417300
+
+[[asset.source.file]]
+path = "Inter-Regular.ttf"
+sha256 = "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82"
+size = 411640
+
+[[asset.source.file]]
+path = "Inter-SemiBold.ttf"
+sha256 = "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3"
+size = 419744
+
+[[asset.source.file]]
+path = "JetBrainsMono-Medium.ttf"
+sha256 = "31c92d01a8a08528b718a43addf0ad3df0af2ca4b7b3290a452f70f358e14d3d"
+size = 273860
+
+[[asset.source.file]]
+path = "JetBrainsMono-OFL.txt"
+sha256 = "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
+size = 4399

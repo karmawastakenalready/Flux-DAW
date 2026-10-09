@@ -1,0 +1,65 @@
+// Far Roads hand percussion, built from VSCO 2 CE (CC0) samples.
+//   36 (C2)  bass drum, soft mallet (a big frame drum)        7 vel layers x 2 RR
+//   41 (F2)  large hand drum, palm hit                        6 vel layers, random takes
+//   43 (G2)  large hand drum, brushed with the fingers
+//   54 (F#2) tambourine hit                                   2 vel layers x 2 RR
+//   56 (G#2) tambourine shake
+
+<control>
+default_path=../instruments/VSCO-2-CE/
+
+<global>
+ampeg_attack=0.001
+ampeg_dynamic=1
+loop_mode=one_shot
+
+// ---------- bass drum ----------
+<group> key=36 seq_length=2 seq_position=1 volume=0 amp_veltrack=60
+<region> sample=Percussion/BDrumNewhit_v1_rr1_Sum.wav lovel=0   hivel=18
+<region> sample=Percussion/BDrumNewhit_v2_rr1_Sum.wav lovel=19  hivel=36
+<region> sample=Percussion/BDrumNewhit_v3_rr1_Sum.wav lovel=37  hivel=54
+<region> sample=Percussion/BDrumNewhit_v4_rr1_Sum.wav lovel=55  hivel=72
+<region> sample=Percussion/BDrumNewhit_v5_rr1_Sum.wav lovel=73  hivel=90
+<region> sample=Percussion/BDrumNewhit_v6_rr1_Sum.wav lovel=91  hivel=108
+<region> sample=Percussion/BDrumNewhit_v7_rr1_Sum.wav lovel=109 hivel=127
+<group> key=36 seq_length=2 seq_position=2 volume=0 amp_veltrack=60
+<region> sample=Percussion/BDrumNewhit_v1_rr2_Sum.wav lovel=0   hivel=18
+<region> sample=Percussion/BDrumNewhit_v2_rr2_Sum.wav lovel=19  hivel=36
+<region> sample=Percussion/BDrumNewhit_v3_rr2_Sum.wav lovel=37  hivel=54
+<region> sample=Percussion/BDrumNewhit_v4_rr2_Sum.wav lovel=55  hivel=72
+<region> sample=Percussion/BDrumNewhit_v5_rr2_Sum.wav lovel=73  hivel=90
+<region> sample=Percussion/BDrumNewhit_v6_rr2_Sum.wav lovel=91  hivel=108
+<region> sample=Percussion/BDrumNewhit_v7_rr2_Sum.wav lovel=109 hivel=127
+
+// ---------- large hand drum ----------
+<group> key=41 amp_veltrack=50
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_ppp_1.wav lovel=0   hivel=24 lorand=0   hirand=0.5
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_ppp_2.wav lovel=0   hivel=24 lorand=0.5 hirand=1
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_pp_1.wav  lovel=25  hivel=48 lorand=0    hirand=0.25
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_pp_2.wav  lovel=25  hivel=48 lorand=0.25 hirand=0.5
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_pp_3.wav  lovel=25  hivel=48 lorand=0.5  hirand=0.75
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_pp_4.wav  lovel=25  hivel=48 lorand=0.75 hirand=1
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_p_1.wav   lovel=49  hivel=66
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_mp_1.wav  lovel=67  hivel=90 lorand=0    hirand=0.25
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_mp_2.wav  lovel=67  hivel=90 lorand=0.25 hirand=0.5
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_mp_3.wav  lovel=67  hivel=90 lorand=0.5  hirand=0.75
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_mp_4.wav  lovel=67  hivel=90 lorand=0.75 hirand=1
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_f_1.wav   lovel=91  hivel=112 lorand=0    hirand=0.34
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_f_2.wav   lovel=91  hivel=112 lorand=0.34 hirand=0.67
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_f_4.wav   lovel=91  hivel=112 lorand=0.67 hirand=1
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_ff_1.wav  lovel=113 hivel=127 lorand=0    hirand=0.5
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_ff_2.wav  lovel=113 hivel=127 lorand=0.5  hirand=1
+
+<group> key=43 amp_veltrack=80
+<region> sample=VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_brush_1.wav
+
+// ---------- tambourine ----------
+<group> key=54 seq_length=2 seq_position=1 volume=0 amp_veltrack=70
+<region> sample=Percussion/Tamb1-Hit_v1_rr1_Sum.wav lovel=0  hivel=64
+<region> sample=Percussion/Tamb1-Hit_v2_rr1_Sum.wav lovel=65 hivel=127
+<group> key=54 seq_length=2 seq_position=2 volume=0 amp_veltrack=70
+<region> sample=Percussion/Tamb1-Hit_v1_rr2_Sum.wav lovel=0  hivel=64
+<region> sample=Percussion/Tamb1-Hit_v2_rr2_Sum.wav lovel=65 hivel=127
+
+<group> key=56 amp_veltrack=70
+<region> sample=Percussion/Tamb1-Shake_v1_rr1_Sum.wav

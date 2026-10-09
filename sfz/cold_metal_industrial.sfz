@@ -1,0 +1,34 @@
+// Cold Metal industrial texture: metallic clicks and glitch hits, meant to sit buried in the mix.
+// Sonic Pi bundled samples (CC0) and VSCO-2-CE percussion (CC0).
+//   48-52 glitch_perc1-5   53 elec_blip2   54 elec_ping   55 elec_plip   56 elec_twip
+//   57 hat_metal   58 hat_sci   59 hat_zap   60 tbd_perc_tap_1   61 tbd_perc_tap_2   62 tbd_perc_blip
+//   64 brake drum (3 velocity layers)   65 anvil (3 velocity layers)   67 perc_till   69 perc_door
+<global>
+ampeg_attack=0.0005
+ampeg_release=0.15
+amp_veltrack=80
+loop_mode=one_shot
+
+<region> key=48 sample=../instruments/sonic-pi-samples/etc/samples/glitch_perc1.flac volume=-4
+<region> key=49 sample=../instruments/sonic-pi-samples/etc/samples/glitch_perc2.flac volume=-2
+<region> key=50 sample=../instruments/sonic-pi-samples/etc/samples/glitch_perc3.flac volume=0
+<region> key=51 sample=../instruments/sonic-pi-samples/etc/samples/glitch_perc4.flac volume=2
+<region> key=52 sample=../instruments/sonic-pi-samples/etc/samples/glitch_perc5.flac volume=2
+<region> key=53 sample=../instruments/sonic-pi-samples/etc/samples/elec_blip2.flac volume=-2
+<region> key=54 sample=../instruments/sonic-pi-samples/etc/samples/elec_ping.flac volume=-2
+<region> key=55 sample=../instruments/sonic-pi-samples/etc/samples/elec_plip.flac volume=-6
+<region> key=56 sample=../instruments/sonic-pi-samples/etc/samples/elec_twip.flac volume=-6
+<region> key=57 sample=../instruments/sonic-pi-samples/etc/samples/hat_metal.flac volume=-6
+<region> key=58 sample=../instruments/sonic-pi-samples/etc/samples/hat_sci.flac volume=-6
+<region> key=59 sample=../instruments/sonic-pi-samples/etc/samples/hat_zap.flac volume=-6
+<region> key=60 sample=../instruments/sonic-pi-samples/etc/samples/tbd_perc_tap_1.flac volume=10
+<region> key=61 sample=../instruments/sonic-pi-samples/etc/samples/tbd_perc_tap_2.flac volume=-2
+<region> key=62 sample=../instruments/sonic-pi-samples/etc/samples/tbd_perc_blip.flac volume=-3
+<region> key=64 lovel=1 hivel=50 sample=../instruments/VSCO-2-CE/Percussion/BrakeDrum1_Hammer_v1_Sum.wav volume=12
+<region> key=64 lovel=51 hivel=95 sample=../instruments/VSCO-2-CE/Percussion/BrakeDrum1_Hammer_v2_Sum.wav volume=12
+<region> key=64 lovel=96 hivel=127 sample=../instruments/VSCO-2-CE/Percussion/BrakeDrum1_Hammer_v3_Sum.wav volume=12
+<region> key=65 lovel=1 hivel=50 sample=../instruments/VSCO-2-CE/Percussion/Anvil_Hit1_v1_Sum.wav volume=20
+<region> key=65 lovel=51 hivel=95 sample=../instruments/VSCO-2-CE/Percussion/Anvil_Hit1_v2_Sum.wav volume=20
+<region> key=65 lovel=96 hivel=127 sample=../instruments/VSCO-2-CE/Percussion/Anvil_Hit1_v3_Sum.wav volume=20
+<region> key=67 sample=../instruments/sonic-pi-samples/etc/samples/perc_till.flac volume=-8
+<region> key=69 sample=../instruments/sonic-pi-samples/etc/samples/perc_door.flac volume=-6

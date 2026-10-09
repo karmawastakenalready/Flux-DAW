@@ -1,0 +1,252 @@
+{
+ "name": "sfz/cold_metal_clock",
+ "slug": "sfz-cold-metal-clock",
+ "sfz": "sfz/cold_metal_clock.sfz",
+ "about": "Cold Metal clock: the steady 4/4 \"metronome\" layer (Sonic Pi samples CC0, VSCO-2-CE percussion CC0). 60 tick (elec_tick, ~1 kHz click)   59 tock (same click a fourth lower)   62 claves   64 snap   65 tap",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   },
+   {
+    "library": "sonic-pi-samples",
+    "license": "CC0 1.0",
+    "file": "instruments/sonic-pi-samples/LICENSE.md",
+    "licenses_md": "not listed",
+    "agrees": false
+   }
+  ],
+  "all_in_licenses_md": false
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   59,
+   65
+  ],
+  "main_names": "B3-F4",
+  "ranges": [
+   [
+    59,
+    60
+   ],
+   [
+    62,
+    62
+   ],
+   [
+    64,
+    65
+   ]
+  ],
+  "count": 5,
+  "span": [
+   59,
+   65
+  ],
+  "gaps": [
+   61,
+   63
+  ],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 8,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": null,
+ "per_key": {
+  "59": {
+   "level_db": -44.5,
+   "ap": 1.0
+  },
+  "60": {
+   "level_db": -46.8,
+   "ap": 1.0
+  },
+  "62": {
+   "level_db": -54.4,
+   "ap": 0.16,
+   "f0": 2017.8,
+   "note": 95,
+   "cents": 36.6
+  },
+  "64": {
+   "level_db": -44.9,
+   "ap": 0.6,
+   "f0": 2444.81,
+   "note": 99,
+   "cents": -31.0
+  },
+  "65": {
+   "level_db": -48.9,
+   "ap": 0.25,
+   "f0": 174.58,
+   "note": 53,
+   "cents": -0.4
+  }
+ },
+ "pitch": {
+  "kind": "unpitched",
+  "confident_keys": 1
+ },
+ "level": {
+  "median_db": -46.8,
+  "std_db": 3.6,
+  "min_db": -54.4,
+  "max_db": -44.5,
+  "max_jump_db": 9.5,
+  "max_jump_keys": [
+   62,
+   64
+  ],
+  "jumps_over_6db": 2
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   59,
+   65
+  ],
+  "main": {
+   "hi3k_db": -30.2,
+   "centroid_hz": 1374.0,
+   "attack_db": 99.6,
+   "onset_ms": 0.6
+  },
+  "median": {
+   "hi3k_db": -30.2,
+   "centroid_hz": 1374.0,
+   "attack_db": 99.6,
+   "onset_ms": 0.6
+  },
+  "octaves": {
+   "C3": {
+    "hi3k_db": -47.5,
+    "centroid_hz": 783.0,
+    "attack_db": 160.7,
+    "onset_ms": 0.6
+   },
+   "C4": {
+    "hi3k_db": -17.1,
+    "centroid_hz": 1702.0,
+    "attack_db": 39.5,
+    "onset_ms": 0.6
+   }
+  },
+  "notes": [
+   {
+    "key": 59,
+    "hi3k_db": -47.5,
+    "centroid_hz": 783.0,
+    "attack_db": 160.7,
+    "onset_ms": 0.6
+   },
+   {
+    "key": 60,
+    "hi3k_db": -43.4,
+    "centroid_hz": 1045.0,
+    "attack_db": 159.7,
+    "onset_ms": 0.5
+   },
+   {
+    "key": 64,
+    "hi3k_db": -1.3,
+    "centroid_hz": 3963.0,
+    "attack_db": 27.5,
+    "onset_ms": 4.0
+   },
+   {
+    "key": 65,
+    "hi3k_db": -17.1,
+    "centroid_hz": 1702.0,
+    "attack_db": 39.5,
+    "onset_ms": 0.6
+   }
+  ]
+ },
+ "sustain": {
+  "key": 59,
+  "kind": "decaying",
+  "peak_at_s": 0.0,
+  "t40_s": 0.04,
+  "level_at_2s_db": -90.2,
+  "usable_max_note_s": 0.04,
+  "release_s": null,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 59,
+  "levels": {
+   "30": {
+    "rms_db": -50.2,
+    "hi3k_db": -47.5,
+    "centroid_hz": 783.0,
+    "attack_db": 157.1,
+    "onset_ms": 0.6
+   },
+   "70": {
+    "rms_db": -46.6,
+    "hi3k_db": -47.5,
+    "centroid_hz": 783.0,
+    "attack_db": 160.7,
+    "onset_ms": 0.6
+   },
+   "110": {
+    "rms_db": -42.5,
+    "hi3k_db": -47.5,
+    "centroid_hz": 783.0,
+    "attack_db": 164.8,
+    "onset_ms": 0.6
+   }
+  },
+  "range_db": 7.7,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "harsh": "hi3k -30.2 dB in the main range (> -35.0)",
+  "sharp attack": "attack 99.6 dB (> 12.0)"
+ },
+ "used_by": [
+  "cold_metal: Clock",
+  "sfz/"
+ ],
+ "aliases": [],
+ "seconds": 0.4
+}

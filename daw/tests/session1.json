@@ -1,0 +1,23 @@
+{
+  "image_dir": "daw/tests/out",
+  "calls": [
+    ["open", {"path": "output/makima_boss/makima_boss.json"}],
+    ["render", {}],
+    ["edit", {"commands": [
+      {"op": "set_mixer", "track": "synth_lead", "mixer": {"gain_db": 13.5}},
+      {"op": "set_mixer", "track": "piano", "mixer": {"comp": {"threshold_db": -6, "relative": true, "ratio": 3}}}
+    ]}],
+    ["get_notes", {"track": "synth_lead", "from_bar": 21, "to_bar": 22}],
+    ["edit", {"commands": [{"op": "transpose_notes", "track": "piano", "semitones": 12, "from_bar": 37, "to_bar": 38}]}],
+    ["undo", {}],
+    ["activity", {"limit": 10}],
+    ["render", {}],
+    ["analyze", {"bars": true, "balance": false, "bands": false}],
+    ["save", {"path": "daw/projects/makima_boss.flux.json"}],
+    ["export", {"format": "wav16", "path": "daw/tests/out/makima_flux.wav"}],
+    ["gui", {"action": "open"}],
+    ["gui", {"action": "focus", "track": "synth_lead", "bar": 21}],
+    ["transport", {"action": "seek", "bar": 21}],
+    ["gui", {"action": "screenshot"}]
+  ]
+}

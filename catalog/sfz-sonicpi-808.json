@@ -1,0 +1,391 @@
+{
+ "name": "sfz/sonicpi_808",
+ "slug": "sfz-sonicpi-808",
+ "sfz": "sfz/sonicpi_808.sfz",
+ "about": "Tuned 808-style sub bass from Sonic Pi's bd_boom (CC0). Measured fundamental 29.9 Hz = MIDI 22.46, so pitch_keycenter=22 with tune=-46 cents plays in tune. Monophonic: each new note cuts the last.",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "sonic-pi-samples",
+    "license": "CC0 1.0",
+    "file": "instruments/sonic-pi-samples/LICENSE.md",
+    "licenses_md": "not listed",
+    "agrees": false
+   }
+  ],
+  "all_in_licenses_md": false
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   24,
+   47
+  ],
+  "main_names": "C1-B2",
+  "ranges": [
+   [
+    24,
+    47
+   ]
+  ],
+  "count": 24,
+  "span": [
+   24,
+   47
+  ],
+  "gaps": [],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 1,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": null,
+ "per_key": {
+  "24": {
+   "level_db": -21.1,
+   "ap": 0.0,
+   "f0": 65.43,
+   "note": 36,
+   "cents": 0.5
+  },
+  "25": {
+   "level_db": -21.3,
+   "ap": 0.0,
+   "f0": 69.32,
+   "note": 37,
+   "cents": 0.7
+  },
+  "26": {
+   "level_db": -21.5,
+   "ap": 0.0,
+   "f0": 73.44,
+   "note": 38,
+   "cents": 0.6
+  },
+  "27": {
+   "level_db": -21.7,
+   "ap": 0.0,
+   "f0": 77.81,
+   "note": 39,
+   "cents": 0.6
+  },
+  "28": {
+   "level_db": -21.9,
+   "ap": 0.0,
+   "f0": 82.44,
+   "note": 40,
+   "cents": 0.7
+  },
+  "29": {
+   "level_db": -22.2,
+   "ap": 0.0,
+   "f0": 87.33,
+   "note": 41,
+   "cents": 0.5
+  },
+  "30": {
+   "level_db": -22.4,
+   "ap": 0.0,
+   "f0": 92.53,
+   "note": 42,
+   "cents": 0.5
+  },
+  "31": {
+   "level_db": -22.6,
+   "ap": 0.0,
+   "f0": 98.02,
+   "note": 43,
+   "cents": 0.5
+  },
+  "32": {
+   "level_db": -22.9,
+   "ap": 0.0,
+   "f0": 103.86,
+   "note": 44,
+   "cents": 0.5
+  },
+  "33": {
+   "level_db": -23.1,
+   "ap": 0.0,
+   "f0": 110.04,
+   "note": 45,
+   "cents": 0.6
+  },
+  "34": {
+   "level_db": -23.3,
+   "ap": 0.0,
+   "f0": 116.57,
+   "note": 46,
+   "cents": 0.4
+  },
+  "35": {
+   "level_db": -23.6,
+   "ap": 0.0,
+   "f0": 123.5,
+   "note": 47,
+   "cents": 0.4
+  },
+  "36": {
+   "level_db": -23.8,
+   "ap": 0.0,
+   "f0": 130.85,
+   "note": 48,
+   "cents": 0.5
+  },
+  "37": {
+   "level_db": -24.1,
+   "ap": 0.0,
+   "f0": 138.63,
+   "note": 49,
+   "cents": 0.5
+  },
+  "38": {
+   "level_db": -24.3,
+   "ap": 0.0,
+   "f0": 146.88,
+   "note": 50,
+   "cents": 0.5
+  },
+  "39": {
+   "level_db": -24.6,
+   "ap": 0.0,
+   "f0": 155.61,
+   "note": 51,
+   "cents": 0.6
+  },
+  "40": {
+   "level_db": -24.8,
+   "ap": 0.0,
+   "f0": 164.86,
+   "note": 52,
+   "cents": 0.5
+  },
+  "41": {
+   "level_db": -25.1,
+   "ap": 0.0,
+   "f0": 174.66,
+   "note": 53,
+   "cents": 0.4
+  },
+  "42": {
+   "level_db": -25.3,
+   "ap": 0.0,
+   "f0": 185.04,
+   "note": 54,
+   "cents": 0.4
+  },
+  "43": {
+   "level_db": -25.6,
+   "ap": 0.0,
+   "f0": 196.05,
+   "note": 55,
+   "cents": 0.5
+  },
+  "44": {
+   "level_db": -25.8,
+   "ap": 0.0,
+   "f0": 207.71,
+   "note": 56,
+   "cents": 0.5
+  },
+  "45": {
+   "level_db": -26.1,
+   "ap": 0.0,
+   "f0": 220.06,
+   "note": 57,
+   "cents": 0.5
+  },
+  "46": {
+   "level_db": -26.3,
+   "ap": 0.0,
+   "f0": 233.15,
+   "note": 58,
+   "cents": 0.5
+  },
+  "47": {
+   "level_db": -26.6,
+   "ap": 0.0,
+   "f0": 247.0,
+   "note": 59,
+   "cents": 0.4
+  }
+ },
+ "pitch": {
+  "kind": "pitched",
+  "confident_keys": 24,
+  "offset": 12,
+  "offset_share": 1.0,
+  "offset_outliers": {},
+  "worst_cents": 0.7,
+  "worst_key": 25,
+  "median_abs_cents": 0.5,
+  "out_of_tune": {}
+ },
+ "level": {
+  "median_db": -23.7,
+  "std_db": 1.7,
+  "min_db": -26.6,
+  "max_db": -21.1,
+  "max_jump_db": 0.3,
+  "max_jump_keys": [
+   28,
+   29
+  ],
+  "jumps_over_6db": 0
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   30,
+   41
+  ],
+  "main": {
+   "hi3k_db": -85.5,
+   "centroid_hz": 131.0,
+   "attack_db": 5.8,
+   "onset_ms": 3.9
+  },
+  "median": {
+   "hi3k_db": -86.8,
+   "centroid_hz": 118.0,
+   "attack_db": 4.3,
+   "onset_ms": 4.4
+  },
+  "octaves": {
+   "C1": {
+    "hi3k_db": -90.5,
+    "centroid_hz": 82.0,
+    "attack_db": 2.2,
+    "onset_ms": 6.2
+   },
+   "C2": {
+    "hi3k_db": -82.8,
+    "centroid_hz": 165.0,
+    "attack_db": 7.7,
+    "onset_ms": 3.1
+   }
+  },
+  "notes": [
+   {
+    "key": 24,
+    "hi3k_db": -92.7,
+    "centroid_hz": 65.0,
+    "attack_db": -0.3,
+    "onset_ms": 7.9
+   },
+   {
+    "key": 28,
+    "hi3k_db": -90.5,
+    "centroid_hz": 82.0,
+    "attack_db": 2.2,
+    "onset_ms": 6.2
+   },
+   {
+    "key": 32,
+    "hi3k_db": -88.0,
+    "centroid_hz": 104.0,
+    "attack_db": 2.9,
+    "onset_ms": 4.9
+   },
+   {
+    "key": 36,
+    "hi3k_db": -85.5,
+    "centroid_hz": 131.0,
+    "attack_db": 5.8,
+    "onset_ms": 3.9
+   },
+   {
+    "key": 40,
+    "hi3k_db": -82.8,
+    "centroid_hz": 165.0,
+    "attack_db": 7.7,
+    "onset_ms": 3.1
+   },
+   {
+    "key": 44,
+    "hi3k_db": -80.6,
+    "centroid_hz": 208.0,
+    "attack_db": 9.2,
+    "onset_ms": 2.5
+   }
+  ]
+ },
+ "sustain": {
+  "key": 35,
+  "kind": "decaying",
+  "peak_at_s": 0.04,
+  "t40_s": 0.82,
+  "level_at_2s_db": -102.7,
+  "usable_max_note_s": 0.82,
+  "release_s": null,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 35,
+  "levels": {
+   "30": {
+    "rms_db": -25.8,
+    "hi3k_db": -86.1,
+    "centroid_hz": 124.0,
+    "attack_db": 4.6,
+    "onset_ms": 4.1
+   },
+   "70": {
+    "rms_db": -24.5,
+    "hi3k_db": -86.1,
+    "centroid_hz": 124.0,
+    "attack_db": 4.6,
+    "onset_ms": 4.1
+   },
+   "110": {
+    "rms_db": -22.6,
+    "hi3k_db": -86.1,
+    "centroid_hz": 124.0,
+    "attack_db": 4.6,
+    "onset_ms": 4.1
+   }
+  },
+  "range_db": 3.2,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {},
+ "used_by": [
+  "sfz/",
+  "makima/sub808"
+ ],
+ "aliases": [],
+ "seconds": 0.8
+}

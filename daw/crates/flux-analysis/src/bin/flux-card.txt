@@ -1,0 +1,23 @@
+flux-card: instrument report cards (render an SFZ through sfizz, measure it, write <out>/<slug>.json and <out>/README.md)
+
+usage:
+  flux-card SFZ [SFZ ...] [options]   card these files
+  flux-card --used [options]          every SFZ the songs use (Flux projects, sfz/, VCSL candidates)
+  flux-card --index [--out DIR]       only rebuild DIR/README.md from the JSON cards
+
+options:
+  --out DIR              where the cards go (default <root>/catalog)
+  --name NAME            card name (one SFZ only)
+  --keys LO-HI           scan only these keys, e.g. 36-96 or C2-C7
+  --ks KEY               keyswitch key pressed before every note
+  --used-extra FILE      with --used: more songs' SFZ as JSON [{"sfz": PATH, "where": LABEL}, ...] (the
+                         instruments.py sets; paths relative to the root)
+  -j, --jobs N           instruments at once (default min(8, threads))
+  --key-workers N        sfizz instances per instrument (default threads / jobs)
+  --schema S             reference (exactly the Python tool's fields) or extended (default; adds round robin,
+                         velocity and CC curves, level holes, pitch slides)
+  --in-process           measure in this process (default: one child process per card, so a sfizz crash only
+                         costs that card and random-opcode instruments reproduce exactly)
+  --measured DATE        date written into the cards (default today, UTC)
+  --root DIR             project root (default FLUX_ROOT or the folder containing tools/sfizz)
+  --timeout SECONDS      per-card limit in child processes (default 900)

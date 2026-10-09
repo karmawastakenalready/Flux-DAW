@@ -1,0 +1,375 @@
+{
+ "name": "sfz/cold_metal_industrial",
+ "slug": "sfz-cold-metal-industrial",
+ "sfz": "sfz/cold_metal_industrial.sfz",
+ "about": "Cold Metal industrial texture: metallic clicks and glitch hits, meant to sit buried in the mix. Sonic Pi bundled samples (CC0) and VSCO-2-CE percussion (CC0). 48-52 glitch_perc1-5   53 elec_blip2   54 elec_ping   55 elec_plip   56 elec_twip",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   },
+   {
+    "library": "sonic-pi-samples",
+    "license": "CC0 1.0",
+    "file": "instruments/sonic-pi-samples/LICENSE.md",
+    "licenses_md": "not listed",
+    "agrees": false
+   }
+  ],
+  "all_in_licenses_md": false
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   48,
+   69
+  ],
+  "main_names": "C3-A4",
+  "ranges": [
+   [
+    48,
+    62
+   ],
+   [
+    64,
+    65
+   ],
+   [
+    67,
+    67
+   ],
+   [
+    69,
+    69
+   ]
+  ],
+  "count": 19,
+  "span": [
+   48,
+   69
+  ],
+  "gaps": [
+   63,
+   66,
+   68
+  ],
+  "other_ranges": [],
+  "isolated": []
+ },
+ "regions": 23,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": null,
+ "per_key": {
+  "48": {
+   "level_db": -37.9,
+   "ap": 0.35,
+   "f0": 71.06,
+   "note": 37,
+   "cents": 43.4
+  },
+  "49": {
+   "level_db": -37.3,
+   "ap": 0.38,
+   "f0": 44.2,
+   "note": 29,
+   "cents": 21.4
+  },
+  "50": {
+   "level_db": -38.8,
+   "ap": 0.41,
+   "f0": 80.4,
+   "note": 40,
+   "cents": -42.6
+  },
+  "51": {
+   "level_db": -43.2,
+   "ap": 0.58,
+   "f0": 44.98,
+   "note": 30,
+   "cents": -48.2
+  },
+  "52": {
+   "level_db": -39.9,
+   "ap": 0.44,
+   "f0": 45.36,
+   "note": 30,
+   "cents": -33.5
+  },
+  "53": {
+   "level_db": -43.5,
+   "ap": 0.03,
+   "f0": 582.8,
+   "note": 74,
+   "cents": -13.4
+  },
+  "54": {
+   "level_db": -42.1,
+   "ap": 0.01,
+   "f0": 883.43,
+   "note": 81,
+   "cents": 6.7
+  },
+  "55": {
+   "level_db": -49.1,
+   "ap": 0.15,
+   "f0": 1424.06,
+   "note": 89,
+   "cents": 33.3
+  },
+  "56": {
+   "level_db": -47.6,
+   "ap": 0.25,
+   "f0": 662.16,
+   "note": 76,
+   "cents": 7.6
+  },
+  "57": {
+   "level_db": -43.7,
+   "ap": 0.65,
+   "f0": 41.49,
+   "note": 28,
+   "cents": 12.2
+  },
+  "58": {
+   "level_db": -45.0,
+   "ap": 0.71,
+   "f0": 66.83,
+   "note": 36,
+   "cents": 37.3
+  },
+  "59": {
+   "level_db": -46.0,
+   "ap": 0.67,
+   "f0": 71.88,
+   "note": 38,
+   "cents": -36.6
+  },
+  "60": {
+   "level_db": -48.9,
+   "ap": 0.37,
+   "f0": 171.51,
+   "note": 53,
+   "cents": -31.1
+  },
+  "61": {
+   "level_db": -49.6,
+   "ap": 0.25,
+   "f0": 174.58,
+   "note": 53,
+   "cents": -0.4
+  },
+  "62": {
+   "level_db": -50.7,
+   "ap": 0.13,
+   "f0": 184.71,
+   "note": 54,
+   "cents": -2.7
+  },
+  "64": {
+   "level_db": -40.0,
+   "ap": 0.09,
+   "f0": 357.5,
+   "note": 65,
+   "cents": 40.5
+  },
+  "65": {
+   "level_db": -41.9,
+   "ap": 0.17,
+   "f0": 148.48,
+   "note": 50,
+   "cents": 19.3
+  },
+  "67": {
+   "level_db": -43.3,
+   "ap": 0.63,
+   "f0": 494.32,
+   "note": 71,
+   "cents": 1.5
+  },
+  "69": {
+   "level_db": -38.9,
+   "ap": 0.43,
+   "f0": 75.2,
+   "note": 38,
+   "cents": 41.5
+  }
+ },
+ "pitch": {
+  "kind": "unpitched",
+  "confident_keys": 6
+ },
+ "level": {
+  "median_db": -43.3,
+  "std_db": 4.1,
+  "min_db": -50.7,
+  "max_db": -37.3,
+  "max_jump_db": 10.7,
+  "max_jump_keys": [
+   62,
+   64
+  ],
+  "jumps_over_6db": 2
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   48,
+   69
+  ],
+  "main": {
+   "hi3k_db": -10.9,
+   "centroid_hz": 1404.0,
+   "attack_db": 17.8,
+   "onset_ms": 0.5
+  },
+  "median": {
+   "hi3k_db": -10.9,
+   "centroid_hz": 1404.0,
+   "attack_db": 17.8,
+   "onset_ms": 0.5
+  },
+  "octaves": {
+   "C3": {
+    "hi3k_db": -10.8,
+    "centroid_hz": 1440.0,
+    "attack_db": 14.0,
+    "onset_ms": 0.4
+   },
+   "C4": {
+    "hi3k_db": -11.1,
+    "centroid_hz": 1368.0,
+    "attack_db": 19.5,
+    "onset_ms": 0.6
+   }
+  },
+  "notes": [
+   {
+    "key": 48,
+    "hi3k_db": -15.4,
+    "centroid_hz": 476.0,
+    "attack_db": 14.0,
+    "onset_ms": 0.2
+   },
+   {
+    "key": 52,
+    "hi3k_db": -10.8,
+    "centroid_hz": 1440.0,
+    "attack_db": 11.6,
+    "onset_ms": 4.5
+   },
+   {
+    "key": 56,
+    "hi3k_db": -5.9,
+    "centroid_hz": 2423.0,
+    "attack_db": 35.6,
+    "onset_ms": 0.4
+   },
+   {
+    "key": 60,
+    "hi3k_db": -11.1,
+    "centroid_hz": 786.0,
+    "attack_db": 32.7,
+    "onset_ms": 0.1
+   },
+   {
+    "key": 64,
+    "hi3k_db": -19.3,
+    "centroid_hz": 1368.0,
+    "attack_db": 19.5,
+    "onset_ms": 0.6
+   },
+   {
+    "key": 67,
+    "hi3k_db": -1.2,
+    "centroid_hz": 5542.0,
+    "attack_db": 16.0,
+    "onset_ms": 3.4
+   }
+  ]
+ },
+ "sustain": {
+  "key": 49,
+  "kind": "decaying",
+  "peak_at_s": 0.16,
+  "t40_s": 0.62,
+  "level_at_2s_db": -89.3,
+  "usable_max_note_s": 0.62,
+  "release_s": null,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 49,
+  "levels": {
+   "30": {
+    "rms_db": -45.1,
+    "hi3k_db": -24.3,
+    "centroid_hz": 126.0,
+    "attack_db": 4.2,
+    "onset_ms": 22.1
+   },
+   "70": {
+    "rms_db": -39.9,
+    "hi3k_db": -24.3,
+    "centroid_hz": 126.0,
+    "attack_db": 4.2,
+    "onset_ms": 22.1
+   },
+   "110": {
+    "rms_db": -34.8,
+    "hi3k_db": -24.3,
+    "centroid_hz": 126.0,
+    "attack_db": 4.2,
+    "onset_ms": 22.1
+   }
+  },
+  "range_db": 10.3,
+  "hi3k_change_db": 0.0,
+  "kind": "level only"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "harsh": "hi3k -10.9 dB in the main range (> -35.0)",
+  "sharp attack": "attack 17.8 dB (> 12.0)"
+ },
+ "used_by": [
+  "cold_metal: Industrial",
+  "sfz/"
+ ],
+ "aliases": [],
+ "seconds": 0.7
+}

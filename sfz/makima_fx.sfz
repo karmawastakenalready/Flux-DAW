@@ -1,0 +1,31 @@
+// Makima FX / impacts / beds, from the Sonic Pi bundled samples (CC0).
+//   28 "BANG": misc_cineboom retuned from F#1 to E1      29 perc_impact1   30 perc_impact2
+//   31 glitch_bass_g hit   33 ambi_dark_woosh   34 ambi_swoosh   35 perc_swoosh
+//   36 vinyl_rewind   37 vinyl_backspin   38 vinyl_scratch   40 ambi_haunted_hum (bed)   41 ambi_glass_rub
+//   43 ambi_drone   45 ambi_lunar_land   47 tbd_voctone   48 ambi_choir   50 glitch_robot1   51 glitch_robot2
+<control>
+default_path=../instruments/sonic-pi-samples/etc/samples/
+
+<global>
+ampeg_attack=0.001
+ampeg_release=0.6
+amp_veltrack=60
+
+<region> lokey=28 hikey=28 pitch_keycenter=30 tune=7 sample=misc_cineboom.flac volume=-2 loop_mode=one_shot
+<region> key=29 sample=perc_impact1.flac volume=-3 loop_mode=one_shot
+<region> key=30 sample=perc_impact2.flac volume=-3 loop_mode=one_shot
+<region> key=31 sample=glitch_bass_g.flac volume=-6 loop_mode=one_shot
+<region> key=33 sample=ambi_dark_woosh.flac volume=-4 loop_mode=one_shot
+<region> key=34 sample=ambi_swoosh.flac volume=-4 loop_mode=one_shot
+<region> key=35 sample=perc_swoosh.flac volume=-4 loop_mode=one_shot
+<region> key=36 sample=vinyl_rewind.flac volume=-6 loop_mode=one_shot
+<region> key=37 sample=vinyl_backspin.flac volume=-6 loop_mode=one_shot
+<region> key=38 sample=vinyl_scratch.flac volume=-6 loop_mode=one_shot
+<region> key=40 sample=ambi_haunted_hum.flac volume=2
+<region> key=41 sample=ambi_glass_rub.flac volume=-8
+<region> key=43 sample=ambi_drone.flac volume=-2
+<region> key=45 sample=ambi_lunar_land.flac volume=-6
+<region> key=47 sample=tbd_voctone.flac volume=-4
+<region> key=48 sample=ambi_choir.flac volume=-2
+<region> key=50 sample=glitch_robot1.flac volume=-8 loop_mode=one_shot
+<region> key=51 sample=glitch_robot2.flac volume=-8 loop_mode=one_shot

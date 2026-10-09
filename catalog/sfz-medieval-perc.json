@@ -1,0 +1,250 @@
+{
+ "name": "sfz/medieval_perc",
+ "slug": "sfz-medieval-perc",
+ "sfz": "sfz/medieval_perc.sfz",
+ "about": "Processional percussion map built from the VSCO 2 CE (CC0) percussion samples we downloaded. Keys follow GM where possible: 36 (C2)  bass drum, soft mallet (used like a large frame drum)  7 vel layers x 2 RR",
+ "measured": "2026-10-08",
+ "conditions": {
+  "sr": 44100,
+  "cc": {
+   "1": 70,
+   "7": 100,
+   "11": 127
+  },
+  "keyswitch": null,
+  "keys": [
+   0,
+   127
+  ]
+ },
+ "license": {
+  "name": "CC0 1.0",
+  "libraries": [
+   {
+    "library": "VSCO-2-CE",
+    "license": "CC0 1.0",
+    "file": "instruments/VSCO-2-CE/LICENSE",
+    "licenses_md": "CC0 1.0",
+    "agrees": true
+   }
+  ],
+  "all_in_licenses_md": true
+ },
+ "errors": {},
+ "keys": {
+  "main": [
+   36,
+   38
+  ],
+  "main_names": "C2-D2",
+  "ranges": [
+   [
+    36,
+    36
+   ],
+   [
+    38,
+    38
+   ],
+   [
+    52,
+    52
+   ],
+   [
+    54,
+    54
+   ]
+  ],
+  "count": 4,
+  "span": [
+   36,
+   54
+  ],
+  "gaps": [
+   37
+  ],
+  "other_ranges": [],
+  "isolated": [
+   52,
+   54
+  ]
+ },
+ "regions": 30,
+ "cc_labels": {},
+ "key_labels": {},
+ "keyswitches": null,
+ "per_key": {
+  "36": {
+   "level_db": -39.1,
+   "ap": 0.46,
+   "f0": 29.33,
+   "note": 22,
+   "cents": 11.3
+  },
+  "38": {
+   "level_db": -54.1,
+   "ap": 0.52,
+   "f0": 26.66,
+   "note": 20,
+   "cents": 46.1
+  },
+  "52": {
+   "level_db": -36.0,
+   "ap": 0.27,
+   "f0": 66.27,
+   "note": 36,
+   "cents": 22.7
+  },
+  "54": {
+   "level_db": -49.7,
+   "ap": 0.62,
+   "f0": 1044.42,
+   "note": 84,
+   "cents": -3.5
+  }
+ },
+ "pitch": {
+  "kind": "unpitched",
+  "confident_keys": 0
+ },
+ "level": {
+  "median_db": -46.6,
+  "std_db": 7.5,
+  "min_db": -54.1,
+  "max_db": -39.1,
+  "max_jump_db": 15.0,
+  "max_jump_keys": [
+   36,
+   38
+  ],
+  "jumps_over_6db": 1
+ },
+ "timbre": {
+  "velocity": 70,
+  "main_keys": [
+   36,
+   54
+  ],
+  "main": {
+   "hi3k_db": -32.4,
+   "centroid_hz": 480.0,
+   "attack_db": 16.8,
+   "onset_ms": 1.9
+  },
+  "median": {
+   "hi3k_db": -32.4,
+   "centroid_hz": 480.0,
+   "attack_db": 16.8,
+   "onset_ms": 1.9
+  },
+  "octaves": {
+   "C2": {
+    "hi3k_db": -32.4,
+    "centroid_hz": 404.0,
+    "attack_db": 26.5,
+    "onset_ms": 0.9
+   },
+   "C3": {
+    "hi3k_db": -32.8,
+    "centroid_hz": 4078.0,
+    "attack_db": -4.3,
+    "onset_ms": 17.9
+   }
+  },
+  "notes": [
+   {
+    "key": 36,
+    "hi3k_db": -54.1,
+    "centroid_hz": 97.0,
+    "attack_db": 15.2,
+    "onset_ms": 1.3
+   },
+   {
+    "key": 38,
+    "hi3k_db": -10.7,
+    "centroid_hz": 710.0,
+    "attack_db": 37.8,
+    "onset_ms": 0.5
+   },
+   {
+    "key": 52,
+    "hi3k_db": -65.5,
+    "centroid_hz": 251.0,
+    "attack_db": -27.0,
+    "onset_ms": 33.3
+   },
+   {
+    "key": 54,
+    "hi3k_db": -0.0,
+    "centroid_hz": 7904.0,
+    "attack_db": 18.4,
+    "onset_ms": 2.5
+   }
+  ]
+ },
+ "sustain": {
+  "key": 52,
+  "kind": "decaying",
+  "peak_at_s": 0.08,
+  "t40_s": null,
+  "level_at_2s_db": -10.1,
+  "usable_max_note_s": null,
+  "release_s": 10.0,
+  "note": "times from note-on; t40/usable None = still sounding after 6 s; release_s 10.0 = still sounding 10 s after note-off, None = already silent at note-off"
+ },
+ "velocity": {
+  "key": 52,
+  "levels": {
+   "30": {
+    "rms_db": -51.8,
+    "hi3k_db": -65.2,
+    "centroid_hz": 163.0,
+    "attack_db": 3.9,
+    "onset_ms": 6.6
+   },
+   "70": {
+    "rms_db": -40.6,
+    "hi3k_db": -65.5,
+    "centroid_hz": 251.0,
+    "attack_db": -27.0,
+    "onset_ms": 33.3
+   },
+   "110": {
+    "rms_db": -35.0,
+    "hi3k_db": -33.3,
+    "centroid_hz": 378.0,
+    "attack_db": -37.3,
+    "onset_ms": 38.7
+   }
+  },
+  "range_db": 16.8,
+  "hi3k_change_db": 31.9,
+  "kind": "level and timbre (layers or filter)"
+ },
+ "cc": {
+  "1": {
+   "level_change_db": 0.0,
+   "hi3k_change_db": 0.0,
+   "silent_at_0": false,
+   "changes_level": false,
+   "changes_timbre": false
+  },
+  "11": {
+   "level_change_db": null,
+   "hi3k_change_db": null,
+   "silent_at_0": true,
+   "changes_level": true,
+   "changes_timbre": null
+  }
+ },
+ "flags": {
+  "harsh": "hi3k -32.4 dB in the main range (> -35.0)",
+  "sharp attack": "attack 16.8 dB (> 12.0)"
+ },
+ "used_by": [
+  "sfz/",
+  "capital_city/percussion"
+ ],
+ "aliases": [],
+ "seconds": 0.6
+}

@@ -1,0 +1,4 @@
+# egui_kittest writes these next to the baselines when a snapshot differs or is updated
+*.new.png
+*.diff.png
+*.old.png
