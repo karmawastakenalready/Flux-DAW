@@ -5,11 +5,13 @@ use super::arrange::section_color;
 use super::theme::*;
 use super::widgets::*;
 use super::{Action, Feed, Gui};
+use crate::midi::Input;
 use crate::state::State;
 use flux_core::commands::{Command, NoteKey, NoteSpec};
 use flux_core::pitch::{self, PitchSpec};
 use flux_core::{Instrument, Note, TimeMap, TrackRef};
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Vec2, vec2};
+use flux_engine::sfizz::Ev;
 
 #[derive(Clone, Copy, PartialEq)]
 enum DragMode {
@@ -34,11 +36,13 @@ pub(super) struct Roll {
     shown: Option<u64>,
     /// Beat to bring into view (agent focus / seek); the view also re-centres on the notes there.
     pub focus_beat: Option<f64>,
+    /// The keyboard key held down with the mouse (it plays the track's instrument).
+    pub key_down: Option<u8>,
 }
 
 impl Default for Roll {
     fn default() -> Self {
-        Roll { ppb: 40.0, row: 13.0, grid: 0.25, len: 1.0, drag: None, scroll_to: None, shown: None, focus_beat: None }
+        Roll { ppb: 40.0, row: 13.0, grid: 0.25, len: 1.0, drag: None, scroll_to: None, shown: None, focus_beat: None, key_down: None }
     }
 }
 
@@ -150,7 +154,7 @@ impl Gui {
             pnt.text(
                 Pos2::new(r.left() + 38.0, r.center().y),
                 Align2::LEFT_CENTER,
-                "This track plays an audio stem: note edits are kept, and you hear them once it uses an instrument (Track tab).",
+                "This track plays audio clips: note edits are kept, and you hear them once it uses an instrument (Track tab).",
                 body(12.0),
                 TEXT,
             );
@@ -178,6 +182,9 @@ impl Gui {
         let playhead = f.beat(st);
         let c = col(t.color);
         let edge = ink(c);
+        // keys held down (a MIDI keyboard, the computer keyboard, the mouse) and a recording in progress
+        let lit = self.sh.midi.held(tid);
+        let take = self.sh.midi.take_view().filter(|v| v.track == tid);
         sa.show_viewport(ui, |ui, vp| {
             let (resp, painter) = ui.allocate_painter(content, Sense::click_and_drag());
             let o = resp.rect.min;
@@ -194,6 +201,9 @@ impl Gui {
                 let black = matches!(pc % 12, 1 | 3 | 6 | 8 | 10);
                 let rr = Rect::from_min_size(Pos2::new(vis.left(), y), vec2(vis.width(), row));
                 painter.rect_filled(rr, 0.0, if black { ROW_DARK } else { LANE });
+                if lit.contains(&(pc as u8)) {
+                    painter.rect_filled(rr, 0.0, ACCENT.gamma_multiply(0.10));
+                }
                 painter.hline(vis.x_range(), px(y + row) - 1.0, Stroke::new(1.0, if pc % 12 == 0 { LINE } else { LINE_SOFT }));
             }
             // grid
@@ -241,6 +251,16 @@ impl Gui {
                     }
                 }
             }
+            // the recording in progress: notes played that aren't on the track yet
+            for &(b, d, pc, _) in take.iter().flat_map(|v| &v.notes) {
+                let (x0, x1) = (x_of(b), x_of(b + d));
+                if x1 < vis.left() || x0 > vis.right() {
+                    continue;
+                }
+                let y = y_of(pc as i32);
+                let rr = Rect::from_min_max(Pos2::new(x0.round() + 0.5, y + 1.0), Pos2::new(x1.max(x0 + 4.0).round() - 0.5, y + row - 1.0));
+                painter.rect(rr, 2.0, ERR.gamma_multiply(0.35), Stroke::new(1.0, ERR), StrokeKind::Inside);
+            }
             if let Some((_, Some(g))) = drag_ghost {
                 let rr = Rect::from_min_max(Pos2::new(x_of(g.start), y_of(g.pitch as i32) + 1.0), Pos2::new(x_of(g.start + g.dur), y_of(g.pitch as i32) + row - 1.0));
                 painter.rect(rr, 2.0, c, Stroke::new(1.5, Color32::WHITE), StrokeKind::Inside);
@@ -287,6 +307,14 @@ impl Gui {
                     kp.text(Pos2::new(key_r.right() - 5.0, y + row * 0.5), Align2::RIGHT_CENTER, pitch::name(pc as u8), medium(9.0), Color32::from_gray(0x3A));
                 }
             }
+            for &pc in &lit {
+                let pc = pc as i32;
+                if pc < p_lo || pc > p_hi {
+                    continue;
+                }
+                let w = if matches!(pc % 12, 1 | 3 | 6 | 8 | 10) { KEY_W * 0.6 } else { KEY_W - 1.0 };
+                kp.rect_filled(Rect::from_min_size(Pos2::new(key_r.left(), y_of(pc) + 1.0), vec2(w, row - 2.0)), 2.0, ACCENT);
+            }
             kp.vline(px(key_r.right()) - 1.0, key_r.y_range(), Stroke::new(1.0, LINE));
             painter.rect_filled(Rect::from_min_size(vis.min, vec2(KEY_W, RULER)), 0.0, PANEL);
             painter.vline(px(vis.left() + KEY_W) - 1.0, vis.top()..=vis.top() + RULER, Stroke::new(1.0, LINE));
@@ -306,6 +334,29 @@ impl Gui {
                 })
             };
             let in_body = |pos: Pos2| pos.x > vis.left() + KEY_W && pos.y > vis.top() + RULER;
+            // the keyboard plays the track's instrument while a key is held (further right on a key is louder);
+            // sliding along it plays each key in turn
+            let on_keys = |pos: Pos2| pos.x <= vis.left() + KEY_W && pos.y > vis.top() + RULER;
+            if resp.hover_pos().is_some_and(on_keys) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let key = resp
+                .is_pointer_button_down_on()
+                .then(|| resp.interact_pointer_pos())
+                .flatten()
+                .filter(|&pos| on_keys(pos))
+                .map(|pos| (pitch_at(pos.y), pos.x - vis.left()))
+                .filter(|(pc, _)| (0..=127).contains(pc));
+            if key.map(|k| k.0 as u8) != self.roll.key_down {
+                if let Some(k) = self.roll.key_down.take() {
+                    act.push(Action::Play(Input::Mouse, Ev::Off(k)));
+                }
+                if let Some((pc, x)) = key {
+                    let vel = (40.0 + 87.0 * (x / KEY_W).clamp(0.0, 1.0)).round() as u8;
+                    act.push(Action::Play(Input::Mouse, Ev::On(pc as u8, vel)));
+                    self.roll.key_down = Some(pc as u8);
+                }
+            }
             if let Some(h) = resp.hover_pos()
                 && in_body(h)
             {

@@ -2,13 +2,17 @@
 //!
 //! Starting from the manifest's `usage_roots` (Flux projects, rig files, SFZ wrappers, pipeline scripts), every
 //! referenced path is resolved and followed: JSON files contribute all their string values, SFZ files their
-//! `sample=`, `default_path=` and `#include` references (with `#define` variables), and Python files their string
+//! `sample=`, `default_path=` and `#include` references (with `#define` variables), saved plugin states
+//! (`.vstpreset`) the absolute paths written inside them (a sampler's library folder), and Python files their string
 //! literals (a heuristic: a literal that names an asset folder counts as a use). A reference that lands inside an
-//! asset folder marks that asset as used by the root file it was reached from.
+//! asset folder, or inside an install location of an asset installed by another tool (a plugin in the VST3 folder),
+//! marks that asset as used by the root file it was reached from. An absolute path that ends in an asset folder of
+//! another checkout (a project saved on another machine) counts too, as a heuristic use.
 
 use crate::fsutil;
 use crate::glob;
-use crate::manifest::Loaded;
+use crate::manifest::{Loaded, Source};
+use crate::places::Places;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
@@ -63,9 +67,9 @@ struct AssetDir {
     id: String,
     /// Normalised lowercase absolute path with a trailing separator, for prefix tests.
     prefix: String,
-    /// Folder name, for the Python heuristic.
-    name: String,
-    rel: String,
+    /// The folder below the project root (`None` for an install location outside it): its name, for the Python
+    /// heuristic, and its relative path.
+    rel: Option<(String, String)>,
 }
 
 fn key(p: &Path) -> String {
@@ -73,17 +77,23 @@ fn key(p: &Path) -> String {
     if cfg!(windows) { s.to_lowercase() } else { s }
 }
 
-/// Scan the usage roots of the manifest below `root`.
-pub fn scan(root: &Path, loaded: &Loaded) -> Result<Usage> {
-    let dirs: Vec<AssetDir> = loaded
-        .assets()
-        .iter()
-        .filter_map(|a| {
-            let rel = a.path.as_ref()?;
+/// Scan the usage roots of the manifest below `root`; install locations of assets installed by another tool are
+/// looked for in `places`.
+pub fn scan(root: &Path, loaded: &Loaded, places: &Places) -> Result<Usage> {
+    let mut dirs: Vec<AssetDir> = Vec::new();
+    for a in loaded.assets() {
+        if let Some(rel) = &a.path {
             let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
-            Some(AssetDir { id: a.id.clone(), prefix: format!("{}/", key(&root.join(rel))), name, rel: rel.clone() })
-        })
-        .collect();
+            dirs.push(AssetDir { id: a.id.clone(), prefix: format!("{}/", key(&root.join(rel))), rel: Some((name, rel.clone())) });
+        }
+        for s in &a.sources {
+            if let Source::External(e) = s {
+                for p in e.installed.iter().flat_map(|loc| places.expand(loc)) {
+                    dirs.push(AssetDir { id: a.id.clone(), prefix: format!("{}/", key(&p)), rel: None });
+                }
+            }
+        }
+    }
     let mut roots = BTreeSet::new();
     for pat in &loaded.manifest.policy.usage_roots {
         for f in glob::expand(root, pat)? {
@@ -111,12 +121,24 @@ pub fn scan(root: &Path, loaded: &Loaded) -> Result<Usage> {
                             found.entry(d.id.clone()).or_default().insert(UsageRef { root: r.clone(), via: via.clone(), heuristic: false });
                         } else if depth < MAX_DEPTH && is_followable(&p) && p.is_file() && fsutil::relative_to(root, &p).is_some() {
                             queue.push_back((p, depth + 1));
+                        } else if fsutil::relative_to(root, &p).is_none() {
+                            // saved in another checkout: the path still names the asset folder
+                            let k = format!("{k}/");
+                            for d in &dirs {
+                                if let Some((_, rel)) = &d.rel
+                                    && k.contains(&format!("/{}/", key(Path::new(rel))))
+                                {
+                                    found.entry(d.id.clone()).or_default().insert(UsageRef { root: r.clone(), via: via.clone(), heuristic: true });
+                                }
+                            }
                         }
                     }
                     Ref::Literal(s) => {
                         let norm = s.replace('\\', "/");
                         for d in &dirs {
-                            if norm.contains(&d.rel) || norm.split('/').any(|c| c == d.name) {
+                            if let Some((name, rel)) = &d.rel
+                                && (norm.contains(rel.as_str()) || norm.split('/').any(|c| c == name))
+                            {
                                 found.entry(d.id.clone()).or_default().insert(UsageRef { root: r.clone(), via: via.clone(), heuristic: true });
                             }
                         }
@@ -132,7 +154,7 @@ pub fn scan(root: &Path, loaded: &Loaded) -> Result<Usage> {
 
 fn is_followable(p: &Path) -> bool {
     let n = p.to_string_lossy().to_ascii_lowercase();
-    n.ends_with(".sfz") || n.ends_with(".json") || n.ends_with(".sfzh")
+    n.ends_with(".sfz") || n.ends_with(".json") || n.ends_with(".sfzh") || n.ends_with(".vstpreset")
 }
 
 enum Ref {
@@ -171,6 +193,8 @@ fn references(file: &Path, project_root: &Path) -> Vec<Ref> {
         sfz_references(&text, &dir).into_iter().map(Ref::Path).collect()
     } else if lower.ends_with(".py") {
         python_literals(&text).into_iter().map(Ref::Literal).collect()
+    } else if lower.ends_with(".vstpreset") {
+        embedded_paths(&bytes).into_iter().map(Ref::Path).collect()
     } else {
         vec![]
     }
@@ -285,6 +309,64 @@ pub fn opcode_value(line: &str, key: &str) -> Option<String> {
     }
     let v = rest[..end].trim();
     (!v.is_empty()).then(|| v.to_string())
+}
+
+/// Absolute paths written inside a binary file (a plugin's saved state): in its text runs (UTF-8, as XML or JSON
+/// usually is) and its UTF-16LE runs (wide strings). A path runs from a drive letter (`C:\`, `C:/`), or a `/` that
+/// opens a quoted or attribute value, to the next quote, angle bracket or control character; XML entities are
+/// decoded, and JSON's doubled backslashes collapse like any repeated separator.
+fn embedded_paths(bytes: &[u8]) -> Vec<PathBuf> {
+    let mut runs: Vec<String> = Vec::new();
+    let mut start = None;
+    for (i, &b) in bytes.iter().chain([&0u8]).enumerate() {
+        match (b >= 0x20 && b != 0x7f, start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
+                if i - s >= 4 {
+                    runs.push(String::from_utf8_lossy(&bytes[s..i]).into_owned());
+                }
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    for offset in [0, 1] {
+        let units: Vec<u16> = bytes.get(offset..).unwrap_or_default().as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
+        for run in units.split(|&u| u < 0x20 || u == 0x7f) {
+            // only runs that can hold a drive path (`:` then a separator); bytes read two at a time make long runs
+            if run.len() >= 4 && run.windows(2).any(|w| w[0] == u16::from(b':') && matches!(w[1], 0x2f | 0x5c)) {
+                runs.push(String::from_utf16_lossy(run));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for run in &runs {
+        let c: Vec<char> = run.chars().collect();
+        for i in 0..c.len() {
+            let opener = if i == 0 { None } else { Some(c[i - 1]) };
+            let drive = c[i].is_ascii_alphabetic()
+                && c.get(i + 1) == Some(&':')
+                && matches!(c.get(i + 2), Some('\\' | '/'))
+                && opener.is_none_or(|o| !o.is_alphanumeric());
+            let unix = c[i] == '/' && matches!(opener, Some('"' | '\'' | '=' | '>')) && c.get(i + 1).is_some_and(|n| n.is_alphanumeric());
+            if !(drive || unix) {
+                continue;
+            }
+            let end = c[i..]
+                .iter()
+                .position(|&ch| matches!(ch, '"' | '<' | '>' | '|' | '?' | '*') || ch.is_control() || (opener == Some('\'') && ch == '\''))
+                .map_or(c.len(), |n| i + n);
+            let raw: String = c[i..end].iter().collect();
+            let path = raw.replace("&quot;", "\"").replace("&apos;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+            let path = path.trim_end();
+            if path.len() > 3 {
+                out.push(PathBuf::from(path));
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Quoted string literals in Python source (single, double and triple quotes; no escapes interpreted).
@@ -407,10 +489,104 @@ license = { id = "CC0-1.0" }
 type = "vendored"
 "#;
         let l = crate::manifest::parse(toml).unwrap();
-        let u = scan(r, &l).unwrap();
+        let u = scan(r, &l, &Places::default()).unwrap();
         assert_eq!(u.roots, ["daw/projects/song.flux.json", "pieces.py"]);
         assert_eq!(u.uses("piano"), [UsageRef { root: "daw/projects/song.flux.json".into(), via: Some("sfz/wrap.sfz".into()), heuristic: false }]);
         assert_eq!(u.roots_using("drums"), ["daw/projects/song.flux.json"]);
         assert!(u.uses("unused")[0].heuristic);
+    }
+
+    #[test]
+    fn paths_inside_binary_states() {
+        let b = b"\x00\x01VST3<a p=\"C:\\Libs\\Tom &amp; Jerry\\x\" q='/Users/me/it&apos;s/y' r=\"rel/path\"></a>\x00{\"f\":\"D:\\\\json\\\\z\"}\x00";
+        let mut found: Vec<String> = embedded_paths(b).iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        found.sort();
+        assert_eq!(found, ["/Users/me/it's/y", "C:\\Libs\\Tom & Jerry\\x", "D:\\\\json\\\\z"]);
+        let mut wide = vec![0u8, 7];
+        "E:\\Wide\\kit".encode_utf16().for_each(|u| wide.extend(u.to_le_bytes()));
+        wide.extend([0, 0]);
+        assert_eq!(embedded_paths(&wide), [PathBuf::from("E:\\Wide\\kit")]);
+        assert_eq!(embedded_paths(&wide[1..]), [PathBuf::from("E:\\Wide\\kit")], "odd offset");
+    }
+
+    #[test]
+    fn follows_plugin_states_and_install_locations() {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path();
+        let vst3 = tempfile::tempdir().unwrap();
+        for p in ["instruments/Bottles/Bottles", "instruments/Wide", "daw/projects", "plugin-states"] {
+            fs::create_dir_all(r.join(p)).unwrap();
+        }
+        fs::create_dir_all(vst3.path().join("Sampler.vst3")).unwrap();
+        // a sampler's saved state: a binary header, then XML naming the library folder it loads
+        let mut state = b"VST3\x01\x00\x00\x00".to_vec();
+        let lib = r.join("instruments").join("Bottles").join("Bottles");
+        state.extend(format!("<DecentSampler _samplePath=\"{}\" _userVolume=\"1.0\"/>", lib.display()).as_bytes());
+        // and a wide string written on another machine, naming another library
+        state.extend([0, 0, 0]);
+        "D:\\old\\checkout\\instruments\\Wide\\kit".encode_utf16().for_each(|u| state.extend(u.to_le_bytes()));
+        state.extend([0, 0]);
+        fs::write(r.join("plugin-states/abc.vstpreset"), state).unwrap();
+        let project = serde_json::json!({"tracks": [{"instrument": {
+            "kind": "vst3", "path": vst3.path().join("Sampler.vst3"), "state": "plugin-states/abc.vstpreset"}}]});
+        fs::write(r.join("daw/projects/song.flux.json"), project.to_string()).unwrap();
+        let toml = r#"
+schema = 1
+[policy]
+usage_roots = ["daw/projects/*.flux.json"]
+[[asset]]
+id = "bottles"
+name = "B"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/Bottles"
+version = "1"
+license = { id = "CC0-1.0" }
+[[asset.source]]
+type = "vendored"
+[[asset]]
+id = "wide"
+name = "W"
+kind = "sample-library"
+scope = "audio"
+path = "instruments/Wide"
+version = "1"
+license = { id = "CC0-1.0" }
+[[asset.source]]
+type = "vendored"
+[[asset]]
+id = "sampler"
+name = "S"
+kind = "plugin"
+scope = "tool"
+version = "1"
+license = { id = "MIT" }
+[[asset.source]]
+type = "external"
+page = "https://example.com/sampler"
+instructions = "Run its installer."
+installed = ["{vst3}/Sampler.vst3"]
+[[asset]]
+id = "other"
+name = "O"
+kind = "plugin"
+scope = "tool"
+version = "1"
+license = { id = "MIT" }
+[[asset.source]]
+type = "external"
+page = "https://example.com/other"
+instructions = "Run its installer."
+installed = ["{vst3}/Other.vst3"]
+"#;
+        let l = crate::manifest::parse(toml).unwrap();
+        let places = Places::default().with("vst3", vec![vst3.path().to_path_buf()]);
+        let u = scan(r, &l, &places).unwrap();
+        let root = "daw/projects/song.flux.json".to_string();
+        let via = Some("plugin-states/abc.vstpreset".to_string());
+        assert_eq!(u.uses("bottles"), [UsageRef { root: root.clone(), via: via.clone(), heuristic: false }]);
+        assert_eq!(u.uses("wide"), [UsageRef { root: root.clone(), via, heuristic: true }]);
+        assert_eq!(u.uses("sampler"), [UsageRef { root, via: None, heuristic: false }]);
+        assert!(!u.is_used("other"));
     }
 }

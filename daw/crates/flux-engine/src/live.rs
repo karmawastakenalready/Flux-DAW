@@ -13,7 +13,13 @@
 //! change; a VST3 or rig track's cached render stands in while its plugin or rig loads. The channel strips
 //! run as streaming processors (the same ones the offline render uses), then the shared reverb, glue, EQ,
 //! the master drive and a sample-peak limiter. Edits arrive as new project snapshots while playing.
-//! Instruments are loaded, and big ones freed, on background threads.
+//! Instruments are loaded, and big ones freed, on background threads. Automation plays as it renders: the
+//! volume, pan and reverb send lanes glide across each block from their values at its start to those at its
+//! end, and a live plugin's parameter lanes (resolved against it in the background) go to it with its blocks.
+//!
+//! Notes and controllers played in from outside (a MIDI keyboard: `input`) go to a track's instrument at the start
+//! of the next block, with the song playing or stopped: stopped, `render_input` runs the instruments and strips
+//! with the timeline standing still, so only what is played in sounds (and reverb tails ring out).
 //!
 //! The offline render stays the reference for measurement and export. Live playback borrows what the last
 //! render measured (`RenderHints`: the loudness drive and the loud levels behind relative compressor
@@ -25,8 +31,9 @@ use crate::dsp::{
 use crate::render::{self, fold_loop, note_events};
 use crate::rig::{self, LiveRig, RigFx};
 use crate::sfizz::{Ev, Synth};
-use crate::vst::{self, LivePlugin, SlotId};
+use crate::vst::{self, Automation, LivePlugin, SlotId};
 use crate::paths;
+use flux_core::automation::{Target, volume_gain};
 use flux_core::{Insert, InsertPosition, Instrument, Mixer, Project, TimeMap, Track};
 use flux_vst3::client::AudioError;
 use flux_vst3::{Midi, TimedMidi, Transport};
@@ -66,8 +73,8 @@ enum Job {
     Raw { id: u64, ticket: u64, track: Box<Track>, project: Arc<Project> },
     /// Load a track's plugin or an insert's.
     Plugin { slot: SlotId, ticket: u64, project: Arc<Project> },
-    /// Set a playing plugin up again (its preset or params changed).
-    Configure { slot: SlotId, seq: u64, project: Arc<Project> },
+    /// Set a playing plugin up again (its preset, params or parameter lanes changed), from scratch if `full`.
+    Configure { slot: SlotId, seq: u64, project: Arc<Project>, full: bool },
     Rig { id: u64, ticket: u64, track: Box<Track>, project: Arc<Project> },
     /// Build a playing rig's chain again (its params changed, or the tempo map its VST3 effects follow).
     RigFx { id: u64, ticket: u64, seq: u64, track: Box<Track>, project: Arc<Project> },
@@ -79,7 +86,8 @@ enum Done {
     Synth { id: u64, ticket: u64, r: Result<Synth, String> },
     Raw { id: u64, ticket: u64, r: Result<Arc<Stereo>, String> },
     Plugin { slot: SlotId, ticket: u64, r: Result<LivePlugin, String> },
-    Configured { slot: SlotId, r: Result<(), String> },
+    /// A plugin set up again, with its parameter lanes resolved against it (and those left out, why).
+    Configured { slot: SlotId, seq: u64, r: Result<(), String>, auto: Option<(Automation, Vec<String>)> },
     Rig { id: u64, ticket: u64, r: Result<LiveRig, String> },
     /// A rig's new chain, with the instrument it was built for.
     RigFx { id: u64, ticket: u64, seq: u64, r: Result<(RigFx, Instrument), String> },
@@ -112,8 +120,10 @@ fn spawn_loaders(n: usize) -> (mpsc::Sender<Job>, mpsc::Receiver<Done>) {
                     Job::Plugin { slot, ticket, project } => {
                         Done::Plugin { slot, ticket, r: vst::live_open(&project, slot, BLOCK).map_err(|e| format!("{e:#}")) }
                     }
-                    Job::Configure { slot, seq, project } => {
-                        Done::Configured { slot, r: vst::live_configure(&project, slot, seq).map_err(|e| format!("{e:#}")) }
+                    Job::Configure { slot, seq, project, full } => {
+                        let r = vst::live_configure(&project, slot, seq, full).map_err(|e| format!("{e:#}"));
+                        // after the set-up, so the lanes' first values go out on top of it
+                        Done::Configured { slot, seq, r, auto: vst::live_automation(&project, slot) }
                     }
                     Job::Rig { id, ticket, track, project } => {
                         Done::Rig { id, ticket, r: LiveRig::open(&track, &project, BLOCK).map_err(|e| format!("{e:#}")) }
@@ -284,8 +294,10 @@ impl LiveStrip {
         }
     }
 
-    /// The end of the strip, after the post inserts: the duck, mono below, then panning and width.
-    fn finish(&mut self, l: &mut [f32], r: &mut [f32], duck: Option<&[f32]>) {
+    /// The end of the strip, after the post inserts: the volume lane, the duck, mono below, then panning and
+    /// width. The lanes glide across the block from `from` to `to`.
+    fn finish(&mut self, l: &mut [f32], r: &mut [f32], duck: Option<&[f32]>, from: MixNow, to: MixNow) {
+        ramp(l, r, &mut { from.gain }, to.gain);
         if let Some(env) = duck {
             for i in 0..l.len().min(env.len()) {
                 l[i] *= env[i];
@@ -295,7 +307,46 @@ impl LiveStrip {
         if let Some(m) = &mut self.mono {
             m.process(l, r);
         }
-        dsp::place_s(l, r, self.m.pan, self.m.width);
+        if from.pan == to.pan {
+            dsp::place_s(l, r, to.pan, self.m.width);
+        } else {
+            let n = l.len() as f64;
+            dsp::place_moving(l, r, |i| from.pan + (to.pan - from.pan) * (i + 1) as f64 / n, self.m.width);
+        }
+    }
+}
+
+/// A track's volume gain, pan and reverb send at a point of the song: its lanes' values, or the mixer's where it
+/// has none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MixNow {
+    gain: f32,
+    pan: f64,
+    send: f32,
+}
+
+impl MixNow {
+    /// At song sample `s` (in a loop, its end is its start).
+    fn at(t: &Track, tg: &Timing, len: usize, s: usize) -> MixNow {
+        let mut now = MixNow { gain: 1.0, pan: t.mixer.pan, send: t.mixer.reverb_send as f32 };
+        let mut beat = None;
+        for lane in &t.automation {
+            if matches!(lane.target, Target::Param { .. }) {
+                continue;
+            }
+            let b = *beat.get_or_insert_with(|| {
+                let s = if tg.looped && len > 0 { s % len } else { s };
+                tg.tm.beat(s as f64 / tg.sr)
+            });
+            let Some(v) = lane.value_at(b) else { continue };
+            match lane.target {
+                Target::Volume => now.gain = volume_gain(v) as f32,
+                Target::Pan => now.pan = v.clamp(-1.0, 1.0),
+                Target::ReverbSend => now.send = v.clamp(0.0, 1.0) as f32,
+                Target::Param { .. } => {}
+            }
+        }
+        now
     }
 }
 
@@ -381,10 +432,12 @@ struct LivePlug {
     latency: usize,
     /// Why setting it up after an edit failed, for the status.
     warning: Option<String>,
+    lanes: LiveLanes,
 }
 
 impl LivePlug {
-    fn new(plugin: LivePlugin) -> LivePlug {
+    /// `seq`: the set-up asked for it as it arrived.
+    fn new(plugin: LivePlugin, seq: u64) -> LivePlug {
         let latency = plugin.latency;
         LivePlug {
             plugin,
@@ -396,6 +449,7 @@ impl LivePlug {
             late: 0,
             latency,
             warning: None,
+            lanes: LiveLanes { seq, ..LiveLanes::default() },
         }
     }
 
@@ -412,6 +466,46 @@ impl LivePlug {
         }
         self.midi.push(TimedMidi { offset: offset as u32, msg: midi_of(ev) });
     }
+}
+
+/// A live plugin's parameter lanes, resolved against it with each set-up.
+#[derive(Default)]
+struct LiveLanes {
+    /// The latest set-up asked for: lanes resolved with an older one are dropped.
+    seq: u64,
+    auto: Automation,
+    /// The lanes left out, why.
+    problem: Option<String>,
+}
+
+impl LiveLanes {
+    /// Take the lanes a set-up resolved, unless a newer set-up has been asked for since. True if a parameter
+    /// lost its lane (it goes back to the set-up's value only when the plugin is set up from scratch).
+    fn install(&mut self, seq: u64, auto: Option<(Automation, Vec<String>)>) -> bool {
+        let Some((auto, problems)) = auto.filter(|_| seq == self.seq) else { return false };
+        let dropped = self.auto.ids().any(|id| !auto.ids().any(|x| x == id));
+        self.auto = auto;
+        self.problem = (!problems.is_empty()).then(|| problems.join("; "));
+        dropped
+    }
+}
+
+/// Set a slot's live plugin up again in the background (from scratch if `full`), its parameter lanes with it.
+/// Returns the request's number.
+fn reconfigure(jobs: &mpsc::Sender<Job>, ticket: &mut u64, p: &Arc<Project>, slot: SlotId, full: bool) -> u64 {
+    *ticket += 1;
+    let _ = jobs.send(Job::Configure { slot, seq: *ticket, project: p.clone(), full });
+    *ticket
+}
+
+/// Where a block of the channel strips is in the song: what their inserts are told (tempo, position), and
+/// where their parameter lanes are read.
+struct Clock<'a> {
+    transport: Transport,
+    p: &'a Project,
+    tm: &'a TimeMap,
+    /// Song sample of the block's first frame.
+    at: usize,
 }
 
 fn midi_of(ev: Ev) -> Midi {
@@ -469,6 +563,7 @@ struct LiveFx {
     latency: usize,
     /// Why setting it up after an edit failed, for the status.
     warning: Option<String>,
+    lanes: LiveLanes,
 }
 
 impl LiveInsert {
@@ -487,7 +582,7 @@ impl LiveInsert {
     /// Process a block in place. Bypassed or not loaded (yet), it passes the audio through; while it is still
     /// busy with a block it missed, it plays silence; one that stays busy is given up on. True if its latency
     /// changed (or it stopped).
-    fn process(&mut self, l: &mut [f32], r: &mut [f32], transport: &Transport) -> bool {
+    fn process(&mut self, l: &mut [f32], r: &mut [f32], clock: &Clock) -> bool {
         if self.ins.bypass {
             return false;
         }
@@ -511,7 +606,9 @@ impl LiveInsert {
             }
             fx.stalled = None;
         }
-        if fx.plugin.port().begin(l.len(), &[&*l, &*r], &[], &[], Some(transport)).is_err() {
+        let params = fx.lanes.auto.block(clock.p, clock.tm, l.len(), |o| clock.at + o);
+        if fx.plugin.port().begin(l.len(), &[&*l, &*r], &[], params, Some(&clock.transport)).is_err() {
+            fx.lanes.auto.resend();
             return false;
         }
         match fx.plugin.port().end(&mut [&mut *l, &mut *r]) {
@@ -544,7 +641,7 @@ impl LiveInsert {
                 (Some(_), _) => Some(format!("{name} is not keeping up")),
                 (None, Some(w)) => Some(format!("{name} couldn't apply the last change: {w}")),
                 (None, None) if fx.late > 0 => Some(format!("{name}: {} late blocks", fx.late)),
-                (None, None) => None,
+                (None, None) => fx.lanes.problem.as_ref().map(|p| format!("{name}: {p}")),
             },
             FxSrc::Standby => None,
             FxSrc::Failed(e) => Some(format!("{name} failed, passing audio through: {e}")),
@@ -553,10 +650,10 @@ impl LiveInsert {
 }
 
 /// Process a block through the inserts of a chain that `at` selects. True if a latency changed.
-fn run_inserts(chain: &mut [LiveInsert], at: Option<InsertPosition>, l: &mut [f32], r: &mut [f32], transport: &Transport) -> bool {
+fn run_inserts(chain: &mut [LiveInsert], at: Option<InsertPosition>, l: &mut [f32], r: &mut [f32], clock: &Clock) -> bool {
     let mut changed = false;
     for x in chain.iter_mut().filter(|x| at.is_none_or(|a| x.ins.position == a)) {
-        changed |= x.process(l, r, transport);
+        changed |= x.process(l, r, clock);
     }
     changed
 }
@@ -594,13 +691,10 @@ fn sync_chain(jobs: &mpsc::Sender<Job>, ticket: &mut u64, p: &Arc<Project>, chai
         let same = x.ins.path == ni.path && x.ins.class == ni.class;
         let setup = x.ins.params != ni.params || x.ins.preset != ni.preset;
         x.ins = ni.clone();
-        match &x.src {
+        match &mut x.src {
             // one unloaded while idle loads (the new plugin) when playback wakes
             FxSrc::Standby => {}
-            FxSrc::Ready(_) if same && setup => {
-                *ticket += 1;
-                let _ = jobs.send(Job::Configure { slot: SlotId::Insert(ni.id), seq: *ticket, project: p.clone() });
-            }
+            FxSrc::Ready(fx) if same && setup => fx.lanes.seq = reconfigure(jobs, ticket, p, SlotId::Insert(ni.id), false),
             // one still loading is set up from the project when it arrives
             FxSrc::Ready(_) | FxSrc::Loading if same => {}
             // another plugin, or one that failed and has changed: load it again
@@ -611,6 +705,19 @@ fn sync_chain(jobs: &mpsc::Sender<Job>, ticket: &mut u64, p: &Arc<Project>, chai
     }
     // what is left in `old` was removed (a live plugin closes in the background)
     true
+}
+
+/// Set up again the loaded plugins of a chain whose parameter lanes differ between `old` and `p` (their lanes
+/// are resolved with the set-up).
+fn sync_lanes(jobs: &mpsc::Sender<Job>, ticket: &mut u64, old: &Project, p: &Arc<Project>, chain: &mut [LiveInsert]) {
+    for x in chain {
+        let slot = SlotId::Insert(x.ins.id);
+        if let FxSrc::Ready(fx) = &mut x.src
+            && vst::slot_lanes(old, slot) != vst::slot_lanes(p, slot)
+        {
+            fx.lanes.seq = reconfigure(jobs, ticket, p, slot, false);
+        }
+    }
 }
 
 /// A fixed stereo delay: plugin delay compensation holds every track back to line up with the plugin
@@ -703,11 +810,15 @@ struct LiveTrack {
     held: Vec<u8>,
     on_since_wrap: Vec<u8>,
     pending: Vec<Ev>,
+    /// Played in from outside (`LiveEngine::input`), for the start of the next block.
+    input: Vec<Ev>,
     /// Plugin delay compensation.
     delay: Delay,
     /// Its VST3 inserts, in order (each at its position in the strip).
     inserts: Vec<LiveInsert>,
     strip: LiveStrip,
+    /// Its volume, pan and reverb send where the last block ended.
+    mix: MixNow,
     duck: Option<DuckLive>,
     level: f32,
 }
@@ -796,7 +907,8 @@ fn sounding(t: &Track, tg: &Timing, pos: usize) -> Vec<(u8, u8, usize)> {
 }
 
 impl LiveTrack {
-    fn new(t: &Track, tg: &Timing, hints: &RenderHints, pos: usize) -> LiveTrack {
+    /// `len`: the frames of the song (`LiveEngine::len`).
+    fn new(t: &Track, tg: &Timing, hints: &RenderHints, pos: usize, len: usize) -> LiveTrack {
         let voicing = Voicing::of(t);
         LiveTrack {
             track: t.clone(),
@@ -810,9 +922,11 @@ impl LiveTrack {
             held: vec![],
             on_since_wrap: vec![],
             pending: vec![],
+            input: vec![],
             delay: Delay::default(),
             inserts: vec![],
             strip: LiveStrip::new(tg.sr, &t.mixer, hints.comp_loud_db.get(&t.id).copied(), tg.loop_s(), pos),
+            mix: MixNow::at(t, tg, len, pos),
             duck: None,
             level: 0.0,
         }
@@ -877,6 +991,37 @@ impl LiveTrack {
         }
     }
 
+    /// The song is stopped: notes the timeline started stop and none start (its controllers, bend and articulation
+    /// still apply), so only what is played in sounds. Called before every block while stopped; it does nothing
+    /// once the timeline's notes are gone.
+    fn hush(&mut self) {
+        let v = &self.voicing;
+        let mut unsent = vec![];
+        self.pending.retain(|e| match *e {
+            Ev::On(p, _) if !v.is_keyswitch(p) => {
+                unsent.push(p);
+                false
+            }
+            _ => true,
+        });
+        let mut held = std::mem::take(&mut self.held);
+        for p in unsent {
+            if let Some(k) = held.iter().position(|&h| h == p) {
+                held.swap_remove(k);
+            }
+        }
+        held.sort_unstable();
+        held.dedup();
+        for p in held {
+            if v.is_keyswitch(p) {
+                self.held.push(p);
+            } else {
+                self.pending.push(Ev::Off(p));
+            }
+        }
+        self.on_since_wrap.clear();
+    }
+
     /// After a note edit while playing: stop held notes that no longer exist, keep the rest.
     fn reconcile(&mut self, tg: &Timing, pos: usize) {
         self.idx = self.events.partition_point(|e| e.0 < pos);
@@ -898,6 +1043,7 @@ impl LiveTrack {
     fn resync_plugin(&mut self, tg: &Timing, pos: usize) {
         let Src::Plugin(pl) = &mut self.src else { return };
         pl.resync = false;
+        pl.lanes.auto.resend();
         let offs: Vec<Ev> = pl.holding.iter().map(|&p| Ev::Off(p)).collect();
         self.chase(tg, pos);
         self.pending.splice(0..0, offs);
@@ -905,8 +1051,10 @@ impl LiveTrack {
 
     /// Phase 1 of a block for a live plugin: send it the block's MIDI, so it works on it in its own
     /// process while the other tracks render. One still busy with a block it missed gets none (and is
-    /// brought back in line with the timeline once it is done); one that stays busy is given up on.
-    fn begin_plugin(&mut self, tg: &Timing, pos: usize, n: usize, transport: &Transport) {
+    /// brought back in line with the timeline once it is done); one that stays busy is given up on. With the
+    /// song stopped (`rolling` false) it gets only what is played in, and catches up with the timeline once
+    /// the song plays.
+    fn begin_plugin(&mut self, p: &Project, tg: &Timing, pos: usize, n: usize, transport: &Transport, rolling: bool) {
         let Src::Plugin(pl) = &mut self.src else { return };
         pl.sent = false;
         if let Some(since) = pl.stalled {
@@ -922,18 +1070,24 @@ impl LiveTrack {
             pl.stalled = None;
             pl.resync = true;
         }
-        if pl.resync {
+        if pl.resync && rolling {
             self.resync_plugin(tg, pos);
         }
         let Src::Plugin(pl) = &mut self.src else { return };
         pl.midi.clear();
-        for ev in self.pending.drain(..) {
+        for ev in self.pending.drain(..).chain(self.input.drain(..)) {
             pl.push(0, ev);
         }
-        take_events(&self.events, &mut self.idx, &mut self.held, &mut self.on_since_wrap, pos, n, |off, ev| pl.push(off, ev));
-        let LivePlug { plugin, midi, sent, .. } = &mut **pl;
+        if rolling {
+            take_events(&self.events, &mut self.idx, &mut self.held, &mut self.on_since_wrap, pos, n, |off, ev| pl.push(off, ev));
+        }
+        let LivePlug { plugin, midi, sent, lanes, .. } = &mut **pl;
+        let params = lanes.auto.block(p, &tg.tm, n, |o| if rolling { pos + o } else { pos });
         // a failure shows in `end_plugin`
-        *sent = plugin.port().begin(n, &[], &midi[..], &[], Some(transport)).is_ok();
+        *sent = plugin.port().begin(n, &[], &midi[..], params, Some(transport)).is_ok();
+        if !*sent {
+            lanes.auto.resend();
+        }
     }
 
     /// Phase 2: the plugin's block, or silence if it missed the deadline. True if its latency changed.
@@ -980,7 +1134,12 @@ impl LiveTrack {
 
     fn status(&self) -> String {
         let troubles: Vec<String> = self.inserts.iter().filter_map(LiveInsert::trouble).collect();
-        let s = self.instrument_status();
+        let mut s = self.instrument_status();
+        if let Src::Plugin(pl) = &self.src
+            && let Some(problem) = &pl.lanes.problem
+        {
+            s.push_str(&format!(" (automation: {problem})"));
+        }
         if troubles.is_empty() { s } else { format!("{s} (inserts: {})", troubles.join("; ")) }
     }
 
@@ -1116,7 +1275,7 @@ impl LiveEngine {
         e.len = e.song_len(&p);
         let mut tracks = vec![];
         for t in &p.tracks {
-            let mut lt = LiveTrack::new(t, &e.tg, &e.hints, 0);
+            let mut lt = LiveTrack::new(t, &e.tg, &e.hints, 0, e.len);
             e.request(&mut lt);
             sync_chain(&e.jobs, &mut e.ticket, &p, &mut lt.inserts, &t.mixer.inserts);
             tracks.push(lt);
@@ -1335,7 +1494,7 @@ impl LiveEngine {
         let mut tracks = Vec::with_capacity(p.tracks.len());
         for nt in &p.tracks {
             let Some(i) = old_tracks.iter().position(|t| t.track.id == nt.id) else {
-                let mut lt = LiveTrack::new(nt, &self.tg, &self.hints, spos);
+                let mut lt = LiveTrack::new(nt, &self.tg, &self.hints, spos, self.len);
                 self.request(&mut lt);
                 sync_chain(&self.jobs, &mut self.ticket, &p, &mut lt.inserts, &nt.mixer.inserts);
                 lt.idx = lt.events.partition_point(|e| e.0 < pos);
@@ -1344,7 +1503,7 @@ impl LiveEngine {
             };
             let mut lt = old_tracks.swap_remove(i);
             let instr = lt.track.instrument != nt.instrument;
-            let content = lt.track.notes != nt.notes || lt.track.ccs != nt.ccs || lt.track.bends != nt.bends;
+            let content = lt.track.notes != nt.notes || lt.track.ccs != nt.ccs || lt.track.bends != nt.bends || lt.track.clips != nt.clips;
             let mixer = lt.track.mixer != nt.mixer;
             // the same plugin with another preset or params: its instance is set up again as it plays
             let retune = instr
@@ -1357,6 +1516,9 @@ impl LiveEngine {
                 && rig::plays_rig(nt)
                 && same_plugin(&lt.track.instrument, &nt.instrument)
                 && (lt.live_loading || matches!(lt.src, Src::Rig(_)));
+            // the plugin's parameter lanes are resolved against it again
+            let slot = SlotId::Instrument(nt.id);
+            let lanes = vst::slot_lanes(&old, slot) != vst::slot_lanes(&p, slot);
             lt.track = nt.clone();
             if instr && !retune && !rechain {
                 lt.voicing = Voicing::of(nt);
@@ -1373,10 +1535,10 @@ impl LiveEngine {
                 lt.idx = lt.events.partition_point(|e| e.0 < pos);
             } else {
                 // one still loading is set up from the project when it arrives
-                if retune && matches!(lt.src, Src::Plugin(_)) {
-                    self.ticket += 1;
-                    let job = Job::Configure { slot: SlotId::Instrument(nt.id), seq: self.ticket, project: p.clone() };
-                    let _ = self.jobs.send(job);
+                if let Src::Plugin(pl) = &mut lt.src
+                    && (retune || lanes)
+                {
+                    pl.lanes.seq = reconfigure(&self.jobs, &mut self.ticket, &p, slot, false);
                 }
                 // VST3 effects in a rig's chain follow the tempo map
                 let rig_clock = timing && matches!(&lt.src, Src::Rig(r) if r.has_vst3());
@@ -1395,6 +1557,7 @@ impl LiveEngine {
                 lt.strip.update(&nt.mixer, self.hints.comp_loud_db.get(&nt.id).copied(), self.tg.loop_s(), spos);
             }
             sync_chain(&self.jobs, &mut self.ticket, &p, &mut lt.inserts, &nt.mixer.inserts);
+            sync_lanes(&self.jobs, &mut self.ticket, &old, &p, &mut lt.inserts);
             tracks.push(lt);
         }
         // deleted tracks
@@ -1404,6 +1567,8 @@ impl LiveEngine {
         self.tracks = tracks;
         sync_chain(&self.jobs, &mut self.ticket, &p, &mut self.reverb_fx, &p.master.reverb_inserts);
         sync_chain(&self.jobs, &mut self.ticket, &p, &mut self.master_fx, &p.master.inserts);
+        sync_lanes(&self.jobs, &mut self.ticket, &old, &p, &mut self.reverb_fx);
+        sync_lanes(&self.jobs, &mut self.ticket, &old, &p, &mut self.master_fx);
         self.compensate();
         self.rebuild_ducks();
         if old.master != p.master {
@@ -1448,6 +1613,10 @@ impl LiveEngine {
     pub fn poll(&mut self) {
         let mut relatch = false;
         while let Ok(d) = self.done.try_recv() {
+            if let Done::Configured { slot, seq, r, auto } = d {
+                self.configured(slot, seq, r, auto);
+                continue;
+            }
             if matches!(d, Done::Plugin { slot: SlotId::Insert(_), .. }) {
                 relatch |= self.insert_loaded(d);
                 continue;
@@ -1458,23 +1627,7 @@ impl LiveEngine {
                 | Done::Plugin { slot: SlotId::Instrument(id), ticket, .. }
                 | Done::Rig { id, ticket, .. }
                 | Done::RigFx { id, ticket, .. } => (*id, *ticket),
-                Done::Plugin { slot: SlotId::Insert(_), .. } => continue,
-                Done::Configured { slot: SlotId::Instrument(id), r } => {
-                    if let Some(t) = self.tracks.iter_mut().find(|t| t.track.id == *id)
-                        && let Src::Plugin(pl) = &mut t.src
-                    {
-                        pl.warning = r.as_ref().err().cloned();
-                    }
-                    continue;
-                }
-                Done::Configured { slot: SlotId::Insert(id), r } => {
-                    if let Some(x) = self.all_inserts_mut().find(|x| x.ins.id == *id)
-                        && let FxSrc::Ready(fx) = &mut x.src
-                    {
-                        fx.warning = r.as_ref().err().cloned();
-                    }
-                    continue;
-                }
+                Done::Plugin { slot: SlotId::Insert(_), .. } | Done::Configured { .. } => continue,
             };
             let pos = self.pos;
             // a stale load (the track changed or went since) is freed in the background
@@ -1525,12 +1678,10 @@ impl LiveEngine {
                 Done::Raw { r: Ok(b), .. } => t.src = Src::Raw(b),
                 Done::Plugin { r: Ok(plugin), .. } => {
                     plugin.register();
-                    t.src = Src::Plugin(Box::new(LivePlug::new(plugin)));
+                    // catch up with edits made while it loaded (its parameter lanes are resolved then)
+                    let seq = reconfigure(&self.jobs, &mut self.ticket, &self.p, SlotId::Instrument(id), false);
+                    t.src = Src::Plugin(Box::new(LivePlug::new(plugin, seq)));
                     t.live_loading = false;
-                    // catch up with edits made while it loaded
-                    self.ticket += 1;
-                    let job = Job::Configure { slot: SlotId::Instrument(id), seq: self.ticket, project: self.p.clone() };
-                    let _ = self.jobs.send(job);
                     relatch = true;
                 }
                 Done::Synth { r: Err(e), .. } | Done::Raw { r: Err(e), .. } => t.src = Src::Failed(e),
@@ -1544,6 +1695,29 @@ impl LiveEngine {
         }
         if relatch {
             self.compensate();
+        }
+    }
+
+    /// A live plugin was set up again: what went wrong, if anything, and its parameter lanes resolved anew. A
+    /// parameter that lost its lane goes back to the set-up's value (the plugin is set up from scratch).
+    fn configured(&mut self, slot: SlotId, seq: u64, r: Result<(), String>, auto: Option<(Automation, Vec<String>)>) {
+        let (warning, lanes) = match slot {
+            SlotId::Instrument(id) => match self.tracks.iter_mut().find(|t| t.track.id == id).map(|t| &mut t.src) {
+                Some(Src::Plugin(pl)) => (&mut pl.warning, &mut pl.lanes),
+                _ => return,
+            },
+            SlotId::Insert(id) => {
+                let mut inserts =
+                    self.tracks.iter_mut().flat_map(|t| t.inserts.iter_mut()).chain(self.reverb_fx.iter_mut()).chain(self.master_fx.iter_mut());
+                match inserts.find(|x| x.ins.id == id).map(|x| &mut x.src) {
+                    Some(FxSrc::Ready(fx)) => (&mut fx.warning, &mut fx.lanes),
+                    _ => return,
+                }
+            }
+        };
+        *warning = r.err();
+        if lanes.install(seq, auto) {
+            lanes.seq = reconfigure(&self.jobs, &mut self.ticket, &self.p, slot, true);
         }
     }
 
@@ -1563,11 +1737,11 @@ impl LiveEngine {
         x.src = match r {
             Ok(plugin) => {
                 plugin.register();
-                // catch up with edits made while it loaded
-                seq += 1;
-                let _ = jobs.send(Job::Configure { slot: SlotId::Insert(id), seq, project: p });
+                // catch up with edits made while it loaded (its parameter lanes are resolved then)
+                let seq = reconfigure(&jobs, &mut seq, &p, SlotId::Insert(id), false);
                 let latency = plugin.latency;
-                FxSrc::Ready(Box::new(LiveFx { plugin, stalled: None, late: 0, latency, warning: None }))
+                let lanes = LiveLanes { seq, ..LiveLanes::default() };
+                FxSrc::Ready(Box::new(LiveFx { plugin, stalled: None, late: 0, latency, warning: None, lanes }))
             }
             Err(e) => FxSrc::Failed(e),
         };
@@ -1653,6 +1827,35 @@ impl LiveEngine {
         self.ticket = ticket;
     }
 
+    /// A note or controller played in from outside (a MIDI keyboard): the track's instrument gets it at the start
+    /// of the next block, whether the song plays (`render`) or not (`render_input`). Tracks that can't play notes
+    /// now (audio, no instrument, loading, failed) ignore it; plugins unloaded while idle load again.
+    pub fn input(&mut self, track: u64, ev: Ev) {
+        let Some(t) = self.tracks.iter_mut().find(|t| t.track.id == track) else { return };
+        match t.src {
+            // (a block takes them all; this bounds what a track that stopped taking blocks holds)
+            Src::Synth(_) | Src::Rig(_) | Src::Plugin(_) if t.input.len() < 4096 => t.input.push(ev),
+            Src::Standby => self.wake(),
+            _ => {}
+        }
+    }
+
+    /// Render the next frames with the song stopped: only what is played in (`input`) sounds, through its track's
+    /// strip and the master, and reverb tails ring out. The position stays where it is.
+    pub fn render_input(&mut self, l: &mut [f32], r: &mut [f32]) -> usize {
+        self.poll();
+        let want = l.len().min(r.len());
+        let mut done = 0;
+        while done < want {
+            let n = BLOCK.min(want - done);
+            self.block(n, false);
+            l[done..done + n].copy_from_slice(&self.dry.0[..n]);
+            r[done..done + n].copy_from_slice(&self.dry.1[..n]);
+            done += n;
+        }
+        done
+    }
+
     /// Render the next frames into `l`/`r` (any length); `pos` receives each frame's song position.
     /// Returns the frames written (fewer only when a one-shot project ends).
     pub fn render(&mut self, l: &mut [f32], r: &mut [f32], pos: &mut [u32]) -> usize {
@@ -1660,14 +1863,14 @@ impl LiveEngine {
         let want = l.len().min(r.len()).min(pos.len());
         while self.prime > 0 && !self.ended && self.len > 0 {
             let n = BLOCK.min(self.prime).min(self.len - self.pos);
-            self.block(n);
+            self.block(n, true);
             self.prime -= n;
             self.advance(n);
         }
         let mut done = 0;
         while done < want && !self.ended && self.len > 0 {
             let n = BLOCK.min(want - done).min(self.len - self.pos);
-            self.block(n);
+            self.block(n, true);
             l[done..done + n].copy_from_slice(&self.dry.0[..n]);
             r[done..done + n].copy_from_slice(&self.dry.1[..n]);
             for i in 0..n {
@@ -1694,32 +1897,44 @@ impl LiveEngine {
         }
     }
 
-    fn block(&mut self, n: usize) {
+    /// One block of `n` frames into `dry`: the song's at `pos` (`rolling`), or with it stopped there (only what is
+    /// played in sounds; the position doesn't move).
+    fn block(&mut self, n: usize, rolling: bool) {
         let pos = self.pos;
         let sr = self.tg.sr;
         // the strips run `pdc` behind the instruments' input
         let strip_t = (pos as f64 - self.pdc as f64) / sr;
         let spos = self.strip_pos();
+        let len = self.len;
         let LiveEngine { tracks, dry, send, tl, tr, duck_buf, p, tg, jobs, .. } = self;
         // where the inserts are (they get the song's tempo and position, as instruments do)
-        let fx_transport = {
-            let mut t = vst::transport_at(p, &tg.tm, spos, sr, true);
+        let fx = {
+            let mut t = vst::transport_at(p, &tg.tm, spos, sr, rolling);
             if tg.looped {
                 t.cycle = Some((0.0, p.total_beats()));
             }
-            t
+            Clock { transport: t, p, tm: &tg.tm, at: spos }
         };
+        // where the strips' block ends, for the lanes
+        let spos_end = match () {
+            _ if !rolling => spos,
+            _ if tg.looped && len > 0 => (spos + n) % len,
+            _ => spos + n,
+        };
+        if !rolling {
+            tracks.iter_mut().for_each(LiveTrack::hush);
+        }
         for b in [&mut dry.0, &mut dry.1, &mut send.0, &mut send.1] {
             b[..n].iter_mut().for_each(|x| *x = 0.0);
         }
         // phase 1: the plugins get their block first and work on it in their own processes meanwhile
         if tracks.iter().any(|t| matches!(t.src, Src::Plugin(_))) {
-            let mut transport = vst::transport_at(p, &tg.tm, pos, sr, true);
+            let mut transport = vst::transport_at(p, &tg.tm, pos, sr, rolling);
             if tg.looped {
                 transport.cycle = Some((0.0, p.total_beats()));
             }
             for t in tracks.iter_mut() {
-                t.begin_plugin(tg, pos, n, &transport);
+                t.begin_plugin(p, tg, pos, n, &transport, rolling);
             }
         }
         let any_solo = tracks.iter().any(|t| t.track.mixer.solo);
@@ -1733,20 +1948,28 @@ impl LiveEngine {
             } else {
                 match &mut t.src {
                     Src::Synth(s) => {
-                        for ev in t.pending.drain(..) {
+                        for ev in t.pending.drain(..).chain(t.input.drain(..)) {
                             s.send(0, ev);
                         }
-                        take_events(&t.events, &mut t.idx, &mut t.held, &mut t.on_since_wrap, pos, n, |off, ev| s.send(off, ev));
+                        if rolling {
+                            take_events(&t.events, &mut t.idx, &mut t.held, &mut t.on_since_wrap, pos, n, |off, ev| s.send(off, ev));
+                        }
                         s.render_block(bl, br);
                     }
                     Src::Rig(rg) => {
-                        for ev in t.pending.drain(..) {
+                        for ev in t.pending.drain(..).chain(t.input.drain(..)) {
                             rg.send(0, ev);
                         }
-                        take_events(&t.events, &mut t.idx, &mut t.held, &mut t.on_since_wrap, pos, n, |off, ev| rg.send(off, ev));
+                        if rolling {
+                            take_events(&t.events, &mut t.idx, &mut t.held, &mut t.on_since_wrap, pos, n, |off, ev| rg.send(off, ev));
+                        }
                         if let Some(old) = rg.render_block(pos, bl, br) {
                             let _ = jobs.send(Job::Discard(Box::new(old)));
                         }
+                    }
+                    Src::Raw(_) if !rolling => {
+                        bl.iter_mut().for_each(|x| *x = 0.0);
+                        br.iter_mut().for_each(|x| *x = 0.0);
                     }
                     Src::Raw(b) => {
                         for i in 0..n {
@@ -1763,6 +1986,8 @@ impl LiveEngine {
             }
             // runs while muted too, so unmuting doesn't bring back stale audio
             t.delay.process(bl, br);
+            let to = MixNow::at(&t.track, tg, len, spos_end);
+            let from = std::mem::replace(&mut t.mix, to);
             let m = &t.track.mixer;
             let audible = if any_solo { m.solo } else { !m.mute };
             if !audible {
@@ -1776,14 +2001,14 @@ impl LiveEngine {
                 }
                 None => None,
             };
-            relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Pre), bl, br, &fx_transport);
+            relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Pre), bl, br, &fx);
             t.strip.process(bl, br);
-            relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Post), bl, br, &fx_transport);
-            t.strip.finish(bl, br, duck);
+            relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Post), bl, br, &fx);
+            t.strip.finish(bl, br, duck, from, to);
             let pk = bl.iter().chain(br.iter()).fold(0f32, |a, x| a.max(x.abs()));
             t.level = pk.max(t.level * decay);
-            let rs = m.reverb_send as f32;
             for i in 0..n {
+                let rs = from.send + (to.send - from.send) * (i + 1) as f32 / n as f32;
                 dry.0[i] += bl[i];
                 dry.1[i] += br[i];
                 send.0[i] += bl[i] * rs;
@@ -1795,7 +2020,7 @@ impl LiveEngine {
         if p.master.reverb_inserts.is_empty() {
             self.reverb.process(&mut send.0[..n], &mut send.1[..n]);
         } else {
-            relatch |= run_inserts(&mut self.reverb_fx, None, &mut send.0[..n], &mut send.1[..n], &fx_transport);
+            relatch |= run_inserts(&mut self.reverb_fx, None, &mut send.0[..n], &mut send.1[..n], &fx);
             dsp::gain_s(&mut send.0[..n], &mut send.1[..n], p.master.reverb.return_db);
             self.bus_delay.process(&mut dry.0[..n], &mut dry.1[..n]);
         }
@@ -1803,15 +2028,16 @@ impl LiveEngine {
             dry.0[i] += send.0[i];
             dry.1[i] += send.1[i];
         }
-        relatch |= run_inserts(&mut self.master_fx, None, &mut dry.0[..n], &mut dry.1[..n], &fx_transport);
+        relatch |= run_inserts(&mut self.master_fx, None, &mut dry.0[..n], &mut dry.1[..n], &fx);
         if let Some(g) = &mut self.glue {
             g.process(&mut dry.0[..n], &mut dry.1[..n], None);
         }
         self.eq.process(&mut dry.0[..n], &mut dry.1[..n]);
 
-        // loudness drive: the last render's, or an estimate from what has played so far
+        // loudness drive: the last render's, or an estimate from what has played so far (of the song)
         let drive_db = match self.hints.drive_db {
             Some(d) => d,
+            None if !rolling => self.auto_drive_db,
             None => {
                 let m = self.meter.get_or_insert_with(|| ebur128::EbuR128::new(2, sr as u32, ebur128::Mode::I).expect("ebur128"));
                 let _ = m.add_frames_planar_f32(&[&dry.0[..n], &dry.1[..n]]);
@@ -1857,7 +2083,7 @@ mod tests {
             commands::apply(&mut p, &c).unwrap();
         }
         let tg = Timing::new(&p);
-        let mut t = LiveTrack::new(&p.tracks[0], &tg, &RenderHints::default(), 0);
+        let mut t = LiveTrack::new(&p.tracks[0], &tg, &RenderHints::default(), 0, tg.loop_len);
         t.voicing = Voicing { init_cc: vec![(22, 51)], keyswitches: vec![(0, 29), (89, 127)], default_ks: Some(17) };
         t.events = build_events(&t.track, &tg, &t.voicing);
         (t, tg)

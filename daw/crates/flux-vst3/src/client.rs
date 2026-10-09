@@ -119,6 +119,25 @@ pub struct ParamSet {
     pub display: Option<String>,
 }
 
+/// What a parameter value resolves to (see [`PluginHost::resolve_params`]).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ParamResolved {
+    pub name: String,
+    /// Whether the plugin lets a host change it during playback (VST3 `kCanAutomate`).
+    #[serde(default)]
+    pub automatable: bool,
+    /// The parameter, its value normalized, and its value now; or why it didn't resolve.
+    #[serde(flatten)]
+    pub resolved: Resolved,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Resolved {
+    Ok { id: u32, title: String, normalized: f64, current: f64 },
+    Err { error: String },
+}
+
 /// A loaded plugin's description.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Loaded {
@@ -385,6 +404,11 @@ impl PluginHost {
     /// Set parameters by name with human values (see [`crate::params`]). All or nothing.
     pub fn set_params(&self, values: &[(String, Value)]) -> Result<Vec<ParamSet>> {
         self.call_json(Request::SetParams { values: values.to_vec() }, Some("set"))
+    }
+
+    /// Resolve parameters by name with human values, as [`Self::set_params`] would, without setting them.
+    pub fn resolve_params(&self, values: &[(String, Value)]) -> Result<Vec<ParamResolved>> {
+        self.call_json(Request::ResolveParams { values: values.to_vec() }, Some("resolved"))
     }
 
     /// The plugin's state as `.vstpreset` bytes.

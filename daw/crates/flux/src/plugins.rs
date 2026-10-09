@@ -617,6 +617,36 @@ fn watchers() -> &'static Mutex<HashMap<SlotId, Watcher>> {
     W.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// A parameter an automation lane can move.
+#[derive(Clone, Debug)]
+pub struct Automatable {
+    /// What a lane names it by: its title, or `#id` where the plugin gives two parameters one title.
+    pub name: String,
+    pub title: String,
+    /// Where it is now, normalized 0..1.
+    pub value: f64,
+}
+
+/// The parameters of a slot's plugin that automation can move, in the plugin's order (the GUI's lane picker).
+pub fn automatable(sh: &Arc<Shared>, slot: SlotId) -> Result<Vec<Automatable>> {
+    let p = sh.lock().session.project.clone();
+    let all = vst::with_slot(&p, slot, |inst| inst.host.params(None))?;
+    let key = |t: &str| t.trim().to_lowercase();
+    let mut titles: HashMap<String, usize> = HashMap::new();
+    for q in &all {
+        *titles.entry(key(&q.title)).or_default() += 1;
+    }
+    Ok(all
+        .iter()
+        .filter(|q| q.has("automatable") && !q.has("read_only") && !q.has("hidden"))
+        .map(|q| {
+            let unique = !q.title.trim().is_empty() && titles[&key(&q.title)] == 1;
+            let name = if unique { q.title.trim().to_string() } else { format!("#{}", q.id) };
+            Automatable { name, title: q.title.trim().to_string(), value: q.value }
+        })
+        .collect())
+}
+
 /// Show a track's instrument window to the human (the GUI's track header uses this).
 pub fn open_track_editor(sh: &Arc<Shared>, track: u64) -> Result<()> {
     let p = sh.lock().session.project.clone();

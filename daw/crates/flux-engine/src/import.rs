@@ -91,6 +91,8 @@ pub fn import_midi(path: &Path) -> Result<Project> {
             mixer: Mixer::default(),
             meta: Default::default(),
             layer: String::new(),
+            automation: vec![],
+            clips: vec![],
         });
     }
     Ok(p)
@@ -199,11 +201,7 @@ pub fn import_pipeline(meta_path: &Path) -> Result<Project> {
     let set = meta["instrument_set"].as_str().unwrap_or("").to_string();
     for (i, t) in mtracks.into_iter().enumerate() {
         let stem = dir.join("stems").join(format!("{}.wav", t.name));
-        let instrument = if stem.exists() {
-            Instrument::Audio { path: crate::paths::portable(&stem) }
-        } else {
-            Instrument::None
-        };
+        let instrument = if stem.exists() { Instrument::Audio { path: String::new() } } else { Instrument::None };
         let mut meta_map = BTreeMap::new();
         let sfz = crate::paths::root().join("build").join("sfz").join(&set).join(format!("{}.sfz", t.name));
         if sfz.exists() {
@@ -215,8 +213,8 @@ pub fn import_pipeline(meta_path: &Path) -> Result<Project> {
             .and_then(|m| m["tracks"].get(&t.name))
             .map(|cfg| mixer_from(cfg, &mut warnings, &t.name))
             .unwrap_or_default();
-        let id = p.next_id;
-        p.next_id += 1;
+        let id = p.alloc_id();
+        let clips = if stem.exists() { vec![Clip::new(p.alloc_id(), crate::paths::portable(&stem), 0.0)] } else { vec![] };
         p.tracks.push(Track {
             id,
             name: t.name,
@@ -227,7 +225,9 @@ pub fn import_pipeline(meta_path: &Path) -> Result<Project> {
             bends: t.bends,
             mixer,
             meta: meta_map,
-                    layer: String::new(),
+            layer: String::new(),
+            automation: vec![],
+            clips,
         });
     }
     if let Some(m) = &mix {
@@ -289,6 +289,8 @@ pub fn import_pipeline(meta_path: &Path) -> Result<Project> {
                     mixer: Mixer::default(),
                     meta: meta_map,
                     layer: String::new(),
+                    automation: vec![],
+                    clips: vec![],
                 });
                 Some(id)
             } else {

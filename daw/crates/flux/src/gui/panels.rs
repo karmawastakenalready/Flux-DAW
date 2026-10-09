@@ -560,7 +560,13 @@ impl Gui {
         let w = fit_widths(ui.available_width(), &[(204.0, 236.0), (232.0, 320.0), (CHANNEL_W, CHANNEL_W), (248.0, INSERTS_W)]);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            section(ui, w[0], "Track", &format!("#{id} \u{b7} {} notes \u{b7} {} CC points \u{b7} {} bends", t.notes.len(), t.ccs.len(), t.bends.len()), |ui| {
+            let counts = if t.is_audio() {
+                let n = t.clips.len();
+                format!("#{id} \u{b7} {n} audio clip{} \u{b7} {} notes", if n == 1 { "" } else { "s" }, t.notes.len())
+            } else {
+                format!("#{id} \u{b7} {} notes \u{b7} {} CC points \u{b7} {} bends", t.notes.len(), t.ccs.len(), t.bends.len())
+            };
+            section(ui, w[0], "Track", &counts, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     // the rest of the row is the Rename button
@@ -613,11 +619,11 @@ impl Gui {
             let kind = match &t.instrument {
                 Instrument::Sfz { .. } => "SFZ sampler",
                 Instrument::Vst3 { .. } => "VST3 plugin",
-                Instrument::Audio { .. } => "Audio stem",
+                Instrument::Audio { .. } => "Audio clips",
                 Instrument::None => "No instrument",
             };
             section(ui, w[1], "Instrument", kind, |ui| {
-                ui.add(text_field(&mut self.instr_path, ui.available_width(), "Path to an .sfz, .vst3 or .wav file").font(mono(11.0)));
+                ui.add(text_field(&mut self.instr_path, ui.available_width(), "Path to an .sfz, .vst3 or audio file").font(mono(11.0)));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
@@ -626,7 +632,7 @@ impl Gui {
                     for (k, label, hint) in [
                         ("sfz", "SFZ", "Play this path as an SFZ instrument (sfizz)"),
                         ("vst3", "VST3", "Load this path as a VST3 instrument plugin (or a guitar rig)"),
-                        ("audio", "Audio", "Place this WAV at the start of the song"),
+                        ("audio", "Audio", "Play this audio file (WAV, FLAC or Ogg Vorbis) from the top of the song, in place of the track's clips"),
                     ] {
                         if button_ex(ui, None, label, Kind::Secondary, has_path).on_hover_text(hint).clicked() {
                             let path = self.instr_path.trim().to_string();
@@ -646,6 +652,10 @@ impl Gui {
                     if primary_button(ui, None, "Open plugin window", true).on_hover_text("Changes you make in the plugin's window are saved to this track (undo works)").clicked() {
                         act.push(Action::OpenPlugin(id));
                     }
+                }
+                if t.is_audio() {
+                    ui.add_space(6.0);
+                    caption(ui, "Drop audio files on the track to place more clips; drag them to move, trim and fade.");
                 }
                 if let Some(hint) = t.meta.get("sfz")
                     && !matches!(t.instrument, Instrument::Sfz { .. })

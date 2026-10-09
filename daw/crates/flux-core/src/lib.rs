@@ -4,12 +4,16 @@
 //! agent (MCP) or a human (GUI). That gives both the same powers, a single undo history, and an
 //! activity log that records who did what.
 
+pub mod automation;
+pub mod clip;
 pub mod commands;
 pub mod model;
 pub mod pitch;
 pub mod session;
 pub mod time;
 
+pub use automation::Lane;
+pub use clip::Clip;
 pub use commands::Command;
 pub use model::*;
 pub use session::{CommentOp, Session, Source};

@@ -1,40 +1,84 @@
+use crate::clip::Clip;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// A whole song. Times are in beats (quarter notes) from the top; bars are 1-based.
+///
+/// Read through [`ProjectFile`], which sets what a file leaves out and brings older files up to date.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "ProjectFile")]
 pub struct Project {
     pub name: String,
-    #[serde(default = "default_sr")]
     pub sample_rate: u32,
     /// Stepped tempo map: each point holds from its bar's downbeat until the next point.
     pub tempo: Vec<TempoPoint>,
     pub time_signature: (u32, u32),
-    #[serde(default)]
     pub key: String,
     /// Song length in bars (the loop length when `looped`).
     pub bars: u32,
-    #[serde(default)]
     pub looped: bool,
-    #[serde(default)]
     pub sections: Vec<Section>,
     /// The chord track: what harmony the song means at each point, independent of how the parts voice it.
     /// Composing tools (voice leading, bass lines) and the score linter read it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub harmony: Vec<ChordMark>,
-    #[serde(default)]
     pub tracks: Vec<Track>,
-    #[serde(default)]
     pub master: Master,
-    #[serde(default)]
     pub next_id: u64,
     /// Free-form notes for agents/humans (brief, intentions, todo).
-    #[serde(default)]
     pub notes: String,
     /// Timeline comments ("bar 12 the harp is too loud"). Annotations, not content: they live outside the
     /// undo history and never change the sound or the revision.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub comments: Vec<Comment>,
+}
+
+/// A project as a file holds it: what it leaves out takes its default.
+#[derive(Deserialize)]
+struct ProjectFile {
+    name: String,
+    #[serde(default = "default_sr")]
+    sample_rate: u32,
+    tempo: Vec<TempoPoint>,
+    time_signature: (u32, u32),
+    #[serde(default)]
+    key: String,
+    bars: u32,
+    #[serde(default)]
+    looped: bool,
+    #[serde(default)]
+    sections: Vec<Section>,
+    #[serde(default)]
+    harmony: Vec<ChordMark>,
+    #[serde(default)]
+    tracks: Vec<Track>,
+    #[serde(default)]
+    master: Master,
+    #[serde(default)]
+    next_id: u64,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    comments: Vec<Comment>,
+}
+
+impl From<ProjectFile> for Project {
+    fn from(f: ProjectFile) -> Project {
+        let ProjectFile { name, sample_rate, tempo, time_signature, key, bars, looped, sections, harmony, tracks, master, next_id, notes, comments } =
+            f;
+        let mut p = Project { name, sample_rate, tempo, time_signature, key, bars, looped, sections, harmony, tracks, master, next_id, notes, comments };
+        // before clips, an audio track played one file from the top
+        for i in 0..p.tracks.len() {
+            if let Instrument::Audio { path } = &mut p.tracks[i].instrument
+                && !path.is_empty()
+            {
+                let path = std::mem::take(path);
+                let id = p.alloc_id();
+                p.tracks[i].clips.insert(0, Clip::new(id, path, 0.0));
+            }
+        }
+        p
+    }
 }
 
 /// A note pinned to the timeline, by a human (from the GUI) or the agent, with an optional reply thread.
@@ -118,11 +162,23 @@ pub struct Track {
     /// Game layer for layered stem export ("base", "melody", "percussion", ...); empty means "base".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub layer: String,
+    /// Volume, pan, reverb send and plugin parameters over time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automation: Vec<crate::automation::Lane>,
+    /// Audio clips, in order of their starts: what an audio track plays (other tracks keep theirs silent, as an
+    /// audio track keeps its notes).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clips: Vec<Clip>,
 }
 
 impl Track {
     pub fn layer_name(&self) -> &str {
         if self.layer.is_empty() { "base" } else { &self.layer }
+    }
+
+    /// Whether it plays audio clips.
+    pub fn is_audio(&self) -> bool {
+        matches!(self.instrument, Instrument::Audio { .. })
     }
 }
 
@@ -156,8 +212,13 @@ pub enum Instrument {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         class: Option<String>,
     },
-    /// A pre-rendered audio file that starts at time 0 (stems, recordings, imports).
-    Audio { path: String },
+    /// Plays the track's audio clips (`Track::clips`): stems, recordings, one-shots, imports.
+    Audio {
+        /// A file to play from the top, as a clip. Projects stored audio tracks this way before clips; reading one,
+        /// or giving a track this instrument, turns the file into a clip, so a track's own is always empty.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        path: String,
+    },
     /// No sound (a MIDI / sketch track).
     None,
 }
@@ -502,6 +563,9 @@ pub struct Master {
     /// becomes the song's shared reverb.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reverb_inserts: Vec<Insert>,
+    /// Parameters of the master's and the reverb return's inserts over time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automation: Vec<crate::automation::Lane>,
 }
 
 impl Default for Master {
@@ -516,6 +580,7 @@ impl Default for Master {
             tail_s: 6.0,
             inserts: vec![],
             reverb_inserts: vec![],
+            automation: vec![],
         }
     }
 }
@@ -600,13 +665,19 @@ impl Project {
         self.chain_mut(c)?.get_mut(at)
     }
 
-    /// Takes an id for a new track or insert. Ids are never reused, even after a delete.
+    /// Takes an id for a new track, insert or clip. Ids are never reused, even after a delete.
     pub fn alloc_id(&mut self) -> u64 {
-        // an older project may have tracks or inserts at or past next_id (hand-edited files)
-        let used = self.tracks.iter().map(|t| t.id).chain(self.inserts().map(|(_, i)| i.id)).max().unwrap_or(0);
+        // an older project may have ids at or past next_id (hand-edited files)
+        let clips = self.tracks.iter().flat_map(|t| t.clips.iter().map(|c| c.id));
+        let used = self.tracks.iter().map(|t| t.id).chain(self.inserts().map(|(_, i)| i.id)).chain(clips).max().unwrap_or(0);
         let id = self.next_id.max(used + 1);
         self.next_id = id + 1;
         id
+    }
+
+    /// The clip with this id, with the index of its track and its index there.
+    pub fn clip(&self, id: u64) -> Option<(usize, usize, &Clip)> {
+        self.tracks.iter().enumerate().find_map(|(ti, t)| t.clips.iter().position(|c| c.id == id).map(|ci| (ti, ci, &t.clips[ci])))
     }
 }
 

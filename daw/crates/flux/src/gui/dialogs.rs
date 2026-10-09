@@ -127,6 +127,7 @@ impl Gui {
         if self.about {
             self.about = self.about_dialog(ctx);
         }
+        self.auto_picker(ctx, st, act);
     }
 
     /// The Open dialog. Returns false once it closes.

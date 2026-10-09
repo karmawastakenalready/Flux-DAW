@@ -8,7 +8,7 @@ use crate::state::{Audition, AuditionMarks, LastRender, Variant};
 use flux_core::{Command, CommentOp, Project, Session, commands};
 use flux_engine::render::{RenderOutput, SectionBound, TrackStat};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{By, Queryable};
 use serde_json::{Value, json};
 use widgets::Ballistic;
 
@@ -22,8 +22,36 @@ fn notes(spec: impl IntoIterator<Item = (f64, f64, u8, u8)>) -> Value {
     Value::Array(spec.into_iter().map(|(beat, dur, pitch, vel)| json!({"beat": beat, "dur": dur, "pitch": pitch, "vel": vel})).collect())
 }
 
-/// A small orchestral loop with sections, six tracks of different kinds and some mixer settings.
+/// A choir-like test stem (a swelling D minor chord, eight bars long at the demo's 92 BPM), written once.
+fn choir_wav() -> &'static std::path::Path {
+    static PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let sr = 22050u32;
+        let n = (32.0 * 60.0 / 92.0 * sr as f64) as usize;
+        let path = std::env::temp_dir().join("flux-gui-tests").join("choir.wav");
+        if flux_engine::clips::info(&path).ok().map(|i| i.frames) != Some(n as u64) {
+            let secs = n as f64 / sr as f64;
+            let mut x = Vec::with_capacity(n * 2);
+            for k in 0..n {
+                let t = k as f64 / sr as f64;
+                let swell = (t / secs * std::f64::consts::PI).sin().powf(0.7) * (0.75 + 0.25 * (t * 0.8 * std::f64::consts::TAU).sin());
+                let v = [146.83, 174.61, 220.0, 293.66].iter().map(|hz| (t * hz * std::f64::consts::TAU).sin()).sum::<f64>() * 0.16 * swell;
+                let s = (v * 32767.0) as i16;
+                x.extend([s, s]);
+            }
+            // written aside and moved into place, so a test running meanwhile never reads half a file
+            let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+            flux_engine::render::write_wav_i16(&tmp, sr, &x).expect("test stem");
+            std::fs::rename(&tmp, &path).expect("test stem");
+        }
+        path
+    })
+}
+
+/// A small orchestral loop with sections, six tracks of different kinds (one of them audio clips of a choir stem)
+/// and some mixer settings.
 pub(super) fn demo_project() -> Project {
+    let choir = choir_wav().to_string_lossy().into_owned();
     let mut p = Project::new("Sunken Temple", 92.0, 32);
     p.key = "D minor".into();
     let chords: [[u8; 3]; 4] = [[50, 53, 57], [46, 50, 53], [43, 46, 50], [45, 49, 52]];
@@ -43,7 +71,9 @@ pub(super) fn demo_project() -> Project {
         {"op": "add_track", "name": "Low Strings", "instrument": {"kind": "sfz", "path": "build/sfz/vsco/celli_sus.sfz"}},
         {"op": "add_track", "name": "Flute", "instrument": {"kind": "sfz", "path": "build/sfz/vsco/flute_sus.sfz"}},
         {"op": "add_track", "name": "Taiko", "instrument": {"kind": "vst3", "path": "plugins/Taiko Ensemble.vst3"}},
-        {"op": "add_track", "name": "Choir Stem", "instrument": {"kind": "audio", "path": "stems/choir.wav"}},
+        {"op": "add_track", "name": "Choir Stem", "instrument": {"kind": "audio"}},
+        {"op": "add_clip", "track": "Choir Stem", "path": choir, "bar": 5, "fade_in": 2.0, "fade_out": 3.0},
+        {"op": "add_clip", "track": "Choir Stem", "path": choir, "bar": 21, "length": 12.0, "gain_db": -3.0, "fade_out": 1.5},
         {"op": "add_notes", "track": "Warm Pad", "notes": notes(pad)},
         {"op": "add_notes", "track": "Harp", "notes": notes(harp)},
         {"op": "add_notes", "track": "Low Strings", "notes": notes(low)},
@@ -231,7 +261,19 @@ pub(super) fn demo_shared() -> Arc<Shared> {
         });
         st.audition_rev = 3;
     }
+    read_waveforms(&project);
     sh
+}
+
+/// Waits until the waveforms of `p`'s clips are read, so pictures show them (not "Loading").
+fn read_waveforms(p: &Project) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    for c in p.tracks.iter().flat_map(|t| &t.clips) {
+        while flux_engine::clips::peaks(&flux_engine::paths::resolve(&c.path), || {}).is_none() {
+            assert!(Instant::now() < deadline, "reading {}", c.path);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
 }
 
 
@@ -305,6 +347,10 @@ enum Part {
     Bottom,
     /// Whatever dialog is open, over an empty window.
     Dialogs,
+    /// The arrangement, with any dialog it opens.
+    Arrange,
+    /// The piano roll.
+    Roll,
 }
 
 /// Draw `part` over the whole screen (kittest hands out a ui inset by a margin), then carry out what was clicked.
@@ -329,10 +375,23 @@ fn draw(ui: &mut egui::Ui, g: &mut Gui, part: Part) {
             Part::Side => g.side_panel(&mut ui, &st, &f, &mut act),
             Part::Bottom => g.bottom(&mut ui, &st, &f, &mut act),
             Part::Dialogs => g.dialogs(&ctx, &st, &mut act),
+            Part::Arrange => {
+                g.keys(&ctx, &mut act);
+                g.play_in(&ctx, &st, &mut act);
+                g.arrange(&mut ui, &st, &f, &mut act);
+                g.dialogs(&ctx, &st, &mut act);
+            }
+            Part::Roll => {
+                g.play_in(&ctx, &st, &mut act);
+                g.piano_roll(&mut ui, &st, &f, &mut act);
+            }
             Part::Window => unreachable!(),
         }
     }
     g.run_actions(act);
+    if let Some(m) = g.sh.midi.tick(&g.sh) {
+        g.say(m);
+    }
 }
 
 /// A harness, holding the GPU for as long as it lives: the software adapter can crash when several tests
@@ -454,7 +513,7 @@ fn top_bars() {
 
 #[test]
 fn transport_menu() {
-    let mut h = stage(760.0, 250.0, demo_gui(|p| stopped_feed(p, 9, Mode::Live)), Part::TopBars);
+    let mut h = stage(760.0, 400.0, demo_gui(|p| stopped_feed(p, 9, Mode::Live)), Part::TopBars);
     h.get_by_label("Transport").click();
     h.run();
     h.hover_at(egui::pos2(260.0, 70.0));
@@ -733,4 +792,518 @@ fn bundled_marks_decode() {
         let icon = eframe::icon_data::from_png_bytes(bytes).unwrap_or_else(|e| panic!("flux-{size}.png: {e}"));
         assert_eq!((icon.width, icon.height), (size, size), "flux-{size}.png");
     }
+}
+
+/// The demo with automation on the harp: a smooth swell in, a fade out at the end, and a pan that holds left
+/// then jumps right; its volume lane shown.
+fn automated_gui() -> (Gui, u64) {
+    let g = demo_gui(|p| stopped_feed(p, 9, Mode::Live));
+    let edits = cmds(json!([
+        {"op": "add_automation", "track": "Harp", "target": "volume", "points": [
+            {"beat": 0, "value": -24, "shape": "smooth"}, {"beat": 16, "value": 0}, {"beat": 112, "value": 0}, {"beat": 128, "value": -90}]},
+        {"op": "add_automation", "track": "Harp", "target": "pan", "points": [{"beat": 0, "value": -0.5, "shape": "hold"}, {"beat": 64, "value": 0.5}]},
+    ]));
+    g.sh.apply(&edits, Source::Agent).unwrap();
+    let harp = track_id(&project_of(&g), "Harp");
+    let mut g = g;
+    g.auto.open.insert(automation::Owner::Track(harp), flux_core::automation::Target::Volume);
+    (g, harp)
+}
+
+/// Where a lane value sits in the harness's arrangement (1280 px wide): the harp's lane is the third row, under
+/// the pad's and the harp's track rows (104 px of overview, sections and ruler above; rows 4 px apart).
+fn harp_lane_at(beat: f64, db: f64) -> egui::Pos2 {
+    let (lane_l, lane_w) = (arrange::HEAD_W, 1280.0 - 12.0 - arrange::HEAD_W);
+    let top = 104.0 + 4.0 + 2.0 * (56.0 + 4.0);
+    let plot = (top + 6.0, top + automation::AUTO_H - 6.0);
+    let u = automation::Scale::Fader.unit(db);
+    egui::pos2(lane_l + (beat / 128.0) as f32 * lane_w, plot.1 - u * (plot.1 - plot.0))
+}
+
+fn harp_volume(h: &Stage, harp: u64) -> Vec<flux_core::automation::Point> {
+    let st = h.state().sh.lock();
+    let t = st.session.project.tracks.iter().find(|t| t.id == harp).unwrap();
+    t.automation.iter().find(|l| l.target == flux_core::automation::Target::Volume).map(|l| l.points.clone()).unwrap_or_default()
+}
+
+/// `clicks` clicks at `pos`, a frame apart (a whole run of the harness can step past the double-click window).
+fn click_at(h: &mut Stage, pos: egui::Pos2, button: egui::PointerButton, clicks: usize) {
+    h.hover_at(pos);
+    h.run();
+    for _ in 0..clicks {
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE });
+        }
+        h.step();
+    }
+    h.run();
+}
+
+#[test]
+fn automation_lane_shows_the_curve() {
+    let (mut g, harp) = automated_gui();
+    g.selected = Some(harp);
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    settle(&mut h);
+    let mut results = egui_kittest::SnapshotResults::new();
+    results.add(h.try_snapshot("arrange_automation"));
+    // the point under the pointer says what it is
+    h.hover_at(harp_lane_at(16.0, 0.0));
+    h.run();
+    results.add(h.try_snapshot("arrange_automation_hover"));
+    results.unwrap();
+}
+
+/// Points added, dragged, reshaped and deleted with the pointer: each edit one human command.
+#[test]
+fn automation_lane_edits() {
+    let (g, harp) = automated_gui();
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    let rev = h.state().sh.lock().session.revision;
+
+    // a click on the lane adds a point there, on the bar
+    click_at(&mut h, harp_lane_at(32.4, -6.0), egui::PointerButton::Primary, 1);
+    let pts = harp_volume(&h, harp);
+    let added = pts.iter().find(|q| q.beat == 32.0).expect("a point at bar 9");
+    assert!((added.value - -6.0).abs() < 0.6, "{}", added.value);
+    {
+        let st = h.state().sh.lock();
+        assert_eq!(st.session.revision, rev + 1);
+        assert_eq!(st.session.log.last().unwrap().source, Source::Human);
+    }
+
+    // dragging the swell's top from bar 5 to bar 7, down to -12 dB
+    let (from, to) = (harp_lane_at(16.0, 0.0), harp_lane_at(24.0, -12.0));
+    h.hover_at(from);
+    h.run();
+    h.drag_at(from);
+    h.run();
+    for k in 1..=4 {
+        h.hover_at(from + (to - from) * (k as f32 / 4.0));
+        h.run();
+    }
+    h.drop_at(to);
+    h.run();
+    let pts = harp_volume(&h, harp);
+    assert!(!pts.iter().any(|q| q.beat == 16.0), "moved away: {pts:?}");
+    let moved = pts.iter().find(|q| q.beat == 24.0).expect("moved to bar 7");
+    assert!((moved.value - -12.0).abs() < 0.6, "{}", moved.value);
+    assert_eq!(moved.shape, flux_core::automation::Shape::Linear);
+    assert_eq!(pts.len(), 5);
+
+    // a double-click changes how a point moves on: linear, then smooth
+    click_at(&mut h, harp_lane_at(112.0, 0.0), egui::PointerButton::Primary, 2);
+    let pts = harp_volume(&h, harp);
+    assert_eq!(pts.iter().find(|q| q.beat == 112.0).unwrap().shape, flux_core::automation::Shape::Smooth);
+    assert_eq!(pts.len(), 5, "a double-click on a point adds none");
+
+    // a right-click deletes one
+    click_at(&mut h, harp_lane_at(32.0, added.value), egui::PointerButton::Secondary, 1);
+    let pts = harp_volume(&h, harp);
+    assert!(!pts.iter().any(|q| q.beat == 32.0), "{pts:?}");
+    assert_eq!(pts.len(), 4);
+
+    // undo takes back one edit at a time
+    h.state().sh.with_session(|s| s.undo(Source::Human));
+    assert_eq!(harp_volume(&h, harp).len(), 5);
+}
+
+/// "A" shows a track's lane; the lane's menu switches to another target; the cross deletes the lane.
+#[test]
+fn automation_toggle_switch_and_delete() {
+    let (mut g, harp) = automated_gui();
+    g.auto.open.clear();
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    h.get_by_label("Show automation (2 lanes)").click();
+    h.run();
+    let owner = automation::Owner::Track(harp);
+    assert_eq!(h.state().auto.open.get(&owner), Some(&flux_core::automation::Target::Volume), "opens on the first lane");
+    h.get(By::new().role(egui::accesskit::Role::ComboBox).value("Volume")).click();
+    h.run();
+    h.get_by_label("Pan \u{b7} 2 points").click();
+    h.run();
+    assert_eq!(h.state().auto.open.get(&owner), Some(&flux_core::automation::Target::Pan));
+    h.get_by_label("Delete this lane").click();
+    h.run();
+    let st = h.state().sh.lock();
+    let t = st.session.project.tracks.iter().find(|t| t.id == harp).unwrap();
+    assert_eq!(t.automation.iter().map(|l| l.target.clone()).collect::<Vec<_>>(), [flux_core::automation::Target::Volume]);
+}
+
+/// The parameter picker lists each plugin's parameters; choosing one starts a lane at its current value.
+#[test]
+fn automation_parameter_picker() {
+    let (mut g, harp) = automated_gui();
+    let p = project_of(&g);
+    let t = p.tracks.iter().find(|t| t.id == harp).unwrap();
+    let (vinyl, sm) = (t.mixer.inserts.iter().find(|i| i.plugin_name() == "Vinyl").unwrap().id, t.mixer.inserts.iter().find(|i| i.plugin_name() == "ValhallaSupermassive").unwrap().id);
+    let param = |name: &str, value: f64| crate::plugins::Automatable { name: name.into(), title: name.into(), value };
+    g.auto.picker = Some(automation::Picker::with(
+        automation::Owner::Track(harp),
+        vec![
+            (Some(vinyl), "Vinyl".into(), Err("the plugin didn't load".into())),
+            (Some(sm), "ValhallaSupermassive".into(), Ok(vec![param("Mix", 0.35), param("Delay", 0.5), param("Feedback", 0.62), param("Density", 0.8)])),
+        ],
+    ));
+    let mut h = stage(1280.0, 620.0, g, Part::Arrange);
+    settle(&mut h);
+    h.snapshot("dialog_automate_parameter");
+    h.get_by_role(egui::accesskit::Role::TextInput).type_text("feed");
+    h.run();
+    assert!(h.query_by_label("Mix").is_none(), "the search narrows the list");
+    h.get_by_label("Feedback").click();
+    h.run();
+    assert!(h.state().auto.picker.is_none(), "choosing closes it");
+    let target = flux_core::automation::Target::Param { insert: Some(sm), param: "Feedback".into() };
+    assert_eq!(h.state().auto.open.get(&automation::Owner::Track(harp)), Some(&target));
+    let st = h.state().sh.lock();
+    let t = st.session.project.tracks.iter().find(|t| t.id == harp).unwrap();
+    let l = t.automation.iter().find(|l| l.target == target).expect("a Feedback lane");
+    assert!(l.normalized);
+    assert_eq!(l.points.iter().map(|q| (q.beat, q.value)).collect::<Vec<_>>(), [(0.0, 0.62)]);
+}
+
+/// Where a beat is across the harness's arrangement (1280 px wide, 128 beats).
+fn lane_x(beat: f64) -> f32 {
+    arrange::HEAD_W + (beat / 128.0) as f32 * (1280.0 - 12.0 - arrange::HEAD_W)
+}
+
+/// The middle of track row `i` (0-based) when no automation lane is open.
+fn row_y(i: usize) -> f32 {
+    104.0 + 4.0 + i as f32 * (56.0 + 4.0) + 28.0
+}
+
+/// Inside the choir's clips (below their header bands).
+const CHOIR_Y: f32 = 444.0;
+
+fn clips_of(h: &Stage, track: &str) -> Vec<flux_core::Clip> {
+    let st = h.state().sh.lock();
+    st.session.project.tracks.iter().find(|t| t.name == track).map(|t| t.clips.clone()).unwrap_or_default()
+}
+
+/// A drag with the primary button from `from` to `to` in steps, `mods` held as it is let go.
+fn drag(h: &mut Stage, from: egui::Pos2, to: egui::Pos2, mods: egui::Modifiers) {
+    h.hover_at(from);
+    h.run();
+    h.drag_at(from);
+    h.run();
+    for k in 1..=4 {
+        h.hover_at(from + (to - from) * (k as f32 / 4.0));
+        h.run();
+    }
+    h.event(egui::Event::ModifiersChanged(mods));
+    h.run();
+    h.drop_at(to);
+    h.run();
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run();
+}
+
+#[test]
+fn audio_clips_show_their_waveforms() {
+    let g = demo_gui(|p| stopped_feed(p, 9, Mode::Live));
+    g.sh.apply(&cmds(json!([{"op": "set_mixer", "track": "Choir Stem", "mixer": {"mute": false}}])), Source::Human).unwrap();
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    // the first clip selected, the pointer over it: its fade handles show
+    click_at(&mut h, egui::pos2(lane_x(32.0), CHOIR_Y), egui::PointerButton::Primary, 1);
+    h.hover_at(egui::pos2(lane_x(36.0), CHOIR_Y));
+    h.run();
+    h.snapshot("arrange_clips");
+}
+
+/// A clip moved on the grid, its end trimmed and its fade in made longer with the pointer: each one human edit.
+#[test]
+fn audio_clips_move_trim_and_fade() {
+    let g = demo_gui(|p| stopped_feed(p, 1, Mode::Live));
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    let rev = h.state().sh.lock().session.revision;
+    let none = egui::Modifiers::NONE;
+    let at = |beat: f64| egui::pos2(lane_x(beat), CHOIR_Y);
+
+    // two bars later: the grid takes it to the bar
+    drag(&mut h, at(32.0), at(40.3), none);
+    let c = clips_of(&h, "Choir Stem")[0].clone();
+    assert_eq!((c.start, c.offset, c.length), (24.0, 0.0, None));
+    // its end trimmed back to bar 14
+    drag(&mut h, egui::pos2(lane_x(56.0) - 3.0, CHOIR_Y), at(52.2), none);
+    let c = clips_of(&h, "Choir Stem")[0].clone();
+    assert_eq!(c.start, 24.0);
+    let len = c.length.expect("trimmed");
+    assert!((len - 28.0 * 60.0 / 92.0).abs() < 1e-9, "{len}");
+    // the fade in's handle (on the top of the body, where the fade ends) dragged from 2 s to 4 s
+    let fade = |s: f64| egui::pos2(lane_x(24.0 + s * 92.0 / 60.0), row_y(5) - 28.0 + 6.0 + 14.0);
+    drag(&mut h, fade(2.0), fade(4.0), none);
+    let c = clips_of(&h, "Choir Stem")[0].clone();
+    assert!((c.fade_in - 4.0).abs() < 0.01, "{}", c.fade_in);
+    assert_eq!(c.fade_out, 3.0);
+    {
+        let st = h.state().sh.lock();
+        assert_eq!(st.session.revision, rev + 3);
+        assert_eq!(st.session.log.last().unwrap().source, Source::Human);
+    }
+
+    // Escape lets go of a drag without changing anything
+    let before = clips_of(&h, "Choir Stem");
+    h.hover_at(at(30.0));
+    h.run();
+    h.drag_at(at(30.0));
+    h.run();
+    h.hover_at(at(60.0));
+    h.run();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    h.drop_at(at(60.0));
+    h.run();
+    assert_eq!(clips_of(&h, "Choir Stem"), before);
+}
+
+/// A clip moved onto another track (one without an instrument becomes an audio track), and copied with Ctrl.
+#[test]
+fn audio_clips_go_to_other_tracks_and_copy() {
+    let g = demo_gui(|p| stopped_feed(p, 1, Mode::Live));
+    g.sh.apply(&cmds(json!([{"op": "add_track", "name": "Hits"}])), Source::Human).unwrap();
+    let mut h = stage(1280.0, 600.0, g, Part::Arrange);
+    let second = clips_of(&h, "Choir Stem")[1].clone();
+    assert_eq!(second.start, 80.0);
+    drag(&mut h, egui::pos2(lane_x(88.0), CHOIR_Y), egui::pos2(lane_x(88.0) + 2.0, row_y(6) + 8.0), egui::Modifiers::NONE);
+    assert_eq!(clips_of(&h, "Choir Stem").len(), 1);
+    let hits = clips_of(&h, "Hits");
+    assert_eq!(hits, std::slice::from_ref(&second), "the same clip, at the same time");
+    assert!(h.state().sh.lock().session.project.tracks.iter().find(|t| t.name == "Hits").unwrap().is_audio());
+    // Ctrl as it is let go: a copy four bars later, the clip stays
+    drag(&mut h, egui::pos2(lane_x(88.0), row_y(6) + 8.0), egui::pos2(lane_x(104.2), row_y(6) + 8.0), egui::Modifiers::COMMAND);
+    let hits = clips_of(&h, "Hits");
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0], second);
+    assert_eq!((hits[1].start, hits[1].length, hits[1].gain_db, hits[1].fade_out), (96.0, Some(12.0), -3.0, 1.5));
+    assert_ne!(hits[1].id, second.id);
+}
+
+/// The right-click menu splits at the playhead and duplicates; Delete removes the selected clip.
+#[test]
+fn audio_clip_menu_and_delete_key() {
+    // the playhead at bar 9: inside the first clip
+    let g = demo_gui(|p| stopped_feed(p, 9, Mode::Live));
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    let at = |beat: f64| egui::pos2(lane_x(beat), CHOIR_Y);
+    click_at(&mut h, at(40.0), egui::PointerButton::Secondary, 1);
+    h.get_by_label("Split at playhead").click();
+    h.run();
+    let cl = clips_of(&h, "Choir Stem");
+    assert_eq!(cl.iter().map(|c| c.start).collect::<Vec<_>>(), [16.0, 32.0, 80.0]);
+    // the back half selected and deleted
+    click_at(&mut h, at(40.0), egui::PointerButton::Primary, 1);
+    assert_eq!(h.state().clips.selected, Some(cl[1].id));
+    h.key_press(egui::Key::Delete);
+    h.run();
+    let after = clips_of(&h, "Choir Stem");
+    assert_eq!(after.iter().map(|c| c.id).collect::<Vec<_>>(), [cl[0].id, cl[2].id]);
+    assert_eq!(h.state().clips.selected, None);
+    // the front half duplicated right after itself
+    click_at(&mut h, at(20.0), egui::PointerButton::Secondary, 1);
+    h.get_by_label("Duplicate").click();
+    h.run();
+    let cl = clips_of(&h, "Choir Stem");
+    assert_eq!(cl.len(), 3);
+    assert_eq!((cl[1].start, cl[1].offset, cl[1].length), (32.0, 0.0, cl[0].length));
+}
+
+/// A file as the desktop hands it over.
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+/// Audio files dropped on an audio track become clips there; under the tracks, a new audio track each.
+#[test]
+fn audio_files_dropped_from_the_desktop() {
+    let g = demo_gui(|p| stopped_feed(p, 1, Mode::Live));
+    let mut h = stage(1280.0, 600.0, g, Part::Arrange);
+    let choir = choir_wav().to_path_buf();
+    let drop = |h: &mut Stage, pos: egui::Pos2, files: &[&std::path::Path]| {
+        h.hover_at(pos);
+        h.run();
+        h.input_mut().dropped_files.extend(files.iter().map(|f| Arc::new(Dropped(f.to_path_buf())) as egui::DroppedFileHandle));
+        h.run();
+    };
+    // on the choir track in bar 25 (the grid takes it to the bar), with a file that isn't audio
+    drop(&mut h, egui::pos2(lane_x(97.0), CHOIR_Y), &[choir.as_path(), std::path::Path::new("notes.txt")]);
+    let cl = clips_of(&h, "Choir Stem");
+    assert_eq!(cl.len(), 3);
+    assert!(cl.iter().any(|c| c.start == 96.0 && c.path == flux_engine::paths::portable(&choir)), "{cl:?}");
+    assert!(h.state().flash.as_ref().is_some_and(|(m, _)| m.starts_with("Skipped 1 file that isn't audio")));
+    // under the tracks: a new audio track, named after the file
+    drop(&mut h, egui::pos2(lane_x(0.0) + 1.0, 580.0), &[choir.as_path()]);
+    let st = h.state().sh.lock();
+    let t = st.session.project.tracks.iter().find(|t| t.name == "choir").expect("a new track");
+    assert!(t.is_audio());
+    assert_eq!(t.clips.iter().map(|c| c.start).collect::<Vec<_>>(), [0.0]);
+}
+
+/// What went to the live engine since last asked: (track name, event).
+fn sent(h: &Stage) -> Vec<(String, Ev)> {
+    let g = h.state();
+    let p = project_of(g);
+    let evs = std::mem::take(&mut *g.sh.midi.sent.lock());
+    evs.into_iter().map(|(id, ev)| (p.tracks.iter().find(|t| t.id == id).map(|t| t.name.clone()).unwrap_or_default(), ev)).collect()
+}
+
+fn flash(h: &Stage) -> String {
+    h.state().flash.as_ref().map(|(m, _)| m.clone()).unwrap_or_default()
+}
+
+fn on(name: &str, ev: Ev) -> (String, Ev) {
+    (name.to_string(), ev)
+}
+
+#[test]
+fn computer_keyboard_plays_the_selected_track() {
+    let mut g = demo_gui(|p| stopped_feed(p, 1, Mode::Live));
+    let p = project_of(&g);
+    let (harp, flute) = (track_id(&p, "Harp"), track_id(&p, "Flute"));
+    g.selected = Some(harp);
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    // letters are letters until M
+    h.key_press(egui::Key::A);
+    h.run();
+    assert!(sent(&h).is_empty());
+    h.key_press(egui::Key::M);
+    h.run();
+    assert!(h.state().sh.midi.keys_on());
+    assert!(flash(&h).starts_with("The computer keyboard plays notes"), "{}", flash(&h));
+    h.key_down(egui::Key::A);
+    h.run();
+    assert_eq!(h.state().sh.midi.held(harp), vec![60]);
+    h.key_up(egui::Key::A);
+    h.run();
+    assert_eq!(sent(&h), vec![on("Harp", Ev::On(60, 100)), on("Harp", Ev::Off(60))]);
+    // an octave up; a key held while another track is selected lets go where it started
+    h.key_press(egui::Key::X);
+    h.key_down(egui::Key::S);
+    h.run();
+    h.state_mut().selected = Some(flute);
+    h.run();
+    h.key_up(egui::Key::S);
+    // softer, on the flute; then the window loses focus with the key down
+    h.key_press(egui::Key::C);
+    h.key_down(egui::Key::D);
+    h.run();
+    assert_eq!(h.state().sh.midi.held(flute), vec![76]);
+    h.event(egui::Event::WindowFocused(false));
+    h.run();
+    assert_eq!(sent(&h), vec![on("Harp", Ev::On(74, 100)), on("Harp", Ev::Off(74)), on("Flute", Ev::On(76, 80)), on("Flute", Ev::Off(76))]);
+    // with Ctrl the letters are shortcuts; an audio track takes no notes
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::A);
+    h.state_mut().selected = Some(track_id(&p, "Choir Stem"));
+    h.run();
+    h.key_press(egui::Key::A);
+    h.run();
+    assert!(sent(&h).is_empty());
+    assert!(flash(&h).starts_with("Select a track to play"), "{}", flash(&h));
+    h.key_press(egui::Key::M);
+    h.run();
+    assert!(!h.state().sh.midi.keys_on());
+}
+
+#[test]
+fn piano_roll_keys_play_and_light_up() {
+    let mut g = demo_gui(|p| stopped_feed(p, 1, Mode::Live));
+    let flute = track_id(&project_of(&g), "Flute");
+    g.view = View::Roll;
+    g.selected = Some(flute);
+    let mut h = stage(900.0, 480.0, g, Part::Roll);
+    // press a key towards its right end, slide two keys down, let go
+    let at = egui::pos2(40.0, 300.0);
+    h.hover_at(at);
+    h.run();
+    h.drag_at(at);
+    h.run();
+    let first = sent(&h);
+    let [(name, Ev::On(pitch, vel))] = first.as_slice() else { panic!("{first:?}") };
+    assert_eq!((name.as_str(), *vel), ("Flute", 107));
+    assert_eq!(h.state().sh.midi.held(flute), vec![*pitch]);
+    h.snapshot("roll_key_held");
+    h.hover_at(at + egui::vec2(0.0, 26.0));
+    h.run();
+    h.drop_at(at + egui::vec2(0.0, 26.0));
+    h.run();
+    assert_eq!(sent(&h), vec![on("Flute", Ev::Off(*pitch)), on("Flute", Ev::On(pitch - 2, 107)), on("Flute", Ev::Off(pitch - 2))]);
+    assert!(h.state().sh.midi.held(flute).is_empty());
+}
+
+#[test]
+fn recording_from_the_computer_keyboard() {
+    let mut g = demo_gui(|p| live_feed(p, 9, 0.0));
+    let p = project_of(&g);
+    let flute = track_id(&p, "Flute");
+    let notes_of = |h: &Stage| h.state().sh.lock().session.project.tracks.iter().find(|t| t.id == flute).unwrap().notes.clone();
+    let tm = TimeMap::new(&p);
+    let at = |beat: f64| Some(tm.sec(tm.bar_beat(9) + beat));
+    g.selected = None;
+    let mut h = stage(1280.0, 520.0, g, Part::Arrange);
+    let before = notes_of(&h);
+    // nothing selected: nothing to record onto
+    h.key_press(egui::Key::R);
+    h.run();
+    assert!(flash(&h).starts_with("Select an instrument track to record on"), "{}", flash(&h));
+    assert_eq!(h.state().sh.midi.recording(), None);
+    // the song is heard at bar 9 (the player stands in with a clock)
+    h.state_mut().selected = Some(flute);
+    *h.state().sh.midi.clock.lock() = at(0.0);
+    h.key_press(egui::Key::R);
+    h.run();
+    assert_eq!(h.state().sh.midi.recording(), Some(flute));
+    assert!(flash(&h).contains("No MIDI keyboard is connected"), "{}", flash(&h));
+    h.key_press(egui::Key::M);
+    h.key_down(egui::Key::A);
+    h.run();
+    *h.state().sh.midi.clock.lock() = at(1.0);
+    h.key_up(egui::Key::A);
+    h.run();
+    *h.state().sh.midi.clock.lock() = at(1.5);
+    h.key_down(egui::Key::D);
+    h.run();
+    *h.state().sh.midi.clock.lock() = at(2.5);
+    h.state_mut().feed = Some(live_feed(&p, 9, 2.5));
+    h.run();
+    settle(&mut h);
+    h.snapshot("arrange_recording");
+    assert_eq!(notes_of(&h), before, "nothing is on the track until the take ends");
+    // R again: the take goes onto the track (the key still down ends there), as one undo step
+    h.key_press(egui::Key::R);
+    h.run();
+    assert_eq!(h.state().sh.midi.recording(), None);
+    assert_eq!(flash(&h), "Recorded 2 notes on Flute (bar 9)");
+    let added: Vec<_> = notes_of(&h).into_iter().filter(|n| !before.contains(n)).map(|n| (n.start, n.dur, n.pitch, n.vel)).collect();
+    assert_eq!(added, vec![(32.0, 1.0, 60, 100), (33.5, 1.0, 64, 100)]);
+    assert!(h.state().sh.with_session(|s| s.undo(Source::Human)));
+    assert_eq!(notes_of(&h), before);
+    h.key_up(egui::Key::D);
+    h.run();
+}
+
+#[test]
+fn automation_scales() {
+    use automation::Scale;
+    use flux_core::automation::{MAX_VOLUME_DB, SILENT_DB};
+    let f = Scale::Fader;
+    assert_eq!(f.unit(SILENT_DB), 0.0);
+    assert_eq!(f.unit(MAX_VOLUME_DB), 1.0);
+    assert!((f.unit(0.0) - 0.708).abs() < 1e-3, "0 dB sits about 70% up: {}", f.unit(0.0));
+    for db in [-60.0, -24.0, -6.0, 0.0, 6.0] {
+        assert!((f.value(f.unit(db)) - db).abs() < 1e-4, "{db}");
+    }
+    assert_eq!(f.value(0.01), SILENT_DB, "the bottom of the lane is silence");
+    let pts = [flux_core::automation::Point { beat: 0.0, value: 200.0, shape: Default::default() }, flux_core::automation::Point { beat: 4.0, value: 800.0, shape: Default::default() }];
+    let hz = Scale::of(&flux_core::automation::Target::Param { insert: None, param: "Cutoff".into() }, false, &pts);
+    assert!(hz.unit(200.0) > 0.05 && hz.unit(800.0) < 0.95, "room above and below the points");
+    assert_eq!(Scale::of(&flux_core::automation::Target::Pan, false, &[]), Scale::Linear(-1.0, 1.0));
 }

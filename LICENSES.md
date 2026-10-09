@@ -31,6 +31,7 @@ General MIDI fallback: GeneralUser GS by S. Christian Collins
 Guitar samples: METAL-GTX by Unreal Instruments
 Amp captures: Peavey 5150 full rig captures by jp_is_out_of_tune (TONE3000)
 Amp captures: 5150 III full rig captures by obijuan (TONE3000)
+Synth sounds: Vital by Vital Audio (https://vital.audio)
 ```
 
 ## Sound content (can end up in the game's audio)
@@ -57,6 +58,7 @@ Amp captures: 5150 III full rig captures by obijuan (TONE3000)
 | **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**, by jp_is_out_of_tune | TONE3000 tone 32868 (5 captures, a2) | **TONE3000 T3K license** | No | https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868 (manual download); our download note |
 | **5150 III full rig (NAM captures)**, by obijuan | TONE3000 tone 30247 (4 captures, a2) | **TONE3000 T3K license** | No | https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247 (manual download); our download note |
 | **Spectrasonics Omnisphere 2**, by Spectrasonics | 2 (purchased license) | **Spectrasonics Omnisphere 2 license (purchased)** | No | https://www.spectrasonics.net/products/omnisphere/ |
+| **Vital**, by Vital Audio (Matt Tytel) | 1.0.7 (Vital Basic, free account) | **Vital end user license agreement** | No | https://vital.audio |
 
 Notes:
 - **Salamander Grand Piano V3**: Original recording: https://archive.org/details/SalamanderGrandPianoV3
@@ -66,23 +68,30 @@ Notes:
 - **Bottles - The Sound of Air, Glass and Water**: Played by the Decent Sampler VST3: load Bottles/Bottles.dspreset with plugins load_preset.
 - **GeneralUser GS**: Commercial music is allowed, but the author cannot be 100 % sure where every sample came from. Keep it out of shipped mixes unless the owner accepts that risk.
 - **METAL-GTX**: The archive carries no license file. The author's About page says (in Japanese) that all libraries are free to use, that works made with them may be used commercially, that no credit is needed, and that modifying or redistributing the data without permission is forbidden. Rendered music is fine under these terms; the samples themselves must never be shipped or shared. A snapshot of the terms is in licenses/terms/metal-gtx-terms.txt.
+- **METAL-GTX**: owner approval: Owner approved these terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the samples are never shipped or shared.
 - **METAL-GTX**: The operation manual is a separate download (METAL-GTX_Manual.rar, 65,636,514 bytes, sha256 d4496bd5533c8e5732cd60c8ed7bcedf6a87b22ccb9e0dd950d45b86ecf6eae5, Drive id 1iAVanIze4j_o2xVRysDHwmv23MmLts7P), cached in instruments/vst/_dl/metal_gtx/.
 - **METAL-GTX**: Fetching from Google Drive: files this large get a virus-scan confirmation page instead of the file, which the fetcher refuses (it never follows HTML). Download it by hand from the author's page into the cache path; `fetch` then checks the SHA-256 and installs from the cache.
 - **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**: SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page.
+- **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**: owner approval: Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.
 - **5150 III full rig (NAM captures)**: SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page.
+- **5150 III full rig (NAM captures)**: owner approval: Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.
 - **Spectrasonics Omnisphere 2**: Layered game exports (base / melody / percussion uploaded separately) can expose a part on its own; ask Spectrasonics (info@spectrasonics.net) for written confirmation before shipping adaptive layers that contain it.
 - **Spectrasonics Omnisphere 2**: owner approval: Owner bought the license (Oct 2026) as an explicit exception to the CC0/CC BY rule. Use only inside full mixes or layers mixed with other instruments; never export an Omnisphere part on its own stem or layer; never use it for sound effects.
+- **Vital**: The EULA explicitly allows commercial music made with Vital and its presets. Flux projects keep each Vital part as a saved plugin state (plugin-states/*.vstpreset) holding the preset's data: those files must never be published.
+- **Vital**: owner approval: Owner installed this plugin for the music project ("I installed some more vsts for you to use aswell", Oct 2026) after allowing any VST ("you can install whatever vsts you want btw"). Only rendered audio leaves the project; the plugin, its presets and its saved states are never shipped or shared.
 
 ## Open license questions
 
-- **METAL-GTX** (warning, `license-needs-approval`): LicenseRef-UnrealInstruments-Free (freeware): free to use but not an open license (no redistribution of the files); record the owner's decision in license.approved
-- **Peavey 5150 + Mesa 4x12 full rig (NAM captures)** (warning, `license-needs-approval`): LicenseRef-TONE3000-T3K (freeware): free to use but not an open license (no redistribution of the files); record the owner's decision in license.approved
-- **5150 III full rig (NAM captures)** (warning, `license-needs-approval`): LicenseRef-TONE3000-T3K (freeware): free to use but not an open license (no redistribution of the files); record the owner's decision in license.approved
+None: every asset's license allows commercial use in the game and its text was found.
 
 ## Tools (not shipped in the game; their licenses don't attach to rendered audio)
 
 | Tool | Version | License | Source |
 |---|---|---|---|
+| Decent Sampler | 1.36.1 | **Decent Sampler (freeware, no published license)** | https://www.decentsamples.com/product/decent-sampler-plugin/ |
+| Valhalla Supermassive | 5.0.0 | **Valhalla DSP terms of use** | https://valhalladsp.com/shop/reverb/valhalla-supermassive/ |
+| iZotope Vinyl | 1.13.0 | **Native Instruments USA (formerly iZotope) end user license agreement** | https://www.izotope.com/en/products/vinyl.html |
+| STL Ignite Emissary plug-in bundle (Emissary, NadIR, cabinet IRs) | 2.0.1 | **STL Tones end user license agreement** | https://www.stltones.com/products/stl-ignite-emissary-plug-in-bundle |
 | Surge XT (portable, with factory data) | 1.3.4 | **GNU General Public License v3.0 or later** | https://github.com/surge-synthesizer/releases-xt/releases/tag/1.3.4 |
 | Surge XT VST3 (plugin only) | 1.3.4 | **GNU General Public License v3.0 or later** | https://github.com/surge-synthesizer/releases-xt/releases/tag/1.3.4 |
 | Dexed | 1.0.1 | **GNU General Public License v3.0** | https://github.com/asb2m10/dexed/releases/tag/v1.0.1 |
@@ -125,6 +134,11 @@ Notes:
 - Peavey 5150 + Mesa 4x12 full rig (NAM captures): `instruments/nam/jp-5150-mesa-fullrig/SOURCE.txt` (LicenseRef-TONE3000-T3K)
 - 5150 III full rig (NAM captures): `instruments/nam/ob1-5150iii-fullrig/SOURCE.txt` (LicenseRef-TONE3000-T3K)
 - Spectrasonics Omnisphere 2: https://support.spectrasonics.net/manual/Omnisphere/legal/all.htm (LicenseRef-Spectrasonics-EULA)
+- Vital: https://vital.audio/eula (LicenseRef-Vital-EULA)
+- Decent Sampler: **not recorded** (LicenseRef-DecentSampler-Freeware)
+- Valhalla Supermassive: https://valhalladsp.com/?p=49 (LicenseRef-Valhalla-Terms)
+- iZotope Vinyl: https://www.izotope.com/en/license-agreement (LicenseRef-NI-iZotope-EULA)
+- STL Ignite Emissary plug-in bundle (Emissary, NadIR, cabinet IRs): https://www.stltones.com/pages/end-user-license-agreements (LicenseRef-STL-Tones-EULA)
 - Surge XT (portable, with factory data): https://raw.githubusercontent.com/surge-synthesizer/surge/f7b97c682ade0b87da85ca5968b63d5c7c98e68d/LICENSE (GPL-3.0-or-later)
 - Surge XT VST3 (plugin only): https://raw.githubusercontent.com/surge-synthesizer/surge/f7b97c682ade0b87da85ca5968b63d5c7c98e68d/LICENSE (GPL-3.0-or-later)
 - Dexed: `plugins/dexed/LICENSE` (GPL-3.0)

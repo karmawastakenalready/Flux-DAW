@@ -2,17 +2,20 @@
 //! (or the reverb return's inserts) -> master inserts -> master chain.
 //!
 //! Loops are rendered "in steady state": each track's tail past the loop point is folded onto its start,
-//! and every effect runs over [last 8 s of the loop][the loop][first 1 s of the loop], keeping the middle
-//! (with VST3 inserts, the lead-in is as long as their tails, repeating the loop as often as needed). The
-//! wrap-around therefore equals continuous playback (checked and reported as `seam_error_db`).
+//! and every effect runs over [last 8 s of the loop][the loop][first 1 s of the loop], keeping the middle. A linear
+//! VST3 insert (a reverb or a delay, even one whose modulation runs free) instead runs over one pass of the loop and
+//! its tail, which is folded onto the loop's start like an instrument's; one that isn't linear gets a lead-in as long
+//! as its tail, repeating the loop as often as needed. The wrap-around therefore equals continuous playback (checked
+//! and reported as `seam_error_db`).
 
 use crate::dsp::{self, Stereo};
-use crate::{license, paths, rig, sfizz, vst, worker};
+use crate::automation::MixCurves;
+use crate::{clips, license, paths, rig, sfizz, vst, worker};
 use anyhow::{anyhow, bail, Context, Result};
 use flux_core::{Insert, InsertPosition, Instrument, Project, TimeMap, Track};
 use rustfft::{num_complex::Complex, FftPlanner};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,6 +23,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 pub type Progress = Arc<dyn Fn(String) + Send + Sync>;
+
+/// A track as it leaves its strip, and its reverb send at each frame (`None`: it sends nothing).
+type SentTrack = (Stereo, Option<Vec<f32>>);
 
 #[derive(Clone, Default)]
 pub struct RenderOptions {
@@ -110,10 +116,14 @@ pub struct RenderOutput {
     /// Problems outside the tracks (an insert on the master or the reverb return that failed and was
     /// passed through); tracks report theirs in `TrackStat::warning`.
     pub warnings: Vec<String>,
-    /// A looped render whose loop isn't exactly periodic (`seam_error_db` above -60: an effect with free-running
-    /// modulation or a sound of its own) has its first milliseconds crossfaded from what follows its end, so the
+    /// A looped render whose loop isn't exactly periodic (`seam_error_db` above -60: an insert that isn't linear and
+    /// modulates or makes a sound of its own) has its first milliseconds crossfaded from what follows its end, so the
     /// wrap doesn't click: this long (ms).
     pub seam_crossfade_ms: Option<f64>,
+    /// Looped renders: the audible VST3 inserts that run over a lead-in toward the loop's steady state, because they
+    /// aren't linear (or ring for over a minute), rather than folding their tail onto the loop's start: "Vinyl on the
+    /// master". If the loop doesn't repeat exactly, one of these is why.
+    pub lead_in_inserts: Vec<String>,
 }
 
 impl RenderOutput {
@@ -223,15 +233,7 @@ pub fn render_instrument_here(track: &Track, p: &Project, tm: &TimeMap, frames: 
     let sr = p.sample_rate;
     match &track.instrument {
         Instrument::None => Ok(((vec![0.0; frames], vec![0.0; frames]), "none".into())),
-        Instrument::Audio { path } => {
-            let (fsr, (mut l, mut r)) = read_wav(&paths::resolve(path))?;
-            if fsr != sr {
-                bail!("{} is {fsr} Hz; project is {sr} Hz", path);
-            }
-            l.resize(frames, 0.0);
-            r.resize(frames, 0.0);
-            Ok(((l, r), "audio".into()))
-        }
+        Instrument::Audio { .. } => Ok((clips::render(track, p, tm, frames)?, "audio".into())),
         Instrument::Sfz { path, init_cc } => {
             let sfz = paths::resolve(path);
             let mut synth = sfizz::Synth::new(&sfz, sr, 256)?;
@@ -265,13 +267,19 @@ pub fn raw_frames(p: &Project) -> usize {
 
 pub fn raw_key(track: &Track, p: &Project, frames: usize) -> u64 {
     let mut h = DefaultHasher::new();
-    let shape = serde_json::to_string(&(&track.instrument, &track.notes, &track.ccs, &track.bends, &p.tempo, p.time_signature, p.sample_rate));
+    let shape = serde_json::to_string(&(&track.instrument, &track.notes, &track.ccs, &track.bends, &track.clips, &p.tempo, p.time_signature, p.sample_rate));
     shape.unwrap_or_default().hash(&mut h);
     frames.hash(&mut h);
+    // the instrument's parameter lanes (they wrap round a loop)
+    let lanes = vst::slot_lanes(p, vst::SlotId::Instrument(track.id));
+    if !lanes.is_empty() {
+        serde_json::to_string(&lanes).unwrap_or_default().hash(&mut h);
+        p.looped.hash(&mut h);
+    }
     // files the audio depends on: an edited WAV or preset, or an updated plugin, sounds different
     // (a rig: its file, SFZ, amp models, impulse responses and plugins)
     let files: Vec<PathBuf> = match &track.instrument {
-        Instrument::Audio { path } => vec![paths::resolve(path)],
+        Instrument::Audio { .. } => clips::files(track),
         Instrument::Vst3 { .. } if rig::plays_rig(track) => rig::files(track),
         Instrument::Vst3 { path, preset, .. } => std::iter::once(path.as_str()).chain(preset.as_deref()).map(|f| vst::binary_of(&paths::resolve(f))).collect(),
         _ => vec![],
@@ -483,8 +491,16 @@ fn process_strip(buf: &mut Stereo, t: &Track, sr: f64, lfo: Option<(usize, usize
     comp_loud
 }
 
-/// The end of the channel strip, after the post inserts: the sidechain duck, mono below, then panning and width.
-fn finish_strip(buf: &mut Stereo, t: &Track, sr: f64, duck_env: Option<&[f32]>) {
+/// The end of the channel strip, after the post inserts: the volume lane, the sidechain duck, mono below, then
+/// panning and width. `pos_of(k)`: the song sample at frame `k`.
+fn finish_strip(buf: &mut Stereo, t: &Track, sr: f64, duck_env: Option<&[f32]>, curves: &MixCurves, pos_of: &dyn Fn(usize) -> usize) {
+    if curves.has_gain() {
+        for i in 0..buf.0.len() {
+            let g = curves.gain(pos_of(i));
+            buf.0[i] *= g;
+            buf.1[i] *= g;
+        }
+    }
     if let Some(env) = duck_env {
         for i in 0..buf.0.len().min(env.len()) {
             buf.0[i] *= env[i];
@@ -494,7 +510,11 @@ fn finish_strip(buf: &mut Stereo, t: &Track, sr: f64, duck_env: Option<&[f32]>) 
     if t.mixer.mono_below_hz > 0.0 {
         dsp::MonoBelow::new(sr, t.mixer.mono_below_hz).process(&mut buf.0, &mut buf.1);
     }
-    dsp::place(buf, t.mixer.pan, t.mixer.width);
+    if curves.has_pan() {
+        dsp::place_moving(&mut buf.0, &mut buf.1, |i| curves.pan(pos_of(i), t.mixer.pan), t.mixer.width);
+    } else {
+        dsp::place(buf, t.mixer.pan, t.mixer.width);
+    }
 }
 
 /// A track's inserts at one place in its strip.
@@ -502,41 +522,103 @@ fn track_inserts(t: &Track, at: InsertPosition) -> impl Iterator<Item = &Insert>
     t.mixer.inserts.iter().filter(move |i| i.position == at)
 }
 
+/// How a looped render runs its inserts. A linear insert with a finite tail (see `vst::insert_is_linear`) runs over
+/// one pass of the loop and its tail, and the tail is folded onto the loop's start, as the instruments' are: that
+/// repeats exactly even when the plugin's modulation runs free, and needs no lead-in. The others run over the work
+/// buffer, lead-in included, and reach the loop's steady state.
+#[derive(Default)]
+struct Folds {
+    /// Insert id -> its tail (samples).
+    tails: HashMap<u64, usize>,
+    /// The work buffer's lead-in and the loop's length (samples).
+    pre: usize,
+    l: usize,
+}
+
+/// The audible inserts of a looped render that fold, with their tails in samples.
+fn fold_tails(p: &Project) -> HashMap<u64, usize> {
+    let sr = p.sample_rate as f64;
+    let audible = audible_tracks(p);
+    let mut tails = HashMap::new();
+    for (chain, ins) in p.inserts() {
+        if ins.bypass || matches!(chain, flux_core::Chain::Track(t) if !audible.contains(&t)) {
+            continue;
+        }
+        // one that fails to load reports it when it renders
+        if let (Ok(Some(tail)), Ok(true)) = (vst::insert_tail_s(p, ins.id), vst::insert_is_linear(p, ins.id)) {
+            tails.insert(ins.id, ((tail + FOLD_MARGIN_S) * sr) as usize);
+        }
+    }
+    tails
+}
+
+/// Added to a folded insert's tail: it is timed to 90 dB down.
+const FOLD_MARGIN_S: f64 = 1.0;
+
+fn audible_tracks(p: &Project) -> Vec<u64> {
+    let any_solo = p.tracks.iter().any(|t| t.mixer.solo);
+    p.tracks.iter().filter(|t| if any_solo { t.mixer.solo } else { !t.mixer.mute }).map(|t| t.id).collect()
+}
+
 /// Run `buf` through inserts in order (bypassed ones pass it through). `pos_of(k)`: the song sample at
-/// frame `k`. A plugin that fails passes the audio through as well; the failures are returned.
-fn run_inserts<'a>(p: &Project, tm: &TimeMap, inserts: impl Iterator<Item = &'a Insert>, buf: &mut Stereo, pos_of: &dyn Fn(usize) -> usize) -> Vec<String> {
+/// frame `k`. A plugin that fails passes the audio through as well; the failures (and lanes left out) are returned.
+fn run_inserts<'a>(
+    p: &Project,
+    tm: &TimeMap,
+    inserts: impl Iterator<Item = &'a Insert>,
+    buf: &mut Stereo,
+    pos_of: &dyn Fn(usize) -> usize,
+    folds: &Folds,
+) -> Vec<String> {
     let mut errors = vec![];
     for ins in inserts.filter(|i| !i.bypass) {
-        if let Err(e) = vst::process_insert(p, tm, ins.id, buf, pos_of) {
-            errors.push(format!("{e:#} (passed through)"));
+        let r = match folds.tails.get(&ins.id) {
+            Some(&tail) => fold_insert(p, tm, ins.id, buf, folds, tail),
+            None => vst::process_insert(p, tm, ins.id, buf, pos_of),
+        };
+        match r {
+            Ok(warnings) => errors.extend(warnings),
+            Err(e) => errors.push(format!("{e:#} (passed through)")),
         }
     }
     errors
 }
 
+/// A folding insert (see [`Folds`]) on a work buffer that repeats every loop: one pass of the loop (song samples 0..l
+/// start at the lead-in's end) and `tail` samples of silence go through the plugin, the output is folded to the loop's
+/// length and laid out like the work buffer again.
+fn fold_insert(p: &Project, tm: &TimeMap, id: u64, buf: &mut Stereo, folds: &Folds, tail: usize) -> Result<Vec<String>> {
+    let Folds { pre, l, .. } = *folds;
+    let mut once: Stereo = (buf.0[pre..pre + l].to_vec(), buf.1[pre..pre + l].to_vec());
+    once.0.resize(l + tail, 0.0);
+    once.1.resize(l + tail, 0.0);
+    let warnings = vst::process_insert(p, tm, id, &mut once, &|k| k)?;
+    *buf = circular_window(&fold_loop(&once, l), l, pre, buf.0.len());
+    Ok(warnings)
+}
+
 /// The reverb return for the summed sends: the built-in reverb, or the reverb return's inserts when it has
 /// any (bypassed ones pass the sends through, as on a DAW's return track); `return_db` either way.
-fn reverb_return(p: &Project, tm: &TimeMap, send: &Stereo, pos_of: &dyn Fn(usize) -> usize) -> (Stereo, Vec<String>) {
+fn reverb_return(p: &Project, tm: &TimeMap, send: &Stereo, pos_of: &dyn Fn(usize) -> usize, folds: &Folds) -> (Stereo, Vec<String>) {
     let sr = p.sample_rate as f64;
     if p.master.reverb_inserts.is_empty() {
         return (dsp::reverb(send, sr, &p.master.reverb), vec![]);
     }
     let mut wet = send.clone();
-    let errors = run_inserts(p, tm, p.master.reverb_inserts.iter(), &mut wet, pos_of);
+    let errors = run_inserts(p, tm, p.master.reverb_inserts.iter(), &mut wet, pos_of, folds);
     dsp::gain(&mut wet, p.master.reverb.return_db);
     (wet, errors)
 }
 
-/// Seconds of lead-in a looped render needs for the inserts to reach steady state: their tails (reported or
-/// measured, at least `MIN_INSERT_TAIL_S`), capped at `MAX_LEAD_IN_S`. 0 without inserts.
-fn insert_lead_in_s(p: &Project) -> f64 {
+/// Seconds of lead-in a looped render needs for the inserts that don't fold to reach steady state: their tails
+/// (reported or measured, at least `MIN_INSERT_TAIL_S`), capped at `MAX_LEAD_IN_S`. 0 without such inserts.
+fn insert_lead_in_s(p: &Project, folded: &HashMap<u64, usize>) -> f64 {
     const MIN_INSERT_TAIL_S: f64 = 8.0;
     const MAX_LEAD_IN_S: f64 = 60.0;
-    let any_solo = p.tracks.iter().any(|t| t.mixer.solo);
-    let audible: Vec<u64> = p.tracks.iter().filter(|t| if any_solo { t.mixer.solo } else { !t.mixer.mute }).map(|t| t.id).collect();
+    let audible = audible_tracks(p);
     let mut lead: f64 = 0.0;
     for (chain, ins) in p.inserts() {
-        if ins.bypass || matches!(chain, flux_core::Chain::Track(t) if !audible.contains(&t)) {
+        if ins.bypass || folded.contains_key(&ins.id) || matches!(chain, flux_core::Chain::Track(t) if !audible.contains(&t)) {
             continue;
         }
         // one that fails to load reports it when it renders
@@ -587,8 +669,19 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
     let tail = (p.master.tail_s * srf) as usize;
     let raw_frames = l + tail;
     let looped = p.looped;
-    let lead_in = if looped { insert_lead_in_s(p) } else { 0.0 };
+    let fold = if looped { fold_tails(p) } else { HashMap::new() };
+    let lead_in = if looped { insert_lead_in_s(p, &fold) } else { 0.0 };
     let (pre, post) = if looped { (((8.0 * srf) as usize).min(l).max((lead_in * srf) as usize), (srf as usize).min(l)) } else { (0, 0) };
+    let folds = Folds { tails: fold, pre, l };
+    let lead_in_inserts: Vec<String> = if looped {
+        let audible = audible_tracks(p);
+        p.inserts()
+            .filter(|(c, i)| !i.bypass && !folds.tails.contains_key(&i.id) && !matches!(c, flux_core::Chain::Track(t) if !audible.contains(t)))
+            .map(|(c, i)| format!("{} on {}", i.plugin_name(), vst::chain_label(p, c)))
+            .collect()
+    } else {
+        vec![]
+    };
     // the song sample at a frame of the work buffer
     let pos_of = move |k: usize| if looped { (k + l - pre % l) % l } else { k };
     let work = if looped { pre + l + post } else { raw_frames };
@@ -615,8 +708,8 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
     let stats: Arc<Mutex<Vec<Option<TrackStat>>>> = Arc::new(Mutex::new(vec![None; p.tracks.len()]));
     // layer name -> (dry, send)
     let layer_bufs: Mutex<BTreeMap<String, (Stereo, Stereo)>> = Mutex::new(BTreeMap::new());
-    // per track: the processed buffer (track stems)
-    let track_bufs: Mutex<Vec<Option<Stereo>>> = Mutex::new(vec![None; if opts.track_stems { p.tracks.len() } else { 0 }]);
+    // per track: the processed buffer and its send at each frame (track stems)
+    let track_bufs: Mutex<Vec<Option<SentTrack>>> = Mutex::new(vec![None; if opts.track_stems { p.tracks.len() } else { 0 }]);
     // the tracks without their delays, summed (the dry master)
     let no_fx = Mutex::new(if opts.dry { (vec![0f32; work], vec![0f32; work]) } else { (vec![], vec![]) });
     let next = AtomicUsize::new(0);
@@ -660,7 +753,7 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
                         stat.engine = engine;
                         stat.restricted = license::of_track(t).map(|r| r.vendor.to_string());
                         let mut buf = if looped { circular_window(&fold_loop(&raw, l), l, pre, work) } else { Arc::try_unwrap(raw).unwrap_or_else(|a| (*a).clone()) };
-                        add_warning(&mut stat.warning, run_inserts(p, &tm, track_inserts(t, InsertPosition::Pre), &mut buf, &pos_of));
+                        add_warning(&mut stat.warning, run_inserts(p, &tm, track_inserts(t, InsertPosition::Pre), &mut buf, &pos_of, &folds));
                         // the strip again without its delay, for the dry master
                         let undelayed = (opts.dry && t.mixer.delay.is_some()).then(|| buf.clone());
                         let duck_env = t.mixer.duck.and_then(|d| {
@@ -679,16 +772,17 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
                             }
                             Some(dsp::duck_envelope(work, srf, &trig, d.depth_db, d.release_ms))
                         });
+                        let curves = MixCurves::new(t, &tm, srf, if looped { l } else { raw_frames }, looped);
                         stat.comp_loud_db = process_strip(&mut buf, t, srf, looped.then_some((pre, l)));
-                        add_warning(&mut stat.warning, run_inserts(p, &tm, track_inserts(t, InsertPosition::Post), &mut buf, &pos_of));
-                        finish_strip(&mut buf, t, srf, duck_env.as_deref());
+                        add_warning(&mut stat.warning, run_inserts(p, &tm, track_inserts(t, InsertPosition::Post), &mut buf, &pos_of, &folds));
+                        finish_strip(&mut buf, t, srf, duck_env.as_deref(), &curves, &pos_of);
                         if opts.dry {
                             let undelayed = undelayed.map(|mut b| {
                                 let mut t2 = t.clone();
                                 t2.mixer.delay = None;
                                 process_strip(&mut b, &t2, srf, looped.then_some((pre, l)));
-                                run_inserts(p, &tm, track_inserts(t, InsertPosition::Post), &mut b, &pos_of);
-                                finish_strip(&mut b, t, srf, duck_env.as_deref());
+                                run_inserts(p, &tm, track_inserts(t, InsertPosition::Post), &mut b, &pos_of, &folds);
+                                finish_strip(&mut b, t, srf, duck_env.as_deref(), &curves, &pos_of);
                                 b
                             });
                             let src = undelayed.as_ref().unwrap_or(&buf);
@@ -717,6 +811,9 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
                             }
                         }
                         let rs = t.mixer.reverb_send as f32;
+                        // the send at each frame (the mixer's, or its lane's)
+                        let sends: Option<Vec<f32>> =
+                            curves.sends(rs).then(|| (0..work).map(|k| curves.send(pos_of(k), rs)).collect());
                         {
                             let mut d = dry.lock().unwrap();
                             for k in 0..work {
@@ -724,11 +821,11 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
                                 d.1[k] += buf.1[k];
                             }
                         }
-                        if rs > 0.0 {
+                        if let Some(g) = &sends {
                             let mut s = send.lock().unwrap();
                             for k in 0..work {
-                                s.0[k] += buf.0[k] * rs;
-                                s.1[k] += buf.1[k] * rs;
+                                s.0[k] += buf.0[k] * g[k];
+                                s.1[k] += buf.1[k] * g[k];
                             }
                         }
                         if opts.layers {
@@ -738,12 +835,16 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
                             for k in 0..work {
                                 d.0[k] += buf.0[k];
                                 d.1[k] += buf.1[k];
-                                s.0[k] += buf.0[k] * rs;
-                                s.1[k] += buf.1[k] * rs;
+                            }
+                            if let Some(g) = &sends {
+                                for k in 0..work {
+                                    s.0[k] += buf.0[k] * g[k];
+                                    s.1[k] += buf.1[k] * g[k];
+                                }
                             }
                         }
                         if opts.track_stems {
-                            track_bufs.lock().unwrap()[i] = Some(buf);
+                            track_bufs.lock().unwrap()[i] = Some((buf, sends));
                         }
                     }
                 }
@@ -757,12 +858,12 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
     progress("master".into());
     let mut bus = Arc::try_unwrap(dry).map_err(|_| anyhow!("dry bus still shared"))?.into_inner().unwrap();
     let send = Arc::try_unwrap(send).map_err(|_| anyhow!("send bus still shared"))?.into_inner().unwrap();
-    let (wet, mut warnings) = reverb_return(p, &tm, &send, &pos_of);
+    let (wet, mut warnings) = reverb_return(p, &tm, &send, &pos_of, &folds);
     for k in 0..work {
         bus.0[k] += wet.0[k];
         bus.1[k] += wet.1[k];
     }
-    warnings.extend(run_inserts(p, &tm, p.master.inserts.iter(), &mut bus, &pos_of));
+    warnings.extend(run_inserts(p, &tm, p.master.inserts.iter(), &mut bus, &pos_of, &folds));
     let mut glue_env: Option<Vec<f32>> = None;
     let mut glue_loud_db = None;
     if let Some(g) = &p.master.glue {
@@ -849,13 +950,13 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
     // each part: exact for linear ones, `layer_sum_error_db` shows what the others change)
     let part = |mut dry: Stereo, send: Option<&Stereo>| -> Stereo {
         if let Some(send) = send {
-            let (wet, _) = reverb_return(p, &tm, send, &pos_of);
+            let (wet, _) = reverb_return(p, &tm, send, &pos_of, &folds);
             for k in 0..work {
                 dry.0[k] += wet.0[k];
                 dry.1[k] += wet.1[k];
             }
         }
-        run_inserts(p, &tm, p.master.inserts.iter(), &mut dry, &pos_of);
+        run_inserts(p, &tm, p.master.inserts.iter(), &mut dry, &pos_of, &folds);
         if let Some(env) = &glue_env {
             for k in 0..work {
                 dry.0[k] *= env[k];
@@ -886,9 +987,9 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
     let mut track_stems: Vec<(String, Stereo)> = vec![];
     if opts.track_stems {
         progress("track stems".into());
-        let bufs: Vec<(usize, Stereo)> =
+        let bufs: Vec<(usize, SentTrack)> =
             track_bufs.into_inner().unwrap().into_iter().enumerate().filter_map(|(i, b)| b.map(|b| (i, b))).collect();
-        let slots: Vec<Mutex<Option<(usize, Stereo)>>> = bufs.into_iter().map(|b| Mutex::new(Some(b))).collect();
+        let slots: Vec<Mutex<Option<(usize, SentTrack)>>> = bufs.into_iter().map(|b| Mutex::new(Some(b))).collect();
         let done: Mutex<Vec<(usize, Stereo)>> = Mutex::new(Vec::with_capacity(slots.len()));
         let next = AtomicUsize::new(0);
         std::thread::scope(|scope| {
@@ -896,9 +997,8 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
                 scope.spawn(|| loop {
                     let k = next.fetch_add(1, Ordering::SeqCst);
                     let Some(slot) = slots.get(k) else { break };
-                    let Some((i, buf)) = slot.lock().unwrap().take() else { continue };
-                    let rs = p.tracks[i].mixer.reverb_send as f32;
-                    let send = (rs > 0.0).then(|| (buf.0.iter().map(|x| x * rs).collect(), buf.1.iter().map(|x| x * rs).collect()));
+                    let Some((i, (buf, sends))) = slot.lock().unwrap().take() else { continue };
+                    let send = sends.map(|g| (buf.0.iter().zip(&g).map(|(x, g)| x * g).collect(), buf.1.iter().zip(&g).map(|(x, g)| x * g).collect()));
                     let stem = part(buf, send.as_ref());
                     done.lock().unwrap().push((i, stem));
                 });
@@ -973,6 +1073,7 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
         dry: dry_master,
         warnings,
         seam_crossfade_ms: (fade > 0).then(|| fade as f64 * 1000.0 / srf),
+        lead_in_inserts,
     })
 }
 

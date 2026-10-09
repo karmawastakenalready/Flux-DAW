@@ -24,12 +24,12 @@ original samples. The copy is returned as `OutputFile`s, and the caller decides 
 | `edit` | `Derived` copies, in two layouts: inline (one file, includes inlined) or mirror (included files copied alongside). Sample paths are relocated through `default_path` prefixes, relative by default. Region and opcode edits map back to the source text. |
 | `set`, `wrap`, `manifest` | Instrument sets (`sfz/sets/<set>.toml`), wrapper generation (`expr`, `strings`, `keyswitch`, `patch`, `none`), and the incremental build and check. |
 | `tighten` | A short release, and no release-triggered regions (for palm-muted parts through high-gain amps). |
-| `retune` | Measures each sample against its key and writes `tune=` corrections. |
+| `retune` | Measures each sample against its key and writes `tune=` corrections. Samples it can't trust (release noise, harmonics that disagree) are left as they are, and the report says why. |
 | `even` | Plays every key through sfizz and brings each key to the median level of its velocity layer. |
 | `ranges` | Keys, key centres, keyswitches and their names, velocity layers, round robins, release regions and controllers. |
 | `audit` | Missing samples, case mismatches (files that would fail on a case-sensitive system), includes that were not read, and absolute paths. |
 | `samples`, `audio` | WAV/FLAC headers (format, rate, depth, length, `smpl` loops and root key) and summaries per instrument or per folder. |
-| `pitch` | f0 and cents measurement. This is the same algorithm as the Python tools, checked on 464 real samples. |
+| `pitch` | f0 estimate (the same algorithm as `tools/sample_pitch.py`, checked on 464 real samples) and the tuning measurement `retune` uses: the median deviation of up to ten harmonics, with a check that they stand out from the noise and agree. |
 | `info` | `describe(&inst)`: everything an agent needs before writing a part, as JSON or as a few lines of text. |
 
 ## sfizz compatibility
@@ -117,9 +117,12 @@ Differences from the Python tools (`tools/sfz_*.py`):
 
 - **tighten** follows includes, and removes release regions wherever their `trigger` is set (Python dropped
   whole `<group>` blocks).
-- **retune** measures against the effective `pitch_keycenter`, or the sample's root key when
-  `pitch_keycenter=sample`. By default the correction replaces the existing `tune`;
-  `keep_existing_tune = true` adds to it, as Python did.
+- **retune** measures the median of up to ten harmonics. Python took the strongest of the first three,
+  usually the fundamental. On low plucked notes the instrument's body pulls the fundamental 25-50 cents
+  off, so Python's corrections put low pizzicato notes out of tune. Noise samples (releases, pedal) are
+  left alone instead of being tuned to whatever peak they have. It measures against the effective
+  `pitch_keycenter`, or the sample's root key when `pitch_keycenter=sample`. By default the correction
+  replaces the existing `tune`; `keep_existing_tune = true` adds to it, as Python did.
 - **even** cuts all sound before each measurement. The Python tool let earlier notes ring into later
   measurements; with a 30 s release that made some keys read up to 10.9 dB too loud.
   `reset_between_notes = false` gives the old behaviour exactly. The layer comes from the velocity ranges,

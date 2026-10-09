@@ -216,7 +216,7 @@ fn scan_usage(ws: &Workspace, a: &Args) -> Option<Usage> {
     if a.flag("no-usage") || ws.loaded.manifest.policy.usage_roots.is_empty() {
         return None;
     }
-    usage::scan(&ws.root, &ws.loaded).ok()
+    usage::scan(&ws.root, &ws.loaded, &ws.places).ok()
 }
 
 /// Status of one asset (no hashing).
@@ -249,7 +249,10 @@ pub fn status(ws: &Workspace, assets: &[&Asset], usage: Option<&Usage>) -> Vec<A
         .map(|a| {
             let (v, _, _) = audit::verdict(ws, a);
             let (install, files, bytes) = match ws.asset_dir(a) {
-                None => ("external".to_string(), 0, 0),
+                None if ws.external_installs(a).is_empty() => ("external".to_string(), 0, 0),
+                None if !a.applies_here() => ("n/a".to_string(), 0, 0),
+                None if ws.is_installed(a) => ("external, found".to_string(), 0, 0),
+                None => ("external, not found".to_string(), 0, 0),
                 Some(_) if !a.applies_here() => ("n/a".to_string(), 0, 0),
                 Some(d) if ws.is_installed(a) => {
                     let (b, f) = fsutil::tree_size(&d, &[".git"]).unwrap_or((0, 0));

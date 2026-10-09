@@ -1,9 +1,12 @@
 //! The arrangement: the song overview, sections, a ruler with comment markers, and one row per track (header
-//! with mute, solo and a live meter, then the lane with its clips).
+//! with automation, mute, solo and a live meter, then the lane: its notes by section, or an audio track's clips),
+//! each with its automation lane when shown, and a master row for the automation of its inserts.
 
+use super::automation::{AUTO_H, Owner, Picker, Span, choices};
 use super::theme::*;
 use super::widgets::*;
 use super::{Action, Feed, Gui, Side, View, bars_label, mixer_cmd, src_style};
+use crate::midi::TakeView;
 use crate::state::{LastRender, State};
 use flux_core::commands::MixerPatch;
 use flux_core::{Instrument, Project, TimeMap, Track};
@@ -16,13 +19,18 @@ const OVER_H: f32 = 40.0;
 const SEC_H: f32 = 20.0;
 const RULER_H: f32 = 26.0;
 const PAD_R: f32 = 12.0;
+const MASTER_H: f32 = 32.0;
 
 pub fn kind_label(t: &Track) -> String {
     let file = |p: &str| p.rsplit(['/', '\\']).next().unwrap_or(p).to_string();
     match &t.instrument {
         Instrument::Sfz { path, .. } => format!("SFZ \u{b7} {}", file(path).trim_end_matches(".sfz")),
         Instrument::Vst3 { path, .. } => format!("VST3 \u{b7} {}", file(path).trim_end_matches(".vst3").trim_end_matches(".rig.json")),
-        Instrument::Audio { .. } => "Audio stem".into(),
+        Instrument::Audio { .. } => match t.clips.as_slice() {
+            [] => "Audio \u{b7} no clips".into(),
+            [c] => format!("Audio \u{b7} {}", c.file_name()),
+            cs => format!("Audio \u{b7} {} clips", cs.len()),
+        },
         Instrument::None => "No instrument".into(),
     }
 }
@@ -97,6 +105,7 @@ impl Gui {
         let lane_w = lane_r - lane_l;
         let x_of = move |beat: f64| lane_l + (beat / total) as f32 * lane_w;
         let beat_at = move |x: f32| ((x - lane_l) / lane_w) as f64 * total;
+        let span = Span { lane_l, lane_w, total };
         let painter = ui.painter_at(top);
         painter.rect_filled(top, 0.0, PANEL);
         painter.vline(px(lane_l) - 1.0, top.y_range(), Stroke::new(1.0, LINE));
@@ -186,9 +195,18 @@ impl Gui {
         let rows_top = ui.cursor().top();
         let any_solo = p.tracks.iter().any(|x| x.mixer.solo);
         let empty = p.tracks.is_empty();
+        let take = self.sh.midi.take_view();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            self.clips.rows.clear();
             for t in &p.tracks {
                 let (row, resp) = ui.allocate_exact_size(vec2(full.width(), ROW_H), Sense::click());
+                let owner = Owner::Track(t.id);
+                if self.auto.open.contains_key(&owner) {
+                    let (lane_row, _) = ui.allocate_exact_size(vec2(full.width(), AUTO_H), Sense::hover());
+                    if ui.is_rect_visible(lane_row) {
+                        self.auto_lane(ui, lane_row, span, st, owner, col(t.color), playhead, act);
+                    }
+                }
                 if !ui.is_rect_visible(row) {
                     continue;
                 }
@@ -199,10 +217,14 @@ impl Gui {
 
                 // header
                 let hr = Rect::from_min_max(row.min, Pos2::new(lane_l - 1.0, row.bottom()));
-                pnt.rect_filled(hr, 0.0, if sel { PANEL.lerp_to_gamma(ACCENT, 0.12) } else { PANEL });
+                let rec = take.as_ref().filter(|v| v.track == t.id);
+                pnt.rect_filled(hr, 0.0, if rec.is_some() { PANEL.lerp_to_gamma(ERR, 0.12) } else if sel { PANEL.lerp_to_gamma(ACCENT, 0.12) } else { PANEL });
                 pnt.rect_filled(Rect::from_min_size(hr.min, vec2(3.0, hr.height() - 1.0)), 0.0, if audible { c } else { dimmed(c) });
+                if rec.is_some() {
+                    pnt.circle_filled(Pos2::new(hr.left() + 8.5, hr.top() + 16.5), 2.5, ERR);
+                }
                 let text_l = hr.left() + 14.0;
-                let tp = pnt.with_clip_rect(Rect::from_min_max(Pos2::new(text_l, hr.top()), Pos2::new(hr.right() - 60.0, hr.bottom())));
+                let tp = pnt.with_clip_rect(Rect::from_min_max(Pos2::new(text_l, hr.top()), Pos2::new(hr.right() - 84.0, hr.bottom())));
                 tp.text(Pos2::new(text_l, hr.top() + 9.0), Align2::LEFT_TOP, &t.name, medium(12.5), if audible { TEXT } else { TEXT3 });
                 let kind = kind_label(t);
                 let g = tp.layout_no_wrap(kind, body(11.0), TEXT3);
@@ -235,12 +257,23 @@ impl Gui {
                     let boundary = b == 1 || b == p.bars + 1 || p.sections.iter().any(|s| s.start_bar == b);
                     pnt.vline(x, row.y_range(), Stroke::new(1.0, if boundary { LINE } else { LINE_SOFT }));
                 }
-                clips(&pnt, row, t, p, &tm, x_of, audible);
+                if t.is_audio() {
+                    self.audio_clips(ui, lr, t, &tm, span, audible, playhead, act);
+                } else {
+                    note_regions(&pnt, row, t, p, &tm, x_of, audible);
+                }
+                if let Some(v) = rec {
+                    take_region(&pnt, lr, v, playhead, total, x_of);
+                }
+                if t.is_audio() || t.instrument == Instrument::None {
+                    self.clips.rows.push((t.id, lr));
+                }
                 pnt.hline(row.x_range(), px(row.bottom()) - 1.0, Stroke::new(1.0, LINE_SOFT));
 
-                // mute / solo over the header
+                // automation / mute / solo over the header
                 let m_r = Rect::from_min_size(Pos2::new(hr.right() - 54.0, hr.top() + 8.0), vec2(20.0, 18.0));
                 let s_r = m_r.translate(vec2(24.0, 0.0));
+                self.auto_toggle(ui, m_r.translate(vec2(-24.0, 0.0)), p, owner);
                 if toggle_at(ui, m_r, Id::new(("arr_m", t.id)), t.mixer.mute, "M", MUTE_LIT, Color32::WHITE, "Mute").clicked() {
                     act.push(mixer_cmd(t.id, MixerPatch { mute: Some(!t.mixer.mute), ..Default::default() }));
                 }
@@ -249,12 +282,20 @@ impl Gui {
                 }
                 if resp.clicked() {
                     self.selected = Some(t.id);
+                    self.clips.selected = None;
                 }
                 if resp.double_clicked() {
                     self.selected = Some(t.id);
                     self.view = View::Roll;
                 }
-                resp.on_hover_text("Click to select \u{b7} double-click to edit the notes");
+                resp.on_hover_text(if t.is_audio() {
+                    "Click to select \u{b7} drop audio files here to place them \u{b7} double-click to edit the notes"
+                } else {
+                    "Click to select \u{b7} double-click to edit the notes"
+                });
+            }
+            if !empty && (!p.master.inserts.is_empty() || !p.master.reverb_inserts.is_empty() || !p.master.automation.is_empty()) {
+                self.master_row(ui, full.width(), span, st, playhead, act);
             }
             // the header column runs to the bottom
             let rest = ui.available_rect_before_wrap();
@@ -263,6 +304,7 @@ impl Gui {
                 pnt.rect_filled(Rect::from_min_max(rest.min, Pos2::new(lane_l - 1.0, rest.bottom())), 0.0, PANEL);
                 pnt.vline(px(lane_l) - 1.0, rest.y_range(), Stroke::new(1.0, LINE));
             }
+            self.clip_overlay(ui, st, &tm, span, rest, act);
         });
         if empty {
             let area = Rect::from_min_max(Pos2::new(lane_l, rows_top), Pos2::new(full.right(), full.bottom()));
@@ -338,6 +380,60 @@ impl Gui {
         }
     }
 
+    /// The "A" toggle that shows an owner's automation lane (a dot on it when there are lanes to show). Without
+    /// lanes to show, it opens the parameter picker.
+    fn auto_toggle(&mut self, ui: &mut egui::Ui, r: Rect, p: &Project, owner: Owner) {
+        let open = self.auto.open.contains_key(&owner);
+        let n = match owner {
+            Owner::Track(id) => p.tracks.iter().find(|t| t.id == id).map_or(0, |t| t.automation.len()),
+            Owner::Master => p.master.automation.len(),
+        };
+        let hint = match n {
+            0 => "Show automation".to_string(),
+            1 => "Show automation (1 lane)".to_string(),
+            n => format!("Show automation ({n} lanes)"),
+        };
+        let id = match owner {
+            Owner::Track(t) => Id::new(("arr_a", t)),
+            Owner::Master => Id::new("arr_a_master"),
+        };
+        if toggle_at(ui, r, id, open, "A", ACCENT_TINT, ACCENT_HOVER, &hint).clicked() {
+            if !open && choices(p, owner).is_empty() {
+                self.auto.picker = Some(Picker::load(&self.sh, p, owner));
+            } else {
+                self.auto.toggle(p, owner);
+            }
+        }
+        if !open && n > 0 {
+            ui.painter().circle_filled(r.right_top() + vec2(-4.0, 4.0), 2.0, ACCENT);
+        }
+    }
+
+    /// The master's row under the tracks (its inserts' and the reverb return's automation), and its lane.
+    fn master_row(&mut self, ui: &mut egui::Ui, width: f32, span: Span, st: &State, playhead: f64, act: &mut Vec<Action>) {
+        let p = &st.session.project;
+        let (row, _) = ui.allocate_exact_size(vec2(width, MASTER_H), Sense::hover());
+        if ui.is_rect_visible(row) {
+            let pnt = ui.painter().clone();
+            let hr = Rect::from_min_max(row.min, Pos2::new(span.lane_l - 1.0, row.bottom()));
+            pnt.rect_filled(hr, 0.0, PANEL);
+            pnt.rect_filled(Rect::from_min_size(hr.min, vec2(3.0, hr.height() - 1.0)), 0.0, TEXT3);
+            pnt.text(Pos2::new(hr.left() + 14.0, hr.center().y), Align2::LEFT_CENTER, "Master", medium(12.5), TEXT);
+            pnt.rect_filled(Rect::from_min_max(Pos2::new(span.lane_l, row.top()), row.max), 0.0, LANE);
+            pnt.vline(px(span.lane_l) - 1.0, row.y_range(), Stroke::new(1.0, LINE));
+            pnt.hline(row.x_range(), px(row.top()), Stroke::new(1.0, LINE));
+            pnt.hline(row.x_range(), px(row.bottom()) - 1.0, Stroke::new(1.0, LINE_SOFT));
+            let a_r = Rect::from_min_size(Pos2::new(hr.right() - 78.0, hr.center().y - 9.0), vec2(20.0, 18.0));
+            self.auto_toggle(ui, a_r, p, Owner::Master);
+        }
+        if self.auto.open.contains_key(&Owner::Master) {
+            let (lane_row, _) = ui.allocate_exact_size(vec2(width, AUTO_H), Sense::hover());
+            if ui.is_rect_visible(lane_row) {
+                self.auto_lane(ui, lane_row, span, st, Owner::Master, TEXT3, playhead, act);
+            }
+        }
+    }
+
     /// No tracks: the app mark, what to do next, and the two ways to start.
     fn empty_arrangement(&mut self, ui: &mut egui::Ui, area: Rect, act: &mut Vec<Action>) {
         let c = Pos2::new(area.center().x, area.top() + (area.height() * 0.38).clamp(110.0, 240.0));
@@ -362,9 +458,38 @@ impl Gui {
     }
 }
 
-/// Clips: one per section that has notes (or one over all the notes), a tinted region with a header band and
-/// the notes drawn in the track's colour.
-fn clips(pnt: &egui::Painter, row: Rect, t: &Track, p: &Project, tm: &TimeMap, x_of: impl Fn(f64) -> f32, audible: bool) {
+/// A recording in progress on its lane: the stretch recorded so far tinted red (all of it once a loop has gone
+/// round), and the notes played that aren't on the track yet.
+fn take_region(pnt: &egui::Painter, lane: Rect, v: &TakeView, playhead: f64, total: f64, x_of: impl Fn(f64) -> f32) {
+    let spans = if v.around {
+        vec![(0.0, total)]
+    } else if playhead >= v.from {
+        vec![(v.from, playhead)]
+    } else {
+        // round the loop point
+        vec![(v.from, total), (0.0, playhead)]
+    };
+    for (a, b) in spans {
+        let (x0, x1) = (x_of(a).round(), x_of(b).round());
+        let r = Rect::from_min_max(Pos2::new(x0, lane.top() + 6.0), Pos2::new(x1.max(x0 + 2.0), lane.bottom() - 6.0));
+        pnt.rect(r, 3.0, ERR.gamma_multiply(0.14), Stroke::new(1.0, ERR.gamma_multiply(0.7)), StrokeKind::Inside);
+    }
+    let Some(lo) = v.notes.iter().map(|n| n.2).min() else { return };
+    let hi = v.notes.iter().map(|n| n.2).max().unwrap_or(lo);
+    let (lo, hi) = (lo as f32 - 1.0, (hi as f32).max(lo as f32 + 11.0) + 1.0);
+    let body = lane.shrink2(vec2(0.0, 9.0));
+    let bp = pnt.with_clip_rect(body);
+    for &(s, d, pitch, vel) in &v.notes {
+        let x0 = x_of(s);
+        let x1 = x_of(s + d).max(x0 + 1.5);
+        let y = body.bottom() - (pitch as f32 - lo) / (hi - lo) * body.height();
+        bp.rect_filled(Rect::from_min_max(Pos2::new(x0, y - 1.0), Pos2::new(x1, y + 1.0)), 0.5, ERR.gamma_multiply(0.5 + 0.5 * vel as f32 / 127.0));
+    }
+}
+
+/// Note regions: one per section that has notes (or one over all the notes), a tinted region with a header band
+/// and the notes drawn in the track's colour.
+fn note_regions(pnt: &egui::Painter, row: Rect, t: &Track, p: &Project, tm: &TimeMap, x_of: impl Fn(f64) -> f32, audible: bool) {
     let total = p.total_beats().max(1.0);
     let c0 = col(t.color);
     let c = if audible { c0 } else { dimmed(c0) };
@@ -385,8 +510,6 @@ fn clips(pnt: &egui::Painter, row: Rect, t: &Track, p: &Project, tm: &TimeMap, x
                 }
             }
         }
-    } else if matches!(t.instrument, Instrument::Audio { .. }) {
-        spans.push((0.0, total, "Audio".into()));
     }
     let (lo, hi) = if t.notes.is_empty() {
         (0.0, 1.0)

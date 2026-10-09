@@ -517,6 +517,21 @@ impl Server {
                     .collect();
                 Ok((json!({"set": out}), none()))
             }
+            Request::ResolveParams { values } => {
+                let l = self.loaded()?;
+                let all = l.plugin.params();
+                let out: Vec<Value> = values
+                    .iter()
+                    .map(|(name, v)| match params::find(&all, name).and_then(|p| params::normalized(&l.plugin, p, v).map(|n| (p, n))) {
+                        Ok((p, n)) => json!({
+                            "name": name, "id": p.id, "title": p.title, "normalized": n,
+                            "current": l.plugin.param(p.id).unwrap_or(p.default), "automatable": p.automatable() && !p.read_only(),
+                        }),
+                        Err(e) => json!({"name": name, "error": format!("{e:#}")}),
+                    })
+                    .collect();
+                Ok((json!({"resolved": out}), none()))
+            }
             Request::GetState => {
                 let l = self.loaded()?;
                 if l.plugin.has_pending_params() {

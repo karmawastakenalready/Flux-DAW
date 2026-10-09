@@ -19,7 +19,8 @@
 //! * [`lock`] and [`verify`]: `assets.lock` plus one tree index per asset (`assets.lock.d/<id>.tsv`, see
 //!   [`hash`]); `verify` re-hashes installs and reports missing, modified, extra and line-ending-only files.
 //! * [`credits`] and [`usage`]: the LICENSES.md overview and the credits text, with which project files use
-//!   which asset (found by following `.flux.json` projects, Python scripts and SFZ includes).
+//!   which asset (found by following `.flux.json` projects, Python scripts, SFZ includes and saved plugin states;
+//!   plugins and other installs made by vendor installers are found through [`places`]).
 //! * [`flac`]: 16/24-bit FLAC from the engine's float buffers, with the engine's TPDF dither, STREAMINFO MD5,
 //!   Vorbis comments including `LOOPSTART` / `LOOPLENGTH`, and a decode check of every file written.
 //! * [`cli`]: `flux assets status|verify|fetch|lock|repair|licenses` and `flux flac`.
@@ -61,6 +62,7 @@ pub mod http;
 pub mod license;
 pub mod lock;
 pub mod manifest;
+pub mod places;
 pub mod usage;
 pub mod verify;
 pub mod workspace;

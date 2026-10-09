@@ -104,6 +104,8 @@ pub struct Shared {
     pub state: Mutex<State>,
     pub changed: Condvar,
     pub player: Arc<Player>,
+    /// MIDI keyboards and the computer keyboard playing in, and recording.
+    pub midi: crate::midi::Midi,
     pub main_tx: Mutex<Option<std::sync::mpsc::Sender<MainMsg>>>,
 }
 
@@ -128,6 +130,7 @@ impl Shared {
             }),
             changed: Condvar::new(),
             player: Player::new(),
+            midi: crate::midi::Midi::new(),
             main_tx: Mutex::new(None),
         })
     }

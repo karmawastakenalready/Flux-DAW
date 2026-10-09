@@ -6,10 +6,15 @@
 //! The stream lives on its own thread (cpal streams are not `Send` on every platform) and is opened
 //! lazily on the first `play`, so a headless MCP server never touches the audio device. Live audio is
 //! rendered ahead by an engine thread into a short queue; the audio callback only copies from it.
+//!
+//! Notes played in (a MIDI keyboard: `input`) go to the live engine, which plays them with the song: or, with
+//! it stopped (or a render or clip playing), on their own, mixed into whatever plays, until they have rung out.
+//! While something can play in (`set_quick`) the queue is kept short so they are heard soon after.
 
 use crate::state::LastRender;
 use flux_core::Project;
 use flux_engine::live::{LiveEngine, RenderHints, BLOCK};
+use flux_engine::sfizz::Ev;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
@@ -47,9 +52,28 @@ struct LiveLink {
     levels: Mutex<Vec<(u64, f32)>>,
     /// Bumps on every seek, so the callback drops its interpolation state.
     epoch: AtomicU64,
+    /// Played in (track, event), for the engine to hand on.
+    input: Mutex<Vec<(u64, Ev)>>,
+    /// With the song stopped, the queue holds what is played in (it hasn't rung out yet).
+    monitoring: AtomicBool,
+    /// Keep the queue short: something can play in.
+    quick: AtomicBool,
+    /// The callback found the queue empty while sound was going out (the queue grows to keep up).
+    underruns: AtomicU64,
+    /// The engine thread, woken when something is played in.
+    thread: OnceLock<std::thread::Thread>,
 }
 
 const NO_SEEK: u64 = u64::MAX;
+/// The song position of queued frames played in with the song stopped.
+const NO_POS: u32 = u32::MAX;
+/// With the song stopped, the engine runs on this long after the last thing played in (tails ring out).
+const MONITOR_TAIL: Duration = Duration::from_secs(5);
+/// How much live audio is queued: normally, and to start with while something can play in (it grows by
+/// `QUICK_STEP` each time the output runs dry, up to `AHEAD`).
+const AHEAD: Duration = Duration::from_millis(120);
+const QUICK: Duration = Duration::from_millis(25);
+const QUICK_STEP: Duration = Duration::from_millis(10);
 
 pub struct Player {
     buf: Mutex<Option<Arc<LastRender>>>,
@@ -67,8 +91,14 @@ pub struct Player {
     hints: Mutex<Option<(String, RenderHints)>>,
     clip: Mutex<Option<Arc<Clip>>>,
     clip_pos: AtomicU64,
+    /// `set_quick`, for an engine started later.
+    quick: AtomicBool,
     /// What the speakers get, smoothed: mean square L/R and decaying peak L/R (f32 bits).
     meter: [AtomicU32; 4],
+    /// Song second (f64 bits) heard at `heard_at` (ns after `born`), playing live: where a note played in lands.
+    heard: AtomicU64,
+    heard_at: AtomicU64,
+    born: Instant,
 }
 
 fn mode_of(v: u8) -> Mode {
@@ -94,8 +124,68 @@ impl Player {
             hints: Mutex::new(None),
             clip: Mutex::new(None),
             clip_pos: AtomicU64::new(0f64.to_bits()),
+            quick: AtomicBool::new(false),
             meter: Default::default(),
+            heard: AtomicU64::new(0f64.to_bits()),
+            heard_at: AtomicU64::new(0),
+            born: Instant::now(),
         })
+    }
+
+    /// Play a note or controller on a track's instrument now (a MIDI keyboard's): through the live engine, with
+    /// the song or on its own. Starts the engine (with `project()`) and the audio output if they aren't running.
+    // (tests play in without an audio device)
+    #[cfg_attr(test, allow(dead_code))]
+    pub fn input(self: &Arc<Self>, track: u64, ev: Ev, project: impl FnOnce() -> Project) {
+        let link = match self.live.get() {
+            Some(l) => l.clone(),
+            None => self.ensure_live(&project()),
+        };
+        link.input.lock().push((track, ev));
+        if let Some(t) = link.thread.get() {
+            t.unpark();
+        }
+        self.ensure_stream();
+    }
+
+    /// Get ready for notes played in: start the live engine (it loads the instruments) and the audio output, so
+    /// the first note is heard.
+    #[cfg_attr(test, allow(dead_code))]
+    pub fn prepare(self: &Arc<Self>, project: impl FnOnce() -> Project) {
+        if self.live.get().is_none() {
+            self.ensure_live(&project());
+        }
+        self.ensure_stream();
+    }
+
+    /// Something can play in (a MIDI keyboard is connected): keep the live queue short so it is heard soon after.
+    /// Otherwise more is queued, which rides out hiccups better.
+    pub fn set_quick(&self, on: bool) {
+        if let Some(l) = self.live.get() {
+            l.quick.store(on, Ordering::Relaxed);
+        }
+        self.quick.store(on, Ordering::Relaxed);
+    }
+
+    /// Notes played in are sounding with the song stopped (or under a render or clip).
+    pub fn monitoring(&self) -> bool {
+        self.live.get().is_some_and(|l| l.monitoring.load(Ordering::Relaxed))
+    }
+
+    /// The song second being heard at `at`, while the song plays live (where a note played then belongs), once the
+    /// output has started. It runs on past the end of a loop (the caller wraps it).
+    pub fn heard_seconds(&self, at: Instant) -> Option<f64> {
+        if !self.is_playing() || self.mode() != Mode::Live {
+            return None;
+        }
+        let ns = self.heard_at.load(Ordering::Relaxed);
+        if ns == 0 {
+            return None;
+        }
+        let sec = f64::from_bits(self.heard.load(Ordering::Relaxed));
+        let then = self.born + Duration::from_nanos(ns);
+        let dt = if at >= then { (at - then).as_secs_f64() } else { -(then - at).as_secs_f64() };
+        Some(sec + dt)
     }
 
     pub fn mode(&self) -> Mode {
@@ -230,6 +320,7 @@ impl Player {
 
     pub fn stop(&self) {
         self.playing.store(false, Ordering::Relaxed);
+        self.heard_at.store(0, Ordering::Relaxed);
         if let Some(l) = self.live.get() {
             l.active.store(false, Ordering::Relaxed);
         }
@@ -291,6 +382,11 @@ impl Player {
                     status: Mutex::new(vec![]),
                     levels: Mutex::new(vec![]),
                     epoch: AtomicU64::new(0),
+                    input: Mutex::new(vec![]),
+                    monitoring: AtomicBool::new(false),
+                    quick: AtomicBool::new(self.quick.load(Ordering::Relaxed)),
+                    underruns: AtomicU64::new(0),
+                    thread: OnceLock::new(),
                 });
                 let hints = self.hints.lock().as_ref().filter(|(n, _)| *n == p.name).map(|(_, h)| h.clone()).unwrap_or_default();
                 let project = Arc::new(p.clone());
@@ -324,79 +420,75 @@ impl Player {
         });
     }
 
-    /// Produce `frames` stereo frames at `out_sr` (called from the audio callback; never waits long).
-    fn fill(&self, cb: &mut CallbackState, out_sr: u32, frames: usize, mut put: impl FnMut(usize, f32, f32)) {
-        if !self.playing.load(Ordering::Relaxed) {
-            (0..frames).for_each(|i| put(i, 0.0, 0.0));
+    /// Produce `frames` stereo frames at `out_sr` (called from the audio callback; never waits long). The first
+    /// is heard at `heard`.
+    fn fill(&self, cb: &mut CallbackState, out_sr: u32, frames: usize, heard: Instant, mut put: impl FnMut(usize, f32, f32)) {
+        let playing = self.playing.load(Ordering::Relaxed);
+        if playing && self.mode() == Mode::Live {
+            self.fill_live(cb, out_sr, frames, heard, put);
             return;
         }
+        // notes played in with the song stopped, under whatever else plays
+        let mut mon = std::mem::take(&mut cb.mon);
+        mon.clear();
+        if let Some(link) = self.live.get().filter(|l| l.monitoring.load(Ordering::Relaxed)) {
+            pull(cb, link, out_sr, frames, |_, l, r| mon.push((l, r)));
+        }
+        let mut put = |i: usize, l: f32, r: f32| {
+            let (ml, mr) = mon.get(i).copied().unwrap_or((0.0, 0.0));
+            put(i, l + ml, r + mr)
+        };
         match self.mode() {
-            Mode::Live => self.fill_live(cb, out_sr, frames, put),
+            _ if !playing => (0..frames).for_each(|i| put(i, 0.0, 0.0)),
+            Mode::Live => unreachable!(),
             Mode::Render => {
                 let guard = self.buf.try_lock();
-                let Some(r) = guard.as_ref().and_then(|g| g.as_ref()) else {
-                    (0..frames).for_each(|i| put(i, 0.0, 0.0));
-                    return;
-                };
-                let o = &r.out;
-                if let Some(p) = play_buffer(&self.pos, &o.left, &o.right, o.sr, o.looped, out_sr, frames, &mut put) {
-                    self.playing.store(false, Ordering::Relaxed);
-                    self.pos.store(p.to_bits(), Ordering::Relaxed);
+                match guard.as_ref().and_then(|g| g.as_ref()) {
+                    Some(r) => {
+                        let o = &r.out;
+                        if let Some(p) = play_buffer(&self.pos, &o.left, &o.right, o.sr, o.looped, out_sr, frames, &mut put) {
+                            self.playing.store(false, Ordering::Relaxed);
+                            self.pos.store(p.to_bits(), Ordering::Relaxed);
+                        }
+                    }
+                    None => (0..frames).for_each(|i| put(i, 0.0, 0.0)),
                 }
             }
             Mode::Clip => {
                 let guard = self.clip.try_lock();
-                let Some(c) = guard.as_ref().and_then(|g| g.as_ref()) else {
-                    (0..frames).for_each(|i| put(i, 0.0, 0.0));
-                    return;
-                };
-                if play_buffer(&self.clip_pos, &c.left, &c.right, c.sr, false, out_sr, frames, &mut put).is_some() {
-                    self.playing.store(false, Ordering::Relaxed);
+                match guard.as_ref().and_then(|g| g.as_ref()) {
+                    Some(c) => {
+                        if play_buffer(&self.clip_pos, &c.left, &c.right, c.sr, false, out_sr, frames, &mut put).is_some() {
+                            self.playing.store(false, Ordering::Relaxed);
+                        }
+                    }
+                    None => (0..frames).for_each(|i| put(i, 0.0, 0.0)),
                 }
             }
         }
+        cb.mon = mon;
     }
 
-    fn fill_live(&self, cb: &mut CallbackState, out_sr: u32, frames: usize, mut put: impl FnMut(usize, f32, f32)) {
+    fn fill_live(&self, cb: &mut CallbackState, out_sr: u32, frames: usize, heard: Instant, mut put: impl FnMut(usize, f32, f32)) {
         let Some(link) = self.live.get() else {
             (0..frames).for_each(|i| put(i, 0.0, 0.0));
             return;
         };
-        let epoch = link.epoch.load(Ordering::Relaxed);
-        if epoch != cb.epoch {
-            cb.epoch = epoch;
-            cb.frac = 1.0;
-            cb.prev = (0.0, 0.0, 0);
-            cb.cur = (0.0, 0.0, 0);
-            cb.valid = false;
-        }
-        let step = link.sr.load(Ordering::Relaxed) as f64 / out_sr.max(1) as f64;
-        let mut ring = link.ring.lock();
-        let mut i = 0;
-        'out: while i < frames {
-            while cb.frac >= 1.0 {
-                match ring.pop_front() {
-                    Some(f) => {
-                        cb.prev = cb.cur;
-                        cb.cur = f;
-                        cb.frac -= 1.0;
-                        cb.valid = true;
-                    }
-                    None => break 'out,
-                }
-            }
-            let f = cb.frac as f32;
-            put(i, cb.prev.0 + (cb.cur.0 - cb.prev.0) * f, cb.prev.1 + (cb.cur.1 - cb.prev.1) * f);
-            cb.frac += step;
-            i += 1;
-        }
-        drop(ring);
+        let mut i = pull(cb, link, out_sr, frames, &mut put);
+        let last = i.checked_sub(1);
         while i < frames {
             put(i, 0.0, 0.0);
             i += 1;
         }
-        if cb.valid && link.seek.load(Ordering::Relaxed) == NO_SEEK {
+        if cb.valid && cb.cur.2 != NO_POS && link.seek.load(Ordering::Relaxed) == NO_SEEK {
             self.pos.store((cb.cur.2 as f64).to_bits(), Ordering::Relaxed);
+            // the last frame out is heard after those before it
+            if let Some(k) = last {
+                let at = heard + Duration::from_secs_f64(k as f64 / out_sr.max(1) as f64);
+                let sec = cb.cur.2 as f64 / link.sr.load(Ordering::Relaxed).max(1) as f64;
+                self.heard.store(sec.to_bits(), Ordering::Relaxed);
+                self.heard_at.store((at.saturating_duration_since(self.born).as_nanos() as u64).max(1), Ordering::Relaxed);
+            }
         }
         if link.ended.load(Ordering::Relaxed) && link.ring.lock().is_empty() {
             self.playing.store(false, Ordering::Relaxed);
@@ -404,6 +496,43 @@ impl Player {
             self.pos.store(0f64.to_bits(), Ordering::Relaxed);
         }
     }
+}
+
+/// Up to `frames` frames from the live queue at `out_sr` (interpolated from the engine's rate). Returns how many
+/// there were; running dry once sound was flowing counts as an underrun.
+fn pull(cb: &mut CallbackState, link: &LiveLink, out_sr: u32, frames: usize, mut put: impl FnMut(usize, f32, f32)) -> usize {
+    let epoch = link.epoch.load(Ordering::Relaxed);
+    if epoch != cb.epoch {
+        cb.epoch = epoch;
+        cb.frac = 1.0;
+        cb.prev = (0.0, 0.0, 0);
+        cb.cur = (0.0, 0.0, 0);
+        cb.valid = false;
+    }
+    let step = link.sr.load(Ordering::Relaxed) as f64 / out_sr.max(1) as f64;
+    let mut ring = link.ring.lock();
+    let mut i = 0;
+    'out: while i < frames {
+        while cb.frac >= 1.0 {
+            match ring.pop_front() {
+                Some(f) => {
+                    cb.prev = cb.cur;
+                    cb.cur = f;
+                    cb.frac -= 1.0;
+                    cb.valid = true;
+                }
+                None => break 'out,
+            }
+        }
+        let f = cb.frac as f32;
+        put(i, cb.prev.0 + (cb.cur.0 - cb.prev.0) * f, cb.prev.1 + (cb.cur.1 - cb.prev.1) * f);
+        cb.frac += step;
+        i += 1;
+    }
+    if i < frames && cb.valid {
+        link.underruns.fetch_add(1, Ordering::Relaxed);
+    }
+    i
 }
 
 /// Interpolation state owned by the audio callback.
@@ -414,6 +543,14 @@ struct CallbackState {
     epoch: u64,
     /// `cur` holds a real frame (not the reset state after a seek).
     valid: bool,
+    /// Notes played in with the song stopped, for this callback (reused).
+    mon: Vec<(f32, f32)>,
+}
+
+impl CallbackState {
+    fn new() -> CallbackState {
+        CallbackState { frac: 1.0, prev: (0.0, 0.0, 0), cur: (0.0, 0.0, 0), epoch: 0, valid: false, mon: Vec::with_capacity(4096) }
+    }
 }
 
 /// Play a buffer from `pos` (f64 frames); returns the final position when a non-looping buffer ran out.
@@ -463,17 +600,24 @@ fn play_buffer(
 /// its own); they load again when it resumes.
 const RELEASE_AFTER: Duration = Duration::from_secs(600);
 
-/// Runs the live engine: applies edits, seeks and render hints, and keeps ~120 ms of audio queued while
-/// playing. Playback holds until the instruments have loaded (up to 30 s) so everything starts together.
+/// Runs the live engine: applies edits, seeks and render hints, hands on what is played in, and keeps audio
+/// queued (~120 ms, or less while something can play in) while playing, or while notes played in with the song
+/// stopped ring. Playback holds until the instruments have loaded (up to 30 s) so everything starts together.
 fn engine_thread(link: Arc<LiveLink>, project: Arc<Project>, hints: RenderHints) {
     // decaying filters, reverbs and amp models go subnormal in silence: slow on x86
     let _ftz = flux_engine::denormals::FlushDenormals::new();
+    let _ = link.thread.set(std::thread::current());
     let mut eng = LiveEngine::new(project, hints);
     let (mut l, mut r, mut pos) = (vec![0f32; BLOCK], vec![0f32; BLOCK], vec![0u32; BLOCK]);
     let mut activated: Option<Instant> = None;
     let mut last_status = Instant::now() - Duration::from_secs(1);
     let mut idle_since = Instant::now();
     let mut last_release = Instant::now();
+    // keys down (track, pitch) and when something was last played in
+    let mut held: Vec<(u64, u8)> = vec![];
+    let mut last_input: Option<Instant> = None;
+    let (mut rolled, mut monitored) = (false, false);
+    let (mut quick, mut underruns) = (QUICK, 0);
     loop {
         if let Some(p) = link.pending.lock().take() {
             eng.update(p);
@@ -488,6 +632,24 @@ fn engine_thread(link: Arc<LiveLink>, project: Arc<Project>, hints: RenderHints)
             link.ring.lock().clear();
             link.epoch.fetch_add(1, Ordering::Relaxed);
         }
+        let input = std::mem::take(&mut *link.input.lock());
+        if !input.is_empty() {
+            last_input = Some(Instant::now());
+        }
+        for (track, ev) in input {
+            match ev {
+                Ev::On(p, _) => held.push((track, p)),
+                Ev::Off(p) => {
+                    if let Some(k) = held.iter().position(|&h| h == (track, p)) {
+                        held.swap_remove(k);
+                    }
+                }
+                // all sound / all notes off
+                Ev::Cc(120 | 123, _) => held.retain(|h| h.0 != track),
+                _ => {}
+            }
+            eng.input(track, ev);
+        }
         eng.poll();
         let loading = eng.loading();
         link.loading.store(loading, Ordering::Relaxed);
@@ -496,16 +658,53 @@ fn engine_thread(link: Arc<LiveLink>, project: Arc<Project>, hints: RenderHints)
             *link.levels.lock() = eng.levels();
             last_status = Instant::now();
         }
-        if !link.active.load(Ordering::Relaxed) {
+        // the queue: short while something can play in (longer each time the output ran dry)
+        let u = link.underruns.load(Ordering::Relaxed);
+        if u != underruns {
+            underruns = u;
+            quick = (quick + QUICK_STEP).min(AHEAD);
+        }
+        let ahead = (eng.sample_rate() as f64 * if link.quick.load(Ordering::Relaxed) { quick } else { AHEAD }.as_secs_f64()) as usize;
+        let rolling = link.active.load(Ordering::Relaxed);
+        if rolled && !rolling {
+            // the song stopped: what it queued goes (notes played in ring on from here)
+            link.ring.lock().clear();
+            link.epoch.fetch_add(1, Ordering::Relaxed);
+        }
+        rolled = rolling;
+        if !rolling {
             activated = None;
+            let monitoring = !held.is_empty() || last_input.is_some_and(|t| t.elapsed() < MONITOR_TAIL);
+            link.monitoring.store(monitoring, Ordering::Relaxed);
+            if monitored && !monitoring {
+                // rung out: the next note starts on a fresh queue
+                link.ring.lock().clear();
+                link.epoch.fetch_add(1, Ordering::Relaxed);
+            }
+            monitored = monitoring;
+            if monitoring {
+                idle_since = Instant::now();
+                if link.ring.lock().len() >= ahead {
+                    std::thread::park_timeout(Duration::from_millis(1));
+                    continue;
+                }
+                let n = eng.render_input(&mut l, &mut r);
+                let mut ring = link.ring.lock();
+                for i in 0..n {
+                    ring.push_back((l[i], r[i], NO_POS));
+                }
+                continue;
+            }
             // checked now and then: a plugin whose window is open stays until the window closes
             if idle_since.elapsed() >= RELEASE_AFTER && last_release.elapsed() >= Duration::from_secs(5) {
                 eng.release_plugins();
                 last_release = Instant::now();
             }
-            std::thread::sleep(Duration::from_millis(8));
+            std::thread::park_timeout(Duration::from_millis(8));
             continue;
         }
+        link.monitoring.store(false, Ordering::Relaxed);
+        monitored = false;
         if activated.is_none() {
             eng.wake();
         }
@@ -516,7 +715,6 @@ fn engine_thread(link: Arc<LiveLink>, project: Arc<Project>, hints: RenderHints)
             std::thread::sleep(Duration::from_millis(10));
             continue;
         }
-        let ahead = (eng.sample_rate() as f64 * 0.12) as usize;
         if link.ring.lock().len() >= ahead || eng.ended {
             if eng.ended {
                 link.ended.store(true, Ordering::Relaxed);
@@ -556,13 +754,15 @@ where
     T: cpal::SizedSample + cpal::FromSample<f32>,
 {
     let ch = ch.max(1);
-    let mut cb = CallbackState { frac: 1.0, prev: (0.0, 0.0, 0), cur: (0.0, 0.0, 0), epoch: 0, valid: false };
+    let mut cb = CallbackState::new();
     dev.build_output_stream::<T, _, _>(
         config,
-        move |data: &mut [T], _| {
+        move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
             let frames = data.len() / ch;
             let (mut sq, mut pk) = ([0f64; 2], [0f32; 2]);
-            p.fill(&mut cb, sr, frames, |i, l, r| {
+            let ts = info.timestamp();
+            let heard = Instant::now() + ts.playback.duration_since(ts.callback);
+            p.fill(&mut cb, sr, frames, heard, |i, l, r| {
                 sq[0] += (l * l) as f64;
                 sq[1] += (r * r) as f64;
                 pk[0] = pk[0].max(l.abs());
@@ -583,4 +783,98 @@ where
         None,
     )
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    //! The live engine playing notes in, heard through the output callback's code (no audio device: the test pulls
+    //! the output at the pace a device would). Needs sfizz and the VSCO 2 cello ensemble; skipped otherwise.
+
+    use super::*;
+    use flux_core::{Command, commands};
+
+    const CELLO: &str = "instruments/VSCO-2-CE/CelloEnsSusVib.sfz";
+
+    /// `secs` of output from callbacks of 480 frames at 48 kHz, paced like a device; the left channel.
+    fn pull_out(p: &Player, cb: &mut CallbackState, secs: f64) -> Vec<f32> {
+        let mut out = vec![];
+        for _ in 0..(secs * 100.0).round() as usize {
+            std::thread::sleep(Duration::from_millis(10));
+            p.fill(cb, 48_000, 480, Instant::now(), |_, l, _| out.push(l));
+        }
+        out
+    }
+
+    fn rms_db(x: &[f32]) -> f64 {
+        10.0 * (x.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / x.len().max(1) as f64).max(1e-20).log10()
+    }
+
+    #[test]
+    fn notes_played_in_are_heard_stopped_and_playing() {
+        if !flux_engine::paths::sfizz_dll().is_file() || !flux_engine::paths::resolve(CELLO).is_file() {
+            eprintln!("skipped: needs sfizz and {CELLO}");
+            return;
+        }
+        // two bars at 120 BPM, dry, nothing in the first
+        let mut proj = Project::new("play-in", 120.0, 2);
+        proj.sample_rate = 48_000;
+        let cmds = serde_json::json!([
+            {"op": "add_track", "name": "Cello", "instrument": {"kind": "sfz", "path": CELLO}},
+            {"op": "set_mixer", "track": "Cello", "mixer": {"reverb_send": 0}},
+        ]);
+        for c in serde_json::from_value::<Vec<Command>>(cmds).unwrap() {
+            commands::apply(&mut proj, &c).unwrap();
+        }
+        let id = proj.tracks[0].id;
+        let p = Player::new();
+        let link = p.ensure_live(&proj);
+        let t0 = Instant::now();
+        while p.live_status().first().is_none_or(|s| s.1 != "live") && t0.elapsed() < Duration::from_secs(60) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(p.live_status()[0].1, "live");
+        let play_in = |ev: Ev| {
+            link.input.lock().push((id, ev));
+            link.thread.get().unwrap().unpark();
+        };
+        let mut cb = CallbackState::new();
+
+        // stopped: silence, then the key while it is held, then it dies away and the engine stops rendering
+        assert!(rms_db(&pull_out(&p, &mut cb, 0.2)) < -120.0);
+        play_in(Ev::On(48, 100));
+        let held = pull_out(&p, &mut cb, 0.8);
+        assert!(p.monitoring());
+        let level = rms_db(&held[24_000..]);
+        assert!(level > -45.0, "{level:.1} dB while the key is held");
+        play_in(Ev::Off(48));
+        let after = pull_out(&p, &mut cb, 5.4);
+        let tail = rms_db(&after[(2.0 * 48_000.0) as usize..(2.5 * 48_000.0) as usize]);
+        assert!(tail < level - 40.0, "{tail:.1} dB after letting go");
+        assert!(!p.monitoring(), "rung out");
+        assert!(after[after.len() - 4800..].iter().all(|&x| x == 0.0));
+        assert_eq!(p.position(), 0.0, "the song stood still");
+        assert_eq!(p.heard_seconds(Instant::now()), None);
+
+        // playing live (as `play` starts it): the key sounds over the empty bar, and the song position heard now
+        // follows the playhead
+        p.playing.store(true, Ordering::Relaxed);
+        link.seek.store(0, Ordering::Relaxed);
+        link.active.store(true, Ordering::Relaxed);
+        pull_out(&p, &mut cb, 0.4);
+        play_in(Ev::On(55, 100));
+        let level = rms_db(&pull_out(&p, &mut cb, 0.6)[14_400..]);
+        assert!(level > -45.0, "{level:.1} dB while the key is held");
+        let heard = p.heard_seconds(Instant::now()).unwrap();
+        assert!((heard - p.seconds()).abs() < 0.05, "heard {heard:.3} s, playhead {:.3} s", p.seconds());
+        assert!((0.9..1.3).contains(&heard), "{heard:.3} s in");
+
+        // stopped with the key still down: the song's queue goes, the key rings on, the playhead stays put
+        p.stop();
+        let at = p.position();
+        let on = rms_db(&pull_out(&p, &mut cb, 0.4)[9_600..]);
+        assert!(p.monitoring());
+        assert!(on > -45.0, "{on:.1} dB from the key held after stopping");
+        assert_eq!(p.position(), at);
+        play_in(Ev::Off(55));
+    }
 }

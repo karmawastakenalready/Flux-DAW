@@ -36,7 +36,8 @@ pub enum State {
     NotInstalled,
     /// The asset is for another platform.
     NotApplicable,
-    /// Installed outside the project (pip, vendor installer); nothing to check.
+    /// Installed outside the project (pip, vendor installer); found where its `installed` locations say, if it
+    /// lists any (nothing is hashed).
     External,
     /// Installed, no drift found, but parts could not be checked (archive source without a lock entry).
     Unverified,
@@ -202,7 +203,8 @@ pub fn verify(ws: &Workspace, assets: &[&Asset], opts: VerifyOptions, ui: &mut d
 pub fn verify_asset(ws: &Workspace, a: &Asset, opts: VerifyOptions, ui: &mut dyn Ui) -> AssetCheck {
     let t0 = Instant::now();
     let mut c = match ws.asset_dir(a) {
-        None => AssetCheck::new(a, State::External),
+        None if !a.applies_here() => AssetCheck::new(a, State::NotApplicable),
+        None => external(ws, a),
         Some(_) if !a.applies_here() => AssetCheck::new(a, State::NotApplicable),
         Some(_) if !ws.is_installed(a) => AssetCheck::new(a, State::NotInstalled),
         Some(dir) => {
@@ -216,6 +218,26 @@ pub fn verify_asset(ws: &Workspace, a: &Asset, opts: VerifyOptions, ui: &mut dyn
         }
     };
     c.seconds = t0.elapsed().as_secs_f64();
+    c
+}
+
+/// An asset installed by another tool: each of its `installed` locations found, or missing. Without the first one
+/// (the install itself) it is not installed; without a later one (content it comes with) it has drifted.
+fn external(ws: &Workspace, a: &Asset) -> AssetCheck {
+    let found = ws.external_installs(a);
+    if found.first().is_some_and(|(_, at)| at.is_none()) {
+        return AssetCheck::new(a, State::NotInstalled);
+    }
+    let mut c = AssetCheck::new(a, State::External);
+    for (loc, at) in found {
+        match at {
+            Some(p) => c.checked.push(format!("{loc}: {}", p.display())),
+            None => c.issues.push(Issue::at(IssueKind::Missing, &loc)),
+        }
+    }
+    if c.has_drift() {
+        c.state = State::Drift;
+    }
     c
 }
 

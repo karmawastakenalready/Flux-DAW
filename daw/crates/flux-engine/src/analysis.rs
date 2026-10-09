@@ -33,6 +33,7 @@ pub fn loudness(out: &RenderOutput) -> Value {
         "sample_peak_dbfs": r1(20.0 * (sp as f64).max(1e-12).log10()), "clipped_samples": clipped,
         "head_silence_ms": r1(head as f64 * 1000.0 / out.sr as f64), "tail_silence_ms": r1(tail as f64 * 1000.0 / out.sr as f64),
         "duration_s": r1(out.duration_s()), "looped": out.looped, "seam_error_db": out.seam_error_db.map(r1), "seam_crossfade_ms": out.seam_crossfade_ms.map(r1),
+        "lead_in_inserts": out.lead_in_inserts,
         "master_drive_db": r1(out.drive_db), "limiter_max_gr_db": r1(out.limiter_gr_db),
     })
 }

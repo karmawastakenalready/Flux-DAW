@@ -77,7 +77,7 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
       <br>
       <sub>A sketch in the piano roll: a melody over left-hand arpeggios, both written by <code>compose</code>.</sub>
       <h3>Write it, or have it written</h3>
-      Click to add notes, drag to move or resize them. Or let the agent write: <code>compose</code> turns a short notation such as <code>"E4:2 G4:1 B4:1 | A4:3 r:1"</code> into a phrased melody, voices chords from the chord track with real voice leading, and writes bass lines, arpeggios, CC swells and pitch-bend curves, each as one undoable edit.
+      Click to add notes, drag to move or resize them, or play them in from a MIDI keyboard (or the computer keyboard) and record takes while the song loops. Or let the agent write: <code>compose</code> turns a short notation such as <code>"E4:2 G4:1 B4:1 | A4:3 r:1"</code> into a phrased melody, voices chords from the chord track with real voice leading, and writes bass lines, arpeggios, CC swells and pitch-bend curves, each as one undoable edit.
       <br><br>
       Before anything is rendered, <code>lint</code> reads the score for what a listener would hear as a mistake: clashes, non-chord tones on strong beats, notes outside an instrument's range, mud, parallel fifths and octaves.
     </td>
@@ -124,8 +124,8 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
       get_project · edit · undo · redo · compose · lint · get_notes · new_project · open · save · render · analyze · export · mix_check · reference_match · spectrogram · game_audio_check · instrument_card · probe_instrument · list_instruments · sfz_derive · sfz_sets · plugins · transport · gui · activity · comments · audition
     </td>
     <td width="33%" valign="top">
-      <h4>✏️ 25 edit commands</h4>
-      Project, tempo, sections and the chord track · add, update and remove tracks · mixer and master settings · add, update, move and remove inserts · add, remove and delete notes · quantize · humanize · transpose · scale velocity · CC and pitch bend · copy and clear bars. A batch of them is atomic and undoes as one step.
+      <h4>✏️ 31 edit commands</h4>
+      Project, tempo, sections and the chord track · add, update and remove tracks · mixer and master settings · add, update, move and remove inserts · add, remove and delete notes · quantize · humanize · transpose · scale velocity · CC and pitch bend · automation · add, update, split and remove audio clips · copy and clear bars. A batch of them is atomic and undoes as one step.
     </td>
     <td width="33%" valign="top">
       <h4>🔍 12 score checks</h4>
@@ -135,7 +135,7 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
   <tr>
     <td width="33%" valign="top">
       <h4>🎻 Instruments</h4>
-      SFZ through sfizz 1.2.3 · VST3 instruments and effects · guitar and bass rigs (NAM captures and cabinet IRs) · audio files. SFZ tools make fixed copies of an instrument without touching the original: retune each sample, even out levels, shorten releases so gaps stay silent. Wrapper sets add CC dynamics and keyswitch articulations.
+      SFZ through sfizz 1.2.3 · VST3 instruments and effects · guitar and bass rigs (NAM captures and cabinet IRs) · audio clips anywhere on the timeline (WAV, FLAC or OGG at any sample rate). SFZ tools make fixed copies of an instrument without touching the original: retune each sample, even out levels, shorten releases so gaps stay silent. Wrapper sets add CC dynamics and keyswitch articulations.
     </td>
     <td width="33%" valign="top">
       <h4>📦 Assets you can ship</h4>
@@ -143,7 +143,7 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
     </td>
     <td width="33%" valign="top">
       <h4>🖥️ The app</h4>
-      Arrangement with sections and a waveform overview · piano roll · mixer · Track, Master and Analysis tabs · Activity, Comments (notes pinned to bars) and Auditions (A/B tests the agent sets up for you) · live playback or the last render · a compact dark theme.
+      Arrangement with sections, a waveform overview, audio clips and automation lanes · piano roll · mixer · MIDI keyboard and computer-keyboard input, monitored and recorded · Track, Master and Analysis tabs · Activity, Comments (notes pinned to bars) and Auditions (A/B tests the agent sets up for you) · live playback or the last render · a compact dark theme.
     </td>
   </tr>
 </table>
@@ -204,7 +204,7 @@ daw\target\debug\flux.exe assets fetch --all        # sfizz and the sample libra
 daw\target\debug\flux.exe                           # the window, with a new project
 ```
 
-A few assets have no direct download link (the guitar library and the amp captures). `flux assets status` lists what's missing, and [LICENSES.md](LICENSES.md) links each one's official page. The VST3 plugins Flux is built around are free downloads from their makers: [Vital](https://vital.audio), [Decent Sampler](https://www.decentsamples.com/product/decent-sampler-plugin/) and [Valhalla Supermassive](https://valhalladsp.com/shop/reverb/valhalla-supermassive/). Install them to `C:\Program Files\Common Files\VST3`.
+A few assets have no direct download link (the guitar library and the amp captures). `flux assets status` lists what's missing, and [LICENSES.md](LICENSES.md) links each one's official page. The VST3 plugins Flux is built around are free downloads from their makers: [Vital](https://vital.audio), [Decent Sampler](https://www.decentsamples.com/product/decent-sampler-plugin/) and [Valhalla Supermassive](https://valhalladsp.com/shop/reverb/valhalla-supermassive/). Install them to `C:\Program Files\Common Files\VST3`; `flux assets status` shows which ones it finds.
 
 To work with an agent, open this folder in Claude Code. It picks up `.mcp.json` and opens the Flux window when the agent connects.
 
@@ -246,7 +246,7 @@ at your option. Unless you explicitly state otherwise, any contribution intentio
 - **The UI fonts** (Inter and JetBrains Mono, in `daw/crates/flux/assets/fonts/`) are under the SIL Open Font License, with their license files next to them.
 - **Third-party terms** in `licenses/terms/` belong to their authors.
 
-**Sound libraries:** [LICENSES.md](LICENSES.md) lists every sample library, amp capture and tool Flux fetches, with its official source and license, and the credits to show in the game. It's generated by `flux assets licenses --no-usage` from [`assets.toml`](assets.toml). Only Salamander Grand Piano (CC BY 3.0) *requires* a credit; the others are credited anyway. The VST3 plugins are installed by you, under their makers' own terms.
+**Sound libraries:** [LICENSES.md](LICENSES.md) lists every sample library, amp capture and tool Flux fetches, with its official source and license, and the credits to show in the game. It's generated by `flux assets licenses --no-usage` from [`assets.toml`](assets.toml). Only Salamander Grand Piano (CC BY 3.0) *requires* a credit; the others are credited anyway. The VST3 plugins are installed by you, under their makers' own terms; LICENSES.md summarizes those too, and `flux assets status` shows which plugins and libraries each project uses, including libraries a plugin loads from a saved preset.
 
 <sub>VST is a registered trademark of Steinberg Media Technologies GmbH. Vital, Decent Sampler, Valhalla Supermassive and Neural Amp Modeler belong to their makers. Flux is an independent project and isn't affiliated with any of them.</sub>
 

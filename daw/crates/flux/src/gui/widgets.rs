@@ -572,6 +572,29 @@ pub fn icon_button_ex(ui: &mut Ui, icon: Icon, on: bool, enabled: bool, size: f3
     resp.on_hover_text(hint)
 }
 
+/// The record button: a red dot, lit while recording.
+pub fn record_button(ui: &mut Ui, on: bool, size: f32, hint: &str) -> Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, hint));
+    let down = resp.is_pointer_button_down_on();
+    let hot = resp.hovered();
+    let p = ui.painter();
+    let lit = PANEL.lerp_to_gamma(ERR, 0.24);
+    let fill = match (down, on, hot) {
+        (true, _, _) => PRESSED,
+        (_, true, true) => PANEL.lerp_to_gamma(ERR, 0.32),
+        (_, true, false) => lit,
+        (_, false, true) => HOVER,
+        _ => Color32::TRANSPARENT,
+    };
+    p.rect_filled(r, CornerRadius::same(R_CTRL), fill);
+    focus_ring(p, r, &resp);
+    let c = if on || hot { ERR } else { ERR.lerp_to_gamma(TEXT2, 0.35) };
+    let s = (size * 0.56).round().min(16.0);
+    paint_icon(p, Rect::from_center_size(r.center(), vec2(s, s)), Icon::Record, c);
+    resp.on_hover_text(hint)
+}
+
 pub fn icon_button(ui: &mut Ui, icon: Icon, enabled: bool, hint: &str) -> Response {
     icon_button_ex(ui, icon, false, enabled, 26.0, hint)
 }
@@ -814,6 +837,7 @@ pub enum Icon {
     Warning,
     Up,
     Down,
+    Record,
 }
 
 pub fn paint_icon(p: &Painter, r: Rect, icon: Icon, c: Color32) {
@@ -887,6 +911,9 @@ pub fn paint_icon(p: &Painter, r: Rect, icon: Icon, c: Color32) {
             for x in [3.5, 8.0, 12.5] {
                 p.circle_filled(pt(x, 8.0), 1.3 * u, c);
             }
+        }
+        Icon::Record => {
+            p.circle_filled(o, 4.6 * u, c);
         }
         Icon::Up | Icon::Down => {
             let s = if matches!(icon, Icon::Up) { -1.0 } else { 1.0 };

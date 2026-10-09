@@ -20,6 +20,10 @@ allowed_hosts = [
     "unreal-instruments.wixsite.com", # METAL-GTX author's site (terms page)
     "www.tone3000.com",              # NAM capture pages (license terms)
     "support.spectrasonics.net",     # Omnisphere license terms
+    "vital.audio",                   # Vital license terms
+    "valhalladsp.com",               # Valhalla DSP terms of use
+    "www.izotope.com",               # iZotope (Native Instruments USA) license agreement
+    "www.stltones.com",              # STL Tones license agreements
 ]
 approval_threshold = "2G"
 download_dir = "tools/_dl"
@@ -65,6 +69,41 @@ name = "Spectrasonics Omnisphere 2 license (purchased)"
 family = "proprietary"
 url = "https://support.spectrasonics.net/manual/Omnisphere/legal/all.htm"
 summary = "Sounds may be used inside original musical compositions, including game music. Not allowed: samples triggered directly by the game, sound effects, or multitrack releases that expose an Omnisphere part on its own."
+
+[[license]]
+id = "LicenseRef-Vital-EULA"
+name = "Vital end user license agreement"
+family = "freeware"
+url = "https://vital.audio/eula"
+summary = "Vital and its content may be used in commercial or non-commercial music and audio productions without permission, including to make samples for commercial products; presets, samples, wavetables, skins and LFOs made from unaltered Vital Audio content may not be redistributed."
+
+[[license]]
+id = "LicenseRef-Valhalla-Terms"
+name = "Valhalla DSP terms of use"
+family = "freeware"
+url = "https://valhalladsp.com/?p=49"
+summary = "Licensed for use within the user's own recording software and computers; Valhalla DSP owns the software; no license to redistribute it, including as part of other software such as video games or DAWs. The terms place no restriction on audio made with the plugins."
+
+[[license]]
+id = "LicenseRef-NI-iZotope-EULA"
+name = "Native Instruments USA (formerly iZotope) end user license agreement"
+family = "freeware"
+url = "https://www.izotope.com/en/license-agreement"
+summary = "Non-exclusive license to use the software (presets included) on one computer at a time; it may not be loaned, rented, leased or licensed to others. The agreement makes no claim on audio made with the software."
+
+[[license]]
+id = "LicenseRef-STL-Tones-EULA"
+name = "STL Tones end user license agreement"
+family = "freeware"
+url = "https://www.stltones.com/pages/end-user-license-agreements"
+summary = "STL Tones (US) Inc.: one user on one computer at a time (three activations); presets are part of the software, which may not be loaned, rented, leased, licensed, modified or decompiled. The agreement makes no claim on audio made with the software."
+
+[[license]]
+id = "LicenseRef-DecentSampler-Freeware"
+name = "Decent Sampler (freeware, no published license)"
+family = "freeware"
+url = "https://www.decentsamples.com/product/decent-sampler-plugin/"
+summary = "Free download from Decent Samples; no license text is published with the player. It plays sample libraries, each under its own license, and adds no sound of its own."
 
 # ---------------------------------------------------------------------------------------------------------------
 # Sample libraries (scope = audio: their sound ends up in the game's music)
@@ -732,7 +771,7 @@ version = "UI_METAL-GTX.rar (Google Drive, Last-Modified 2019-07-06)"
 authors = ["Unreal Instruments"]
 homepage = "https://unreal-instruments.wixsite.com/unreal-instruments/metal-gtx"
 description = "6- and 8-string metal guitar DI (feeds the NAM amp rigs)"
-license = { id = "LicenseRef-UnrealInstruments-Free", text_url = "https://unreal-instruments.wixsite.com/unreal-instruments/about", note = "The archive carries no license file. The author's About page says (in Japanese) that all libraries are free to use, that works made with them may be used commercially, that no credit is needed, and that modifying or redistributing the data without permission is forbidden. Rendered music is fine under these terms; the samples themselves must never be shipped or shared. A snapshot of the terms is in licenses/terms/metal-gtx-terms.txt." }
+license = { id = "LicenseRef-UnrealInstruments-Free", text_url = "https://unreal-instruments.wixsite.com/unreal-instruments/about", approved = 'Owner approved these terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the samples are never shipped or shared.', note = "The archive carries no license file. The author's About page says (in Japanese) that all libraries are free to use, that works made with them may be used commercially, that no credit is needed, and that modifying or redistributing the data without permission is forbidden. Rendered music is fine under these terms; the samples themselves must never be shipped or shared. A snapshot of the terms is in licenses/terms/metal-gtx-terms.txt." }
 credit = { role = "Guitar samples", text = "METAL-GTX by Unreal Instruments", required = false }
 notes = [
     "The operation manual is a separate download (METAL-GTX_Manual.rar, 65,636,514 bytes, sha256 d4496bd5533c8e5732cd60c8ed7bcedf6a87b22ccb9e0dd950d45b86ecf6eae5, Drive id 1iAVanIze4j_o2xVRysDHwmv23MmLts7P), cached in instruments/vst/_dl/metal_gtx/.",
@@ -760,7 +799,7 @@ version = "TONE3000 tone 32868 (5 captures, a2)"
 authors = ["jp_is_out_of_tune"]
 homepage = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868"
 description = "Amp captures for the METAL-GTX rigs (sfz/rigs)"
-license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868", note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
+license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868", approved = 'Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.', note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
 credit = { role = "Amp captures", text = "Peavey 5150 full rig captures by jp_is_out_of_tune (TONE3000)", required = false }
 
 [[asset.source]]
@@ -812,7 +851,7 @@ version = "TONE3000 tone 30247 (4 captures, a2)"
 authors = ["obijuan"]
 homepage = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247"
 description = "Amp captures for the METAL-GTX rigs (sfz/rigs)"
-license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247", note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
+license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247", approved = 'Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.', note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
 credit = { role = "Amp captures", text = "5150 III full rig captures by obijuan (TONE3000)", required = false }
 
 [[asset.source]]
@@ -865,10 +904,102 @@ license = { id = "LicenseRef-Spectrasonics-EULA", text_url = "https://support.sp
 type = "external"
 page = "https://www.spectrasonics.net/products/omnisphere/"
 instructions = "Installed with the Spectrasonics installer under the owner's account; it cannot be downloaded by this tool."
+installed = ["{vst3}/Omnisphere.vst3"]
+
+[[asset]]
+id = "vital"
+name = "Vital"
+kind = "plugin"
+scope = "audio"
+version = "1.0.7 (Vital Basic, free account)"
+authors = ["Vital Audio (Matt Tytel)"]
+homepage = "https://vital.audio"
+description = "Wavetable synth; its factory and bundled preset packs make the synth parts of Flux projects"
+optional = true
+license = { id = "LicenseRef-Vital-EULA", text_url = "https://vital.audio/eula", approved = 'Owner installed this plugin for the music project ("I installed some more vsts for you to use aswell", Oct 2026) after allowing any VST ("you can install whatever vsts you want btw"). Only rendered audio leaves the project; the plugin, its presets and its saved states are never shipped or shared.', note = "The EULA explicitly allows commercial music made with Vital and its presets. Flux projects keep each Vital part as a saved plugin state (plugin-states/*.vstpreset) holding the preset's data: those files must never be published." }
+credit = { role = "Synth sounds", text = "Vital by Vital Audio (https://vital.audio)", required = false }
+
+[[asset.source]]
+type = "external"
+page = "https://vital.audio"
+instructions = "Install Vital with its installer from vital.audio (free account); its presets go to Documents/Vital."
+installed = ["{vst3}/Vital.vst3", "{documents}/Vital"]
 
 # ---------------------------------------------------------------------------------------------------------------
 # Plugins and tools (scope = tool: used to make the music, never shipped in the game)
 # ---------------------------------------------------------------------------------------------------------------
+
+[[asset]]
+id = "decent-sampler"
+name = "Decent Sampler"
+kind = "plugin"
+scope = "tool"
+version = "1.36.1"
+authors = ["Decidedly (David Hilowitz)"]
+homepage = "https://www.decentsamples.com/product/decent-sampler-plugin/"
+description = "Sample player VST3; plays Decent Sampler libraries such as Bottles"
+optional = true
+license = { id = "LicenseRef-DecentSampler-Freeware", approved = 'Owner installed this plugin for the music project ("I installed some more vsts for you to use aswell", Oct 2026) after allowing any VST ("you can install whatever vsts you want btw"). Only rendered audio leaves the project; the plugin, its presets and its saved states are never shipped or shared.' }
+
+[[asset.source]]
+type = "external"
+page = "https://www.decentsamples.com/product/decent-sampler-plugin/"
+instructions = "Install Decent Sampler with its installer from decentsamples.com."
+installed = ["{vst3}/DecentSampler.vst3"]
+
+[[asset]]
+id = "valhalla-supermassive"
+name = "Valhalla Supermassive"
+kind = "plugin"
+scope = "tool"
+version = "5.0.0"
+authors = ["Valhalla DSP, LLC"]
+homepage = "https://valhalladsp.com/shop/reverb/valhalla-supermassive/"
+description = "Free reverb and delay; the reverb return of Flux projects"
+optional = true
+license = { id = "LicenseRef-Valhalla-Terms", text_url = "https://valhalladsp.com/?p=49", approved = 'Owner installed this plugin for the music project ("I installed some more vsts for you to use aswell", Oct 2026) after allowing any VST ("you can install whatever vsts you want btw"). Only rendered audio leaves the project; the plugin, its presets and its saved states are never shipped or shared.', note = "Summary from excerpts of the terms page, which refuses automated readers; read it in a browser before relying on details." }
+
+[[asset.source]]
+type = "external"
+page = "https://valhalladsp.com/shop/reverb/valhalla-supermassive/"
+instructions = "Install Valhalla Supermassive with its installer from valhalladsp.com."
+installed = ["{vst3}/ValhallaSupermassive.vst3", "{programdata}/Valhalla DSP, LLC/ValhallaSupermassive/Presets"]
+
+[[asset]]
+id = "izotope-vinyl"
+name = "iZotope Vinyl"
+kind = "plugin"
+scope = "tool"
+version = "1.13.0"
+authors = ["iZotope, Inc. (Native Instruments)"]
+homepage = "https://www.izotope.com/en/products/vinyl.html"
+description = "Free vinyl and lo-fi simulation effect"
+optional = true
+license = { id = "LicenseRef-NI-iZotope-EULA", text_url = "https://www.izotope.com/en/license-agreement", note = "Summary from search excerpts of the current agreement and from iZotope's earlier EULAs (Ozone 8); the page refused automated readers. Read it in a browser before relying on details.", approved = 'Owner installed this plugin for the music project ("I installed some more vsts for you to use aswell", Oct 2026) after allowing any VST ("you can install whatever vsts you want btw"). Only rendered audio leaves the project; the plugin, its presets and its saved states are never shipped or shared.' }
+
+[[asset.source]]
+type = "external"
+page = "https://www.izotope.com/en/products/vinyl.html"
+instructions = "Install Vinyl with iZotope Product Portal / Native Access."
+installed = ["{vst3}/iZotope/Vinyl.vst3"]
+
+[[asset]]
+id = "stl-ignite-emissary"
+name = "STL Ignite Emissary plug-in bundle (Emissary, NadIR, cabinet IRs)"
+kind = "plugin"
+scope = "tool"
+version = "2.0.1"
+authors = ["Ignite Amps", "STL Tones"]
+homepage = "https://www.stltones.com/products/stl-ignite-emissary-plug-in-bundle"
+description = "Free tube guitar preamp (Emissary), impulse-response loader (NadIR) and the bundle's cabinet IRs"
+optional = true
+license = { id = "LicenseRef-STL-Tones-EULA", text_url = "https://www.stltones.com/pages/end-user-license-agreements", note = "The published agreements name STL's AmpHub, ControlHub and ToneHub; none names the Ignite bundle, which the installer licenses through the same STL account system.", approved = 'Owner installed this plugin for the music project ("I installed some more vsts for you to use aswell", Oct 2026) after allowing any VST ("you can install whatever vsts you want btw"). Only rendered audio leaves the project; the plugin, its presets and its saved states are never shipped or shared.' }
+
+[[asset.source]]
+type = "external"
+page = "https://www.stltones.com/products/stl-ignite-emissary-plug-in-bundle"
+instructions = "Install the bundle with its installer from stltones.com (free STL account); its banks and IRs go to Documents/STL/Ignite."
+installed = ["{vst3}/Emissary.vst3", "{vst3}/NadIR.vst3", "{documents}/STL/Ignite/Emissary plug-in bundle"]
 
 [[asset]]
 id = "surge-xt"

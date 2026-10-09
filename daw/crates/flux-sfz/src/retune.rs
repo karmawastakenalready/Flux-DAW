@@ -1,9 +1,17 @@
 //! Retuned copies: every sample measured against the key it is mapped to, and a `tune=` correction written
 //! into a copy of the instrument.
 //!
-//! The port of `tools/sfz_retune.py` (the pitch measurement is [`crate::pitch::PitchAnalyzer::measure_cents`],
-//! checked against the Python code on 464 real samples). Differences:
+//! Each sample is measured with [`PitchAnalyzer::measure_tuning`](crate::pitch::PitchAnalyzer::measure_tuning).
+//! A region is left as it is when there is nothing to trust ([`Unmeasured`] says why): no harmonic of its key
+//! stands out, the harmonics barely rise above the noise (release samples, pedal and key noise), they disagree,
+//! or the correction would be larger than [`RetuneOptions::max_cents`] (probably another note).
 //!
+//! It replaces `tools/sfz_retune.py`. Differences:
+//!
+//! * The measurement. The Python tool took the strongest of harmonics 1-3, which on a low plucked note is
+//!   usually the fundamental, pulled tens of cents off by the instrument's body: its corrections put low
+//!   pizzicato notes out of tune. It also retuned noise samples to whatever peak it found. Here the median of
+//!   up to ten harmonics decides, and noise is left alone.
 //! * The region's key is its effective `pitch_keycenter` (inherited from a group, or set by `key=`; sfizz's
 //!   default 60 when there is none, where the Python tool used `lokey`); `pitch_keycenter=sample` uses the
 //!   root key stored in the sample file.
@@ -16,7 +24,7 @@ use crate::audio::SampleInfo;
 use crate::edit::{Derived, Layout, OutputFile, RegionEdit, SamplePaths};
 use crate::error::{Error, Result};
 use crate::instrument::{Instrument, SampleRef};
-use crate::pitch::{PitchAnalyzer, measure_sample_cents};
+use crate::pitch::{PitchAnalyzer, Tuning, measure_sample_tuning};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -56,10 +64,12 @@ impl Default for RetuneOptions {
 #[serde(rename_all = "snake_case", tag = "action")]
 pub enum RegionAction {
     Retuned { cents: f64, tune: f64 },
-    /// No pitch found near the key, or further than `max_cents` away: left as it is.
+    /// Nothing to trust: left as it is.
     Unmeasurable {
+        /// What was measured, if anything.
         #[serde(skip_serializing_if = "Option::is_none")]
         cents: Option<f64>,
+        reason: Unmeasured,
     },
     /// The sample could not be read (missing, not audio): left as it is.
     Unreadable { error: String },
@@ -67,6 +77,72 @@ pub enum RegionAction {
     Removed,
     /// No sample file (a generator or nothing): left as it is.
     NoSample,
+}
+
+impl RegionAction {
+    /// Why the region was left as it is (`None` if it was retuned or removed).
+    pub fn left_because(&self) -> Option<&'static str> {
+        match self {
+            RegionAction::Retuned { .. } | RegionAction::Removed => None,
+            RegionAction::Unmeasurable { reason, .. } => Some(reason.name()),
+            RegionAction::Unreadable { .. } => Some("unreadable"),
+            RegionAction::NoSample => Some("no_sample"),
+        }
+    }
+}
+
+/// Why a sample was not measured, or its measurement not trusted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unmeasured {
+    /// `pitch_keycenter=sample` and the file stores no root key: nothing to measure against.
+    NoKey,
+    /// No harmonic of the key stands out (silence, a very short sample, or another note).
+    NoPitch,
+    /// The key's harmonics barely rise above the spectrum around them: noise rather than a note, or another note.
+    Noisy,
+    /// The harmonics disagree about the pitch.
+    Inconsistent,
+    /// Further from the key than [`RetuneOptions::max_cents`]: probably another note.
+    TooFar,
+}
+
+impl Unmeasured {
+    /// The name in reports (as serialized).
+    pub fn name(self) -> &'static str {
+        match self {
+            Unmeasured::NoKey => "no_key",
+            Unmeasured::NoPitch => "no_pitch",
+            Unmeasured::Noisy => "noisy",
+            Unmeasured::Inconsistent => "inconsistent",
+            Unmeasured::TooFar => "too_far",
+        }
+    }
+
+    /// The reason in a sentence, with what was measured.
+    pub fn describe(self, cents: Option<f64>) -> String {
+        let measured = cents.map_or_else(String::new, |c| format!(" (measured {c:+.1} cents)"));
+        match self {
+            Unmeasured::NoKey => "no key to measure against: pitch_keycenter=sample and the file stores no root key".into(),
+            Unmeasured::NoPitch => "no harmonic of the key stands out".into(),
+            Unmeasured::Noisy => format!("the key's harmonics barely stand out: noise, or another note{measured}"),
+            Unmeasured::Inconsistent => format!("the harmonics disagree about the pitch{measured}"),
+            Unmeasured::TooFar => format!("further from the key than max_cents, probably another note{measured}"),
+        }
+    }
+
+    /// Whether a measurement is to be trusted, and if not, why.
+    fn check(t: &Tuning, max_cents: f64) -> Option<Unmeasured> {
+        if t.prominence_db < crate::pitch::MIN_PROMINENCE_DB {
+            Some(Unmeasured::Noisy)
+        } else if !t.trusted() {
+            Some(Unmeasured::Inconsistent)
+        } else if t.cents.abs() > max_cents {
+            Some(Unmeasured::TooFar)
+        } else {
+            None
+        }
+    }
 }
 
 /// One region of a [`RetuneReport`].
@@ -104,6 +180,19 @@ pub struct RetuneReport {
     pub regions: Vec<RegionTuning>,
 }
 
+impl RetuneReport {
+    /// How many regions were left as they were, by [`RegionAction::left_because`].
+    pub fn left_as_is_by_reason(&self) -> BTreeMap<&'static str, usize> {
+        let mut by = BTreeMap::new();
+        for r in &self.regions {
+            if let Some(why) = r.action.left_because() {
+                *by.entry(why).or_default() += 1;
+            }
+        }
+        by
+    }
+}
+
 /// Python's `round`: half to even.
 fn round_half_even(x: f64) -> f64 {
     x.round_ties_even()
@@ -119,7 +208,7 @@ pub fn retune(inst: &Instrument, out: &Path, options: &RetuneOptions) -> Result<
         der.keep_sample_paths();
     }
     let mut analyzer = PitchAnalyzer::new();
-    let mut cache: HashMap<(PathBuf, u8), std::result::Result<Option<f64>, String>> = HashMap::new();
+    let mut cache: HashMap<(PathBuf, u8), std::result::Result<Option<Tuning>, String>> = HashMap::new();
     let mut root_keys: HashMap<PathBuf, Option<u8>> = HashMap::new();
     let mut edits = vec![];
     let mut regions = vec![];
@@ -145,25 +234,28 @@ pub fn retune(inst: &Instrument, out: &Path, options: &RetuneOptions) -> Result<
         }
         let (Some(f), Some(key)) = (file, key) else {
             if file.is_some() {
-                entry.action = RegionAction::Unmeasurable { cents: None };
+                entry.action = RegionAction::Unmeasurable { cents: None, reason: Unmeasured::NoKey };
             }
             regions.push(entry);
             continue;
         };
         let measured = cache
             .entry((f.path.clone(), key))
-            .or_insert_with(|| measure_sample_cents(&f.path, key, &mut analyzer).map_err(|e| e.to_string()))
+            .or_insert_with(|| measure_sample_tuning(&f.path, key, &mut analyzer).map_err(|e| e.to_string()))
             .clone();
         entry.action = match measured {
             Err(error) => RegionAction::Unreadable { error },
-            Ok(Some(c)) if c.abs() <= options.max_cents => {
-                per_key.entry(key).or_default().push(c);
-                let base = if options.keep_existing_tune { p.tune } else { 0.0 };
-                let tune = base - round_half_even(c);
-                edits.push((r.index(), RegionEdit::Set { name: "tune".into(), value: format_number(tune) }));
-                RegionAction::Retuned { cents: c, tune }
-            }
-            Ok(c) => RegionAction::Unmeasurable { cents: c },
+            Ok(None) => RegionAction::Unmeasurable { cents: None, reason: Unmeasured::NoPitch },
+            Ok(Some(t)) => match Unmeasured::check(&t, options.max_cents) {
+                Some(reason) => RegionAction::Unmeasurable { cents: Some(t.cents), reason },
+                None => {
+                    per_key.entry(key).or_default().push(t.cents);
+                    let base = if options.keep_existing_tune { p.tune } else { 0.0 };
+                    let tune = base - round_half_even(t.cents);
+                    edits.push((r.index(), RegionEdit::Set { name: "tune".into(), value: format_number(tune) }));
+                    RegionAction::Retuned { cents: t.cents, tune }
+                }
+            },
         };
         regions.push(entry);
     }
@@ -208,12 +300,27 @@ mod tests {
 
     /// A 16-bit mono WAV of a harmonic tone.
     fn tone_wav(path: &Path, hz: f64) {
+        wav(path, |t| (0.5 * (2.0 * std::f64::consts::PI * hz * t).sin() + 0.2 * (4.0 * std::f64::consts::PI * hz * t).sin()) * 0.8);
+    }
+
+    /// A 16-bit mono WAV of a decaying noise burst.
+    fn noise_wav(path: &Path) {
+        let mut s = 0x9e37_79b9_7f4a_7c15u64;
+        wav(path, |t| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            ((s >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * (-4.0 * t).exp()
+        });
+    }
+
+    /// A one-second, 16-bit mono WAV of `f(t)`.
+    fn wav(path: &Path, mut f: impl FnMut(f64) -> f64) {
         let sr = 44100u32;
         let n = sr as usize;
         let mut data = vec![];
         for i in 0..n {
-            let t = i as f64 / f64::from(sr);
-            let v = (0.5 * (2.0 * std::f64::consts::PI * hz * t).sin() + 0.2 * (4.0 * std::f64::consts::PI * hz * t).sin()) * 0.8;
+            let v = f(i as f64 / f64::from(sr));
             data.extend_from_slice(&((v * 32767.0) as i16).to_le_bytes());
         }
         let mut b = vec![];
@@ -243,24 +350,31 @@ mod tests {
         // A4 played 20 cents sharp, C4 in tune, and a key far off
         tone_wav(&d.join("lib/s/a.wav"), 440.0 * 2f64.powf(20.0 / 1200.0));
         tone_wav(&d.join("lib/s/c.wav"), 261.6256);
+        noise_wav(&d.join("lib/s/release.wav"));
         std::fs::write(
             d.join("lib/map.sfz"),
             "<control> default_path=s/\n<group> tune=5\n<region> sample=a.wav key=69\n<region> sample=c.wav lokey=59 hikey=61 pitch_keycenter=60\n\
-             <region> sample=c.wav key=90\n<region> sample=gone.wav key=50\n",
+             <region> sample=c.wav key=90\n<region> sample=gone.wav key=50\n<region> sample=release.wav key=60 trigger=release\n\
+             <region> sample=c.wav key=63\n",
         )
         .unwrap();
         let inst = Instrument::load_with(d.join("lib/map.sfz"), &LoadOptions::default()).unwrap();
         let out = d.join("out/map.sfz");
         let (files, report) = retune(&inst, &out, &RetuneOptions { keys: Some((0, 80)), ..RetuneOptions::default() }).unwrap();
-        assert_eq!((report.retuned, report.removed, report.left_as_is), (2, 1, 1));
+        assert_eq!((report.retuned, report.removed, report.left_as_is), (2, 1, 3));
         let RegionAction::Retuned { cents, tune } = report.regions[0].action else { panic!("{:?}", report.regions[0]) };
         assert!((cents - 20.0).abs() < 1.0, "{cents}");
         assert_eq!(tune, -20.0);
         assert!(matches!(report.regions[2].action, RegionAction::Removed));
         assert!(matches!(report.regions[3].action, RegionAction::Unreadable { .. }));
+        // the noise is left alone, and so is a sample 300 cents from its key
+        assert!(matches!(report.regions[4].action, RegionAction::Unmeasurable { reason: Unmeasured::Noisy, .. }), "{:?}", report.regions[4]);
+        assert!(matches!(report.regions[5].action, RegionAction::Unmeasurable { .. }), "{:?}", report.regions[5]);
+        let why = report.left_as_is_by_reason();
+        assert_eq!((why.values().sum::<usize>(), why["unreadable"]), (3, 1), "{why:?}");
         let text = files[0].document.to_text();
         let copy = Instrument::from_text(&text, &out, &LoadOptions::default()).unwrap();
-        assert_eq!(copy.regions().len(), 3);
+        assert_eq!(copy.regions().len(), 5);
         assert_eq!(copy.regions()[0].props().tune, -20.0);
         assert_eq!(copy.regions()[0].sample().file().unwrap().path, d.join("lib").join("s").join("a.wav"));
 

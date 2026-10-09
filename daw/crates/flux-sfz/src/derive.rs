@@ -2,7 +2,8 @@
 //! one request, a default place for the copy, and the rule that a sample library is never written to.
 //!
 //! * The copy goes to `out`, or by default to `<root>/sfz/derived/<library>/<name>_<tool>.sfz` (`<library>` is
-//!   the folder under `instruments/` the source is in; sources elsewhere go straight into `sfz/derived/`).
+//!   the folder under `instruments/` the source is in). A copy of a copy goes next to it, so a library's copies
+//!   stay together however many tools they went through; other sources go straight into `sfz/derived/`.
 //! * Nothing is written inside `<root>/instruments/` (libraries are installed and verified as downloaded, see
 //!   `flux assets`), and a copy never replaces one of the files it is made from.
 //!
@@ -13,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::even::{EvenOptions, EvenReport, even};
 use crate::fsutil::{lexical_normalize, slash_path};
 use crate::instrument::{Instrument, LoadOptions};
-use crate::retune::{RegionAction, RetuneOptions, RetuneReport, retune};
+use crate::retune::{RegionAction, RetuneOptions, RetuneReport, Unmeasured, retune};
 use crate::tighten::{TightenOptions, TightenReport, tighten};
 use crate::value::note_name;
 use serde::Serialize;
@@ -87,18 +88,28 @@ pub fn library_dir(root: &Path) -> PathBuf {
     root.join("instruments")
 }
 
-/// Where a copy goes when no output is given: `<root>/sfz/derived/<library>/<name>_<tool>.sfz`.
+/// The folder derived copies go to by default.
+pub fn derived_dir(root: &Path) -> PathBuf {
+    root.join("sfz").join("derived")
+}
+
+/// Where a copy goes when no output is given: `<root>/sfz/derived/<library>/<name>_<tool>.sfz`, or next to the
+/// source when that is a derived copy already.
 pub fn default_output(root: &Path, source: &Path, tool: &str) -> PathBuf {
     let source = absolute_under(root, source);
     let stem = source.file_stem().map_or_else(|| "instrument".into(), |s| s.to_string_lossy().into_owned());
-    let mut out = root.join("sfz").join("derived");
+    let derived = derived_dir(root);
     let libs = library_dir(root);
-    if starts_with_ci(&source, &libs)
+    let dir = if starts_with_ci(&source, &derived) {
+        source.parent().map_or_else(|| derived.clone(), Path::to_path_buf)
+    } else if starts_with_ci(&source, &libs)
         && let Some(lib) = source.components().nth(libs.components().count())
     {
-        out.push(lib.as_os_str());
-    }
-    out.join(format!("{stem}_{tool}.sfz"))
+        derived.join(lib.as_os_str())
+    } else {
+        derived
+    };
+    dir.join(format!("{stem}_{tool}.sfz"))
 }
 
 /// Refuse an output path inside the library folder, or that is not an `.sfz` file.
@@ -181,22 +192,26 @@ impl Report {
             Report::Retune(r) => {
                 let keys: serde_json::Map<String, Value> =
                     r.keys.iter().map(|k| (format!("{} ({})", note_name(k.key), k.key), round(k.median_cents, 1))).collect();
-                let problems: Vec<Value> = r
+                // noise (release samples and the like: a piano has dozens) after everything else
+                let mut problems: Vec<(bool, Value)> = r
                     .regions
                     .iter()
                     .filter_map(|t| {
                         let what = match &t.action {
-                            RegionAction::Unmeasurable { cents: Some(c) } => format!("measured {c:+.1} cents: not trusted"),
-                            RegionAction::Unmeasurable { cents: None } => "no pitch found".to_string(),
+                            RegionAction::Unmeasurable { cents, reason } => reason.describe(*cents),
                             RegionAction::Unreadable { error } => error.clone(),
                             _ => return None,
                         };
-                        Some(json!({"region": t.region, "key": t.key, "sample": t.sample.as_deref().map(rel), "problem": what}))
+                        let noise = matches!(t.action, RegionAction::Unmeasurable { reason: Unmeasured::Noisy, .. });
+                        Some((noise, json!({"region": t.region, "key": t.key, "sample": t.sample.as_deref().map(rel), "problem": what})))
                     })
                     .collect();
+                problems.sort_by_key(|p| p.0);
+                let problems: Vec<Value> = problems.into_iter().map(|p| p.1).collect();
                 json!({
                     "tool": "retune", "source": rel(&r.source), "output": rel(&r.output),
-                    "retuned": r.retuned, "left_as_is": r.left_as_is, "removed": r.removed,
+                    "retuned": r.retuned, "left_as_is": r.left_as_is, "left_as_is_by_reason": r.left_as_is_by_reason(),
+                    "removed": r.removed,
                     "median_cents_by_key": keys,
                     "problems": problems.iter().take(MAX_LISTED).collect::<Vec<_>>(),
                     "problems_total": problems.len(),
@@ -238,6 +253,10 @@ mod tests {
         let lib_src = root.join("instruments/VSCO-2-CE/Harp.sfz");
         assert_eq!(default_output(&root, &lib_src, "tighten"), root.join("sfz/derived/VSCO-2-CE/Harp_tighten.sfz"));
         assert_eq!(default_output(&root, Path::new("sfz/x.sfz"), "even"), root.join("sfz/derived/x_even.sfz"));
+        // a copy of a copy stays with its library
+        let copy = default_output(&root, &lib_src, "retune");
+        assert_eq!(default_output(&root, &copy, "even"), root.join("sfz/derived/VSCO-2-CE/Harp_retune_even.sfz"));
+        assert_eq!(default_output(&root, Path::new("sfz/derived/x_even.sfz"), "tighten"), root.join("sfz/derived/x_even_tighten.sfz"));
         assert!(check_output(&root, Path::new("instruments/VSCO-2-CE/Harp_x.sfz")).is_err());
         assert!(check_output(&root, Path::new("sfz/../instruments/lib/a.sfz")).is_err());
         assert!(check_output(&root, Path::new("sfz/derived/a.txt")).is_err());

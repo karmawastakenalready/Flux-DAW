@@ -47,7 +47,8 @@ Reading instruments (nothing is written):
                                       sample files: formats, lengths, loops (a folder's WAV/FLAC files, or
                                       the samples an SFZ file plays)
 
-Derived copies (the source is never changed; OUT defaults to sfz/derived/<library>/<name>_<tool>.sfz):
+Derived copies (the source is never changed; OUT defaults to sfz/derived/<library>/<name>_<tool>.sfz, or next to
+the source when that is a derived copy already):
   tighten SRC [OUT] --release S [--note TEXT]
                                       short release and no release samples (tight palm mutes)
   retune  SRC [OUT] [--keys LO-HI] [--max-cents C] [--add-to-tune] [--base DIR]
@@ -725,7 +726,15 @@ fn derive_text(ctx: &Ctx<'_>, o: &Outcome) -> Vec<String> {
             count(r.regions_kept, "region")
         ),
         Report::Retune(r) => {
-            format!("{} retuned, {} left as they were, {} removed; {} measured", r.retuned, r.left_as_is, r.removed, count(r.keys.len(), "key"))
+            let why: Vec<String> = r.left_as_is_by_reason().iter().map(|(k, n)| format!("{n} {}", k.replace('_', " "))).collect();
+            let why = if why.is_empty() { String::new() } else { format!(" ({})", why.join(", ")) };
+            format!(
+                "{} retuned, {} left as they were{why}, {} removed; {} measured",
+                r.retuned,
+                r.left_as_is,
+                r.removed,
+                count(r.keys.len(), "key")
+            )
         }
         Report::Even(r) => {
             let targets: Vec<String> = r.targets_db.iter().zip(&r.velocities).map(|(t, v)| format!("{t:.1} dB at velocity {v}")).collect();

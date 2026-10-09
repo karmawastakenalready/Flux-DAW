@@ -17,7 +17,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::AtomicU64;
 
 /// Bumped on any incompatible change to frames, messages or the shared-memory layout.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Largest frame accepted (state blobs of big sample-based instruments can be tens of MB).
 pub const MAX_FRAME: usize = 512 << 20;
 
@@ -38,6 +38,9 @@ pub enum Request {
     },
     /// Set parameters by name/`#id` with human values (see `params`); returns what each resolved to.
     SetParams { values: Vec<(String, Value)> },
+    /// Resolve parameters as `SetParams` would, without setting them: each one's normalized value, and its
+    /// value now. One that doesn't resolve has an error of its own instead of failing the rest.
+    ResolveParams { values: Vec<(String, Value)> },
     /// The state as a .vstpreset (in the blob).
     GetState,
     /// Restore a .vstpreset (in the blob).

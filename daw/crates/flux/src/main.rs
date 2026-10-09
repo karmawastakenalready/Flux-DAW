@@ -4,6 +4,7 @@ mod audio;
 mod gui;
 mod mcp;
 mod measure;
+mod midi;
 mod plugins;
 mod state;
 mod stdio;

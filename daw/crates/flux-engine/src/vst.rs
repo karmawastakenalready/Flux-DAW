@@ -19,13 +19,14 @@
 use crate::dsp::Stereo;
 use crate::paths;
 use anyhow::{anyhow, bail, Context, Result};
+use flux_core::automation::{Lane, Point, Target};
 use flux_core::{Chain, Insert, Instrument, Project, TimeMap, Track};
-use flux_vst3::client::{AudioError, AudioPort, HostOptions, LoadOptions, Loaded, PluginHost};
+use flux_vst3::client::{AudioError, AudioPort, HostOptions, LoadOptions, Loaded, PluginHost, Resolved};
 use flux_vst3::ipc::HostEvent;
 use flux_vst3::preset::Preset;
 use flux_vst3::settle;
 use flux_vst3::vendor;
-use flux_vst3::{Midi, Setup, TimedMidi, Transport};
+use flux_vst3::{Midi, ParamPoint, Setup, TimedMidi, Transport};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -38,6 +39,10 @@ const BLOCK: usize = 512;
 /// Silence rendered (and discarded) before the song, so parameter smoothing settles and
 /// sample-streaming instruments have their first samples loaded.
 const PREROLL_S: f64 = 0.25;
+/// Silence a render instance plays after being set up anew, before its voices and tails are cleared: many plugins
+/// glide to new parameter values (a reverb's delay time over most of a second), and a render must start from where
+/// they arrive, as it does on an instance set up long before.
+const WARM_UP_S: f64 = 2.0;
 /// Plugin hosts kept loaded between renders (least recently used beyond this are closed).
 const MAX_POOLED: usize = 48;
 /// Hosts idle this long are closed.
@@ -426,7 +431,7 @@ const LIVE_SAMPLE_LOAD_WAIT: Duration = Duration::from_secs(5);
 /// A plugin that finishes a restore in the background (a sample player loading its samples) is waited for before
 /// its params are set, which it would overwrite otherwise: with its `port`, until it signals or a probe note sounds
 /// (see `flux_vst3::settle`); without (it is playing live), until it signals, for a few seconds at most.
-fn configure(c: &Control, host: &PluginHost, port: Option<&mut AudioPort>, default_state: &[u8], s: &Spec, reset: bool) -> Result<()> {
+fn configure(c: &Control, host: &PluginHost, mut port: Option<&mut AudioPort>, default_state: &[u8], s: &Spec, reset: bool) -> Result<()> {
     let (want, preset) = setup_hash(s)?;
     // events the plugin sends while Flux sets it up aren't a person's edits
     c.quiet_until.store(u64::MAX, Ordering::Release);
@@ -467,7 +472,7 @@ fn configure(c: &Control, host: &PluginHost, port: Option<&mut AudioPort>, defau
                         let watch = background.map(|_| host.watch());
                         host.set_state(state)?;
                         if let (Some(family), Some(watch)) = (background, watch) {
-                            let note = settle_restore(host, port, &watch, family, state, &label, !s.params.is_empty())?;
+                            let note = settle_restore(host, port.as_deref_mut(), &watch, family, state, &label, !s.params.is_empty())?;
                             *c.setup_note.lock().unwrap_or_else(|e| e.into_inner()) = note;
                         }
                     }
@@ -479,11 +484,31 @@ fn configure(c: &Control, host: &PluginHost, port: Option<&mut AudioPort>, defau
             }
             *c.setup.lock().unwrap_or_else(|e| e.into_inner()) = Some(Applied { hash: want, preset: preset_hash, params: s.params.clone() });
             c.applied.store(want, Ordering::Release);
+            if reset && let Some(port) = port.as_deref_mut() {
+                warm_up(port, s.effect)?;
+            }
         }
         if reset { host.reset() } else { Ok(()) }
     })();
     c.quiet_until.store(now_ms() + 400, Ordering::Release);
     r
+}
+
+/// Play a plugin [`WARM_UP_S`] of silence (an effect gets silent input, an instrument no notes), so the parameters
+/// it was just given are where it glides them to.
+fn warm_up(port: &mut AudioPort, effect: bool) -> Result<()> {
+    let silence = vec![0f32; BLOCK];
+    let (mut l, mut r) = (vec![0f32; BLOCK], vec![0f32; BLOCK]);
+    let total = (WARM_UP_S * port.setup().sample_rate) as usize;
+    let mut done = 0;
+    while done < total {
+        let n = BLOCK.min(total - done);
+        let input: &[&[f32]] = if effect { &[&silence[..n], &silence[..n]] } else { &[] };
+        port.begin(n, input, &[], &[], None).map_err(|e| anyhow!("{e}"))?;
+        port.end(&mut [&mut l[..n], &mut r[..n]]).map_err(|e| anyhow!("{e}"))?;
+        done += n;
+    }
+    Ok(())
 }
 
 /// Wait for a plugin that loads in the background after `state` was restored (see [`configure`]). Returns a note
@@ -776,8 +801,10 @@ pub fn live_open(p: &Project, slot: SlotId, max_block: usize) -> Result<LivePlug
 }
 
 /// Bring a slot's live instance up to date with the project (its preset or params changed) while it
-/// keeps playing. `seq` orders the requests: one that arrives after a newer one is skipped.
-pub fn live_configure(p: &Project, slot: SlotId, seq: u64) -> Result<()> {
+/// keeps playing. `seq` orders the requests: one that arrives after a newer one is skipped. `full` sets
+/// it up from scratch (its preset, then its params) even if it is set up already: a parameter whose
+/// lane went away goes back to the set-up's value.
+pub fn live_configure(p: &Project, slot: SlotId, seq: u64, full: bool) -> Result<()> {
     let s = spec(p, slot)?;
     let Some(reg) = live_reg(&s, p.sample_rate) else { return Ok(()) };
     let mut newest = reg.setup.lock().unwrap_or_else(|e| e.into_inner());
@@ -786,7 +813,18 @@ pub fn live_configure(p: &Project, slot: SlotId, seq: u64) -> Result<()> {
     }
     *newest = seq;
     let host = reg.host().ok_or_else(|| anyhow!("{}: the live plugin has stopped", s.owner))?;
+    if full {
+        reg.ctl.applied.store(0, Ordering::Release);
+    }
     configure(&reg.ctl, &host, None, &reg.default_state, &s, false)
+}
+
+/// A slot's parameter lanes resolved against its live instance (see [`Automation::resolve`]), and the lanes
+/// left out, why. None if live playback hasn't the slot's plugin loaded.
+pub(crate) fn live_automation(p: &Project, slot: SlotId) -> Option<(Automation, Vec<String>)> {
+    let s = spec(p, slot).ok()?;
+    let host = live_reg(&s, p.sample_rate)?.host()?;
+    Some(Automation::resolve(&host, p, slot))
 }
 
 // ---- rendering --------------------------------------------------------------------------------------
@@ -820,8 +858,14 @@ pub fn render(track: &Track, p: &Project, tm: &TimeMap, frames: usize) -> Result
     let events = midi_events(track, tm, sr);
     with_instance(track, p, |inst| {
         let name = inst.loaded.info.class.name.clone();
-        let (buf, report) = render_events(inst, p, tm, &events, frames).map_err(|e| anyhow!("track '{}' ({name}): {e:#}", track.name))?;
+        let (mut auto, problems) = Automation::resolve(&inst.host, p, SlotId::Instrument(track.id));
+        let rendered = render_events(inst, p, tm, &events, frames, &mut auto);
+        let restored = auto.restore(&inst.host);
+        let (buf, report) = rendered.and_then(|r| restored.map(|()| r)).map_err(|e| anyhow!("track '{}' ({name}): {e:#}", track.name))?;
         let mut note = format!("vst3: {name}");
+        for problem in problems {
+            note.push_str(&format!(" ({problem})"));
+        }
         if report.unmapped > 0 {
             note.push_str(&format!(" ({} CC / bend events have no parameter in this plugin)", report.unmapped));
         }
@@ -885,7 +929,14 @@ impl Clock {
     }
 }
 
-fn render_events(inst: &mut Instance, p: &Project, tm: &TimeMap, events: &[TimedMidi], frames: usize) -> Result<(Stereo, flux_vst3::plugin::ProcessReport)> {
+fn render_events(
+    inst: &mut Instance,
+    p: &Project,
+    tm: &TimeMap,
+    events: &[TimedMidi],
+    frames: usize,
+    auto: &mut Automation,
+) -> Result<(Stereo, flux_vst3::plugin::ProcessReport)> {
     let sr = p.sample_rate as f64;
     let port = &mut inst.port;
     let mut report = flux_vst3::plugin::ProcessReport::default();
@@ -902,7 +953,9 @@ fn render_events(inst: &mut Instance, p: &Project, tm: &TimeMap, events: &[Timed
     let mut done = 0;
     while done < pre {
         let n = (pre - done).min(BLOCK);
-        port.begin(n, &[], &[], &[], Some(&t0)).map_err(|e| anyhow!("{e}"))?;
+        // the lanes' values at the top of the song
+        let params = if done == 0 { auto.block(p, tm, 1, |_| 0) } else { &[] };
+        port.begin(n, &[], &[], params, Some(&t0)).map_err(|e| anyhow!("{e}"))?;
         port.end(&mut [&mut l[..n], &mut r[..n]]).map_err(|e| anyhow!("{e}"))?;
         done += n;
     }
@@ -923,7 +976,8 @@ fn render_events(inst: &mut Instance, p: &Project, tm: &TimeMap, events: &[Timed
             ei += 1;
         }
         let t = transport_at(p, tm, at, sr, true);
-        port.begin(n, &[], &block_events, &[], Some(&t)).map_err(|e| anyhow!("{e}"))?;
+        let params = auto.block(p, tm, n, |o| at + o);
+        port.begin(n, &[], &block_events, params, Some(&t)).map_err(|e| anyhow!("{e}"))?;
         let rep = port.end(&mut [&mut l[at..at + n], &mut r[at..at + n]]).map_err(|e| anyhow!("{e}"))?;
         add(&mut report, rep);
         at += n;
@@ -938,14 +992,16 @@ fn render_events(inst: &mut Instance, p: &Project, tm: &TimeMap, events: &[Timed
 /// Run `buf` through an insert's plugin, loaded and set up from the project (voices and tails cleared
 /// first), the way a DAW plays it: `pos_of(k)` is the song sample at frame `k` of the buffer (it wraps
 /// in loops), and the plugin gets the song's tempo and position. The output is compensated for the
-/// plugin's latency. Returns the plugin's name.
-pub fn process_insert(p: &Project, tm: &TimeMap, id: u64, buf: &mut Stereo, pos_of: &dyn Fn(usize) -> usize) -> Result<String> {
+/// plugin's latency; the insert's parameter lanes move its parameters. Returns warnings: lanes left out.
+pub fn process_insert(p: &Project, tm: &TimeMap, id: u64, buf: &mut Stereo, pos_of: &dyn Fn(usize) -> usize) -> Result<Vec<String>> {
     let s = insert_spec(p, id)?;
     let owner = s.owner.clone();
     with_entry(&s, p.sample_rate, |_, inst| {
-        let name = inst.loaded.info.class.name.clone();
-        process_effect(inst, p, tm, buf, pos_of).map_err(|e| anyhow!("{owner}: {e:#}"))?;
-        Ok(name)
+        let (mut auto, problems) = Automation::resolve(&inst.host, p, SlotId::Insert(id));
+        let processed = process_effect(inst, p, tm, buf, pos_of, &mut auto);
+        let restored = auto.restore(&inst.host);
+        processed.and(restored).map_err(|e| anyhow!("{owner}: {e:#}"))?;
+        Ok(problems.into_iter().map(|w| format!("{owner}: {w}")).collect())
     })
 }
 
@@ -1059,7 +1115,94 @@ fn measure_tail(inst: &mut Instance, p: &Project, tm: &TimeMap) -> Result<Option
     Ok(result)
 }
 
-fn process_effect(inst: &mut Instance, p: &Project, tm: &TimeMap, buf: &mut Stereo, pos_of: &dyn Fn(usize) -> usize) -> Result<()> {
+/// Whether an insert's plugin is linear (a reverb, a delay, an EQ; modulated or not): its output scales with its
+/// input, and it makes no sound of its own. Probed once per set-up. A looped render runs such an insert over one pass
+/// of the loop and folds its tail onto the loop's start (see `render`), which repeats exactly even when the plugin's
+/// modulation runs free; anything else (dynamics, saturation, noise) needs a lead-in to reach the loop's steady state.
+pub fn insert_is_linear(p: &Project, id: u64) -> Result<bool> {
+    type Probed = Mutex<HashMap<(Key, u64), bool>>;
+    static PROBED: OnceLock<Probed> = OnceLock::new();
+    let s = insert_spec(p, id)?;
+    let key = (key(&s, p.sample_rate), setup_hash(&s)?.0);
+    let cache = PROBED.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(v) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return Ok(*v);
+    }
+    let tm = TimeMap::new(p);
+    let v = with_entry(&s, p.sample_rate, |_, inst| probe_linear(inst, p, &tm))?;
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key, v);
+    Ok(v)
+}
+
+/// Levels (peak, of full scale) the probe feeds its noise at: loud enough for a compressor or a clipper to act,
+/// quiet enough for a gate to.
+const PROBE_LEVELS: [f32; 4] = [1.0, 0.5, 0.25, 1.0 / 64.0];
+/// A repeatable plugin is linear when each level's output, scaled back up, differs from the loudest's by no more than
+/// this (dB below the loudest output; about the seam a fold can leave).
+const LINEAR_TOLERANCE_DB: f64 = -60.0;
+/// A plugin that comes out different every run (random modulation) is linear when its output energy at each level is
+/// within this of the loudest's, scaled (dB): its modulation changes the fine structure, not the energy.
+const ENERGY_TOLERANCE_DB: f64 = 0.2;
+
+/// Feed a noise burst and its tail through the plugin from a reset, at each of `PROBE_LEVELS`, again at full level,
+/// and as silence. See [`insert_is_linear`]. Leaves the plugin's voices and tails cleared.
+fn probe_linear(inst: &mut Instance, p: &Project, tm: &TimeMap) -> Result<bool> {
+    let sr = p.sample_rate as f64;
+    let burst = (0.5 * sr) as usize;
+    let len = burst + (1.5 * sr) as usize;
+    let mut seed = 0x9e37_79b9_u32;
+    let mut noise = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32 * 2.0 - 1.0
+    };
+    let mut x: Stereo = (vec![0f32; len], vec![0f32; len]);
+    for k in 0..burst {
+        x.0[k] = noise();
+        x.1[k] = noise();
+    }
+    let mut run = |level: f32| -> Result<Stereo> {
+        inst.host.reset()?;
+        let mut b = (x.0.iter().map(|v| v * level).collect(), x.1.iter().map(|v| v * level).collect());
+        process_effect(inst, p, tm, &mut b, &|k| k, &mut Automation::default())?;
+        Ok(b)
+    };
+    let silent = run(0.0)?;
+    let runs = PROBE_LEVELS.iter().map(|&s| run(s)).collect::<Result<Vec<Stereo>>>()?;
+    let again = run(PROBE_LEVELS[0])?;
+    inst.host.reset()?;
+
+    let peak = |b: &Stereo| b.0.iter().chain(&b.1).fold(0f32, |m, v| m.max(v.abs()));
+    let loudest = peak(&runs[0]);
+    if loudest < OWN_SOUND || peak(&silent) > OWN_SOUND {
+        // silent whatever it's fed, or a sound of its own
+        return Ok(false);
+    }
+    // largest difference between `a` scaled by `g` and the loudest run
+    let diff = |a: &Stereo, g: f32| {
+        let d = |x: &[f32], y: &[f32]| x.iter().zip(y).fold(0f32, |m, (u, v)| m.max((u * g - v).abs()));
+        d(&a.0, &runs[0].0).max(d(&a.1, &runs[0].1))
+    };
+    let limit = loudest * 10f32.powf(LINEAR_TOLERANCE_DB as f32 / 20.0);
+    if diff(&again, 1.0) <= limit {
+        return Ok(runs.iter().zip(PROBE_LEVELS).all(|(b, s)| diff(b, 1.0 / s) <= limit));
+    }
+    let energy = |b: &Stereo| b.0.iter().chain(&b.1).map(|v| (*v as f64).powi(2)).sum::<f64>();
+    let e0 = energy(&runs[0]);
+    let off_db = |e: f64, s: f32| (10.0 * (e / (e0 * (s as f64).powi(2))).log10()).abs();
+    Ok(off_db(energy(&again), 1.0) <= ENERGY_TOLERANCE_DB
+        && runs.iter().zip(PROBE_LEVELS).all(|(b, s)| off_db(energy(b), s) <= ENERGY_TOLERANCE_DB))
+}
+
+fn process_effect(
+    inst: &mut Instance,
+    p: &Project,
+    tm: &TimeMap,
+    buf: &mut Stereo,
+    pos_of: &dyn Fn(usize) -> usize,
+    auto: &mut Automation,
+) -> Result<()> {
     let sr = p.sample_rate as f64;
     let cycle = p.looped.then(|| (0.0, p.total_beats()));
     let at = |k: usize, playing: bool| Transport { cycle, ..transport_at(p, tm, pos_of(k), sr, playing) };
@@ -1073,7 +1216,9 @@ fn process_effect(inst: &mut Instance, p: &Project, tm: &TimeMap, buf: &mut Ster
     let mut done = 0;
     while done < pre {
         let n = (pre - done).min(BLOCK);
-        port.begin(n, &[&silence[..n], &silence[..n]], &[], &[], Some(&t0)).map_err(|e| anyhow!("{e}"))?;
+        // the lanes' values where the buffer starts
+        let params = if done == 0 { auto.block(p, tm, 1, |_| pos_of(0)) } else { &[] };
+        port.begin(n, &[&silence[..n], &silence[..n]], &[], params, Some(&t0)).map_err(|e| anyhow!("{e}"))?;
         port.end(&mut [&mut l[..n], &mut r[..n]]).map_err(|e| anyhow!("{e}"))?;
         done += n;
     }
@@ -1089,13 +1234,163 @@ fn process_effect(inst: &mut Instance, p: &Project, tm: &TimeMap, buf: &mut Ster
         // past the end of the buffer the input runs short, and the port pads it with silence
         let (a, b) = (k.min(frames), (k + n).min(frames));
         let t = at(k, true);
-        port.begin(n, &[&buf.0[a..b], &buf.1[a..b]], &[], &[], Some(&t)).map_err(|e| anyhow!("{e}"))?;
+        let params = auto.block(p, tm, n, |o| pos_of(k + o));
+        port.begin(n, &[&buf.0[a..b], &buf.1[a..b]], &[], params, Some(&t)).map_err(|e| anyhow!("{e}"))?;
         port.end(&mut [&mut ol[k..k + n], &mut or[k..k + n]]).map_err(|e| anyhow!("{e}"))?;
         k += n;
     }
     buf.0.copy_from_slice(&ol[latency..]);
     buf.1.copy_from_slice(&or[latency..]);
     Ok(())
+}
+
+// ---- automation -------------------------------------------------------------------------------------
+
+/// A parameter lane's points are sent this often (frames), where its value moved.
+const PARAM_STEP: usize = 32;
+
+/// A parameter lane resolved against its plugin.
+struct ParamLane {
+    id: u32,
+    /// The lane with the plugin's normalized values.
+    lane: Lane,
+    /// The parameter's value in the slot's set-up, put back after the render.
+    restore: f64,
+}
+
+/// A slot's parameter lanes during a render or live playback, sent to its plugin block by block.
+#[derive(Default)]
+pub(crate) struct Automation {
+    lanes: Vec<ParamLane>,
+    /// What each lane last sent.
+    sent: Vec<f64>,
+    points: Vec<ParamPoint>,
+}
+
+/// The parameter lanes of a slot: an instrument's are its track's lanes without an insert; an insert's are on its
+/// track, or the master's for an insert on the master or the reverb return.
+pub fn slot_lanes(p: &Project, slot: SlotId) -> Vec<&Lane> {
+    fn of(lanes: &[Lane], want: Option<u64>) -> Vec<&Lane> {
+        lanes.iter().filter(|l| !l.points.is_empty() && matches!(&l.target, Target::Param { insert, .. } if *insert == want)).collect()
+    }
+    match slot {
+        SlotId::Instrument(t) => p.tracks.iter().find(|x| x.id == t).map(|t| of(&t.automation, None)).unwrap_or_default(),
+        SlotId::Insert(i) => match p.insert(i).map(|(c, ..)| c) {
+            Some(Chain::Track(t)) => p.tracks.iter().find(|x| x.id == t).map(|t| of(&t.automation, Some(i))).unwrap_or_default(),
+            Some(_) => of(&p.master.automation, Some(i)),
+            None => vec![],
+        },
+    }
+}
+
+impl Automation {
+    /// The slot's parameter lanes, resolved against its plugin (set up from the project). A lane that doesn't
+    /// resolve is left out, and why is returned.
+    fn resolve(host: &PluginHost, p: &Project, slot: SlotId) -> (Automation, Vec<String>) {
+        let lanes = slot_lanes(p, slot);
+        if lanes.is_empty() {
+            return (Automation::default(), vec![]);
+        }
+        let param = |l: &Lane| match &l.target {
+            Target::Param { param, .. } => param.clone(),
+            _ => String::new(),
+        };
+        // every point of every lane, in one request
+        let values: Vec<(String, serde_json::Value)> = lanes
+            .iter()
+            .flat_map(|l| {
+                l.points.iter().map(|q| {
+                    let v = if l.normalized { serde_json::json!({"normalized": q.value.clamp(0.0, 1.0)}) } else { serde_json::json!(q.value) };
+                    (param(l), v)
+                })
+            })
+            .collect();
+        let resolved = match host.resolve_params(&values) {
+            Ok(r) => r,
+            Err(e) => return (Automation::default(), vec![format!("its automation was left out: {e:#}")]),
+        };
+        let mut a = Automation::default();
+        let mut problems = vec![];
+        let mut answers = resolved.into_iter();
+        for l in lanes {
+            let mut points = Vec::with_capacity(l.points.len());
+            let mut found = None;
+            let mut problem = None;
+            for (q, r) in l.points.iter().zip(answers.by_ref()) {
+                match r.resolved {
+                    Resolved::Ok { id, title, normalized, current } => {
+                        if !r.automatable {
+                            problem.get_or_insert(format!("the plugin doesn't let '{title}' be automated"));
+                        }
+                        found = Some((id, current));
+                        points.push(Point { value: normalized, ..*q });
+                    }
+                    Resolved::Err { error } => {
+                        problem.get_or_insert(error);
+                    }
+                }
+            }
+            match (found, problem) {
+                (Some((id, restore)), None) => {
+                    a.lanes.push(ParamLane { id, lane: Lane { target: l.target.clone(), normalized: true, points }, restore });
+                }
+                (_, problem) => problems.push(format!("{} automation left out: {}", param(l), problem.unwrap_or_default())),
+            }
+        }
+        a.sent = vec![f64::NAN; a.lanes.len()];
+        (a, problems)
+    }
+
+    /// The points for a block of `n` frames whose frame `o` is song sample `song(o)`: every [`PARAM_STEP`] frames
+    /// and at the last frame, where a lane's value moved since it was last sent. In a loop, song samples past its
+    /// end come round to its start.
+    pub(crate) fn block(&mut self, p: &Project, tm: &TimeMap, n: usize, song: impl Fn(usize) -> usize) -> &[ParamPoint] {
+        self.points.clear();
+        if self.lanes.is_empty() || n == 0 {
+            return &self.points;
+        }
+        let sr = p.sample_rate as f64;
+        let loop_beats = p.looped.then(|| p.total_beats()).filter(|b| *b > 0.0);
+        let beat = |s: usize| {
+            let b = tm.beat(s as f64 / sr);
+            loop_beats.map_or(b, |l| b.rem_euclid(l))
+        };
+        let last = n - 1;
+        let offsets = (0..n).step_by(PARAM_STEP).chain((!last.is_multiple_of(PARAM_STEP)).then_some(last));
+        for o in offsets {
+            let b = beat(song(o));
+            for (i, l) in self.lanes.iter().enumerate() {
+                let Some(v) = l.lane.value_at(b) else { continue };
+                let v = v.clamp(0.0, 1.0);
+                if self.sent[i].is_nan() || (v - self.sent[i]).abs() > 1e-7 {
+                    self.points.push(ParamPoint { id: l.id, offset: o as u32, value: v });
+                    self.sent[i] = v;
+                }
+            }
+        }
+        &self.points
+    }
+
+    /// The parameters it moves.
+    pub(crate) fn ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.lanes.iter().map(|l| l.id)
+    }
+
+    /// Send every lane's value again with the next block (the plugin was set up again since).
+    pub(crate) fn resend(&mut self) {
+        self.sent.iter_mut().for_each(|v| *v = f64::NAN);
+    }
+
+    /// Put the parameters back as the slot's set-up has them.
+    fn restore(&self, host: &PluginHost) -> Result<()> {
+        if self.lanes.is_empty() {
+            return Ok(());
+        }
+        let values: Vec<(String, serde_json::Value)> =
+            self.lanes.iter().map(|l| (format!("#{}", l.id), serde_json::json!({"normalized": l.restore}))).collect();
+        host.set_params(&values).context("putting the automated parameters back")?;
+        Ok(())
+    }
 }
 
 // ---- effects in rig chains -------------------------------------------------------------------------
@@ -1246,6 +1541,8 @@ mod tests {
             mixer: Default::default(),
             meta: Default::default(),
             layer: String::new(),
+            automation: vec![],
+            clips: vec![],
         };
         let ev = midi_events(&t, &tm, 48000.0);
         // 120 bpm: one beat = 24000 samples

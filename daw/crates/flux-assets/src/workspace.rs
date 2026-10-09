@@ -3,7 +3,8 @@
 use crate::fsutil;
 use crate::http::HttpConfig;
 use crate::lock::Lock;
-use crate::manifest::{self, ArchiveSource, Asset, Loaded};
+use crate::manifest::{self, ArchiveSource, Asset, Loaded, Source};
+use crate::places::Places;
 use anyhow::{Context, Result};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -119,6 +120,8 @@ pub struct Workspace {
     pub http: HttpConfig,
     /// Threads for hashing.
     pub threads: usize,
+    /// The standard folders assets installed by another tool are looked for in.
+    pub places: Places,
 }
 
 impl Workspace {
@@ -143,6 +146,7 @@ impl Workspace {
             lock,
             http,
             threads: crate::hash::default_threads(),
+            places: Places::from_env(),
         })
     }
 
@@ -151,9 +155,27 @@ impl Workspace {
         a.path.as_ref().map(|p| self.root.join(p))
     }
 
-    /// Whether the asset's folder exists and is not empty.
+    /// Whether the asset's folder exists and is not empty; for an asset installed by another tool, whether its
+    /// first `installed` location is found.
     pub fn is_installed(&self, a: &Asset) -> bool {
-        self.asset_dir(a).is_some_and(|d| std::fs::read_dir(d).is_ok_and(|mut it| it.next().is_some()))
+        match self.asset_dir(a) {
+            Some(d) => std::fs::read_dir(d).is_ok_and(|mut it| it.next().is_some()),
+            None => self.external_installs(a).first().is_some_and(|(_, p)| p.is_some()),
+        }
+    }
+
+    /// The `installed` locations of an asset installed by another tool, each with where it was found on this
+    /// machine (`None`: nowhere).
+    pub fn external_installs(&self, a: &Asset) -> Vec<(String, Option<PathBuf>)> {
+        a.sources
+            .iter()
+            .filter_map(|s| match s {
+                Source::External(e) => Some(&e.installed),
+                _ => None,
+            })
+            .flatten()
+            .map(|loc| (loc.clone(), self.places.find(loc)))
+            .collect()
     }
 
     /// Where an archive is (or will be) cached.

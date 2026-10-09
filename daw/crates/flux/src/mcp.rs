@@ -11,7 +11,8 @@ const PROTOCOLS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11
 pub const INSTRUCTIONS: &str = "\
 Flux is an agent-first DAW: you can control everything (composition, arrangement, instruments, mixing, \
 mastering, export). A human may be watching the GUI and editing at the same time; their edits appear in \
-`activity` with source=human, so check it before overwriting their work.
+`activity` with source=human, so check it before overwriting their work. They may also play parts in from a \
+keyboard: while `transport` shows `recording`, their take lands on that track at each pass of the loop.
 
 Workflow: get_project -> edit (a batch of commands; atomic; one undo step) -> render -> analyze -> adjust -> export.
 
@@ -26,8 +27,8 @@ names (C4 = 60, sharps '#', flats 'b').
 
 Instruments: sfz (sampled instruments played by sfizz: find them with list_instruments and check the playable \
 range with probe_instrument before writing parts), vst3 (a VST3 instrument plugin hosted by Flux: it gets the \
-song's tempo and position, so synced LFOs, arpeggiators and delays follow the song), audio (a WAV placed at time \
-0) or none. A VST3 instrument's sound comes from its presets: plugins presets/load_preset reads the plugin's own \
+song's tempo and position, so synced LFOs, arpeggiators and delays follow the song), audio (audio files placed as \
+clips: edit add_clip puts a WAV, FLAC or Ogg file anywhere on the track, trimmed, with gain and fades) or none. A VST3 instrument's sound comes from its presets: plugins presets/load_preset reads the plugin's own \
 preset files (Vital banks, Decent Sampler libraries...) headless, and set_program loads factory programs. A rig (sfz/rigs/*.rig.json; list_instruments kind=rig, details=true describes it) is a sampled guitar or \
 bass played into Neural Amp Modeler amp captures and cabinets: give its path as the vst3 instrument's path; track \
 params set its stages by id or type (e.g. {\"nam.input_db\": 3} drives the amp harder) and are heard live at once. \
@@ -42,7 +43,10 @@ send). set_master holds glue compression, EQ, the shared reverb, the loudness ta
 true-peak ceiling (default -1 dBTP). VST3 effects go in insert slots (edit add_insert): on a track (pre or post its \
 strip), on the master, or on the reverb return (which then replaces the built-in reverb); plugins sets them up (params, \
 factory programs, presets in the plugin's own format such as Valhalla's or Vital's, or its window for the human), \
-latency is compensated, and a failing insert passes audio through with a warning. The master drives the mix to the target automatically, so balance tracks \
+latency is compensated, and a failing insert passes audio through with a warning. Automation (edit add_automation) \
+moves a track's volume, pan or reverb send, or any VST3 parameter of its instrument or inserts (or of master and reverb-return \
+inserts), over time: fades, swells, a filter opening, a reverb drying up into a drop; renders and live playback both follow it. \
+The master drives the mix to the target automatically, so balance tracks \
 against each other; limiter_max_gr_db beyond about -4 dB means the mix is too peaky.
 
 You can't listen, so measure: analyze gives per-section loudness, per-track RMS per section, octave bands and \

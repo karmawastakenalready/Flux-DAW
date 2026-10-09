@@ -395,12 +395,17 @@ pub struct VendoredSource {
     pub files: Vec<PinnedFile>,
 }
 
-/// Installed by another tool; only documented here.
+/// Installed by another tool (a vendor installer, pip); documented here, and found where `installed` says.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExternalSource {
     pub page: String,
     pub instructions: String,
+    /// Where the install is, below a standard folder (`{vst3}/Vital.vst3`; see [`crate::places`]). The first
+    /// location is the install itself and decides whether the asset is installed; later ones are content it comes
+    /// with (factory presets, impulse responses). Projects that reference a path inside any of them use the asset.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub installed: Vec<String>,
 }
 
 /// A file with a known size and checksum, relative to the asset folder.
@@ -741,9 +746,25 @@ fn validate_source(l: &Loaded, s: &Source) -> Result<()> {
             check_pinned(&m.files)?;
         }
         Source::Vendored(v) => check_pinned(&v.files)?,
-        Source::External(e) => check_web(&e.page)?,
+        Source::External(e) => {
+            check_web(&e.page)?;
+            for loc in &e.installed {
+                check_location(loc).with_context(|| format!("installed '{loc}'"))?;
+            }
+        }
     }
     Ok(())
+}
+
+/// An install location is a standard folder's placeholder and a relative path below it.
+fn check_location(loc: &str) -> Result<()> {
+    let Some((name, rest)) = crate::places::split(loc) else {
+        bail!("must start with a placeholder such as {{vst3}}/ (one of {})", crate::places::NAMES.join(", "));
+    };
+    if !crate::places::NAMES.contains(&name) {
+        bail!("unknown placeholder {{{name}}} (use one of {})", crate::places::NAMES.join(", "));
+    }
+    check_rel_path(rest, "location")
 }
 
 fn check_pinned(files: &[PinnedFile]) -> Result<()> {

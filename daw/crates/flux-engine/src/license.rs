@@ -136,6 +136,8 @@ mod tests {
             mixer: Default::default(),
             meta: Default::default(),
             layer: String::new(),
+            automation: vec![],
+            clips: vec![],
         };
         assert!(of_track(&t("C:/Program Files/Common Files/VST3/Omnisphere.vst3")).is_some());
         assert!(of_track(&t("C:/Program Files/Common Files/VST3/Stylus RMX.vst3")).is_some());

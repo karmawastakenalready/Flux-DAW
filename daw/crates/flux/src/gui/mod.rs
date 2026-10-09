@@ -3,6 +3,8 @@
 //! Comments, audition picks and opening a project go through the same calls as the MCP tools.
 
 mod arrange;
+mod automation;
+mod clips;
 mod dialogs;
 mod panels;
 mod roll;
@@ -13,9 +15,11 @@ mod theme;
 mod widgets;
 
 use crate::audio::{Mode, Player};
+use crate::midi::Input;
 use crate::state::{RenderStatus, Shared, State};
 use flux_core::commands::{Command, MasterPatch, MixerPatch};
 use flux_core::{CommentOp, Instrument, Source, TimeMap, TrackRef};
+use flux_engine::sfizz::Ev;
 use eframe::egui::{self, Align, Align2, Color32, Layout, Margin, Pos2, Rect, RichText, Sense, Stroke, UiBuilder, vec2};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -50,6 +54,14 @@ enum Action {
     /// Pick a variant (or clear the pick) with an optional note for the agent.
     Pick(u64, Option<usize>, Option<String>),
     ApplyAudition(u64),
+    /// A note or controller played in (the computer keyboard, the piano roll's keys).
+    Play(Input, Ev),
+    /// Start recording onto the selected track (playing live), or stop.
+    Record,
+    /// Turn a MIDI input on or off.
+    MidiDevice(String, bool),
+    /// Play notes with the computer keyboard, or stop.
+    ComputerKeys(bool),
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -99,14 +111,16 @@ impl Feed {
         let playing = p.is_playing();
         let mode = p.mode();
         let silent = [(f64::NEG_INFINITY, f64::NEG_INFINITY); 2];
+        // notes played in with the song stopped
+        let monitoring = p.monitoring();
         Feed {
             playing,
             mode,
             song_mode: p.song_mode(),
             seconds: p.seconds(),
             // levels only mean something while sound is going out; at rest the meters fall on their own
-            out: if playing { p.output_levels() } else { silent },
-            tracks: if playing && mode == Mode::Live { p.live_levels() } else { vec![] },
+            out: if playing || monitoring { p.output_levels() } else { silent },
+            tracks: if (playing && mode == Mode::Live) || monitoring { p.live_levels() } else { vec![] },
             status: p.live_status(),
             loading: p.live_loading(),
             clip: p.clip_progress(),
@@ -191,6 +205,27 @@ impl Meters {
     }
 }
 
+/// The computer keyboard as a piano: the home row and the one above from C (A W S E D F T G Y H U J K O L P ; '),
+/// Z/X an octave down/up, C/V softer/louder. Keys go by position, whatever the layout.
+struct Piano {
+    /// Octaves from the one starting at C4.
+    octave: i32,
+    vel: u8,
+    /// Keys down and the pitch each started (the octave can change while they are held).
+    down: Vec<(egui::Key, u8)>,
+}
+
+impl Default for Piano {
+    fn default() -> Self {
+        Piano { octave: 0, vel: 100, down: vec![] }
+    }
+}
+
+const PIANO_KEYS: [egui::Key; 18] = {
+    use egui::Key::*;
+    [A, W, S, E, D, F, T, G, Y, H, U, J, K, O, L, P, Semicolon, Quote]
+};
+
 /// The app mark, bundled at the sizes it is drawn at (the small ones are a simplified drawing).
 const MARKS: [(u32, &[u8]); 7] = [
     (16, include_bytes!("../../assets/icons/flux-16.png")),
@@ -211,6 +246,8 @@ pub struct Gui {
     wave: Option<WaveCache>,
     analysis: Option<panels::AnalysisCache>,
     roll: roll::Roll,
+    auto: automation::AutoUi,
+    clips: clips::ClipUi,
     flash: Option<(String, Instant)>,
     marker: Option<(u32, Instant)>,
     rename: String,
@@ -228,6 +265,7 @@ pub struct Gui {
     center_w: f32,
     /// The song position while an audition clip plays (the player then counts the clip's time).
     song_secs: f64,
+    piano: Piano,
     #[cfg(test)]
     feed: Option<Feed>,
 }
@@ -252,6 +290,7 @@ pub fn run(sh: Arc<Shared>) -> anyhow::Result<()> {
                 st.window = native_window(cc);
                 st.session.note(Source::System, "GUI opened".into());
             }
+            crate::midi::Midi::start(&sh2, cc.egui_ctx.clone());
             Ok(Box::new(Gui::new(sh2)))
         }),
     );
@@ -345,6 +384,8 @@ impl Gui {
             wave: None,
             analysis: None,
             roll: roll::Roll::default(),
+            auto: Default::default(),
+            clips: Default::default(),
             flash: None,
             marker: None,
             rename: String::new(),
@@ -358,6 +399,7 @@ impl Gui {
             title: String::new(),
             center_w: 560.0,
             song_secs: 0.0,
+            piano: Piano::default(),
             #[cfg(test)]
             feed: None,
         }
@@ -475,12 +517,19 @@ impl Gui {
                 }
                 Action::TogglePlay => {
                     if self.sh.player.is_playing() {
+                        if let Some(m) = self.sh.midi.end_take(&self.sh) {
+                            self.say(m);
+                        }
                         self.sh.player.stop();
                     } else if let Err(e) = self.sh.play() {
                         self.say(e);
                     }
                 }
                 Action::Seek(beat) => {
+                    // a recording keeps what was played and carries on from the new position
+                    if let Some(m) = self.sh.midi.cut(&self.sh) {
+                        self.say(m);
+                    }
                     let tm = {
                         let st = self.sh.lock();
                         Shared::timeline_map(&st, &self.sh.player)
@@ -547,6 +596,137 @@ impl Gui {
                     Ok((i, _, _)) => self.say(format!("Applied variant {}", crate::state::letter(i))),
                     Err(e) => self.say(format!("{e:#}")),
                 },
+                Action::Play(from, ev) => self.sh.midi.play(&self.sh, from, ev),
+                Action::Record => self.record(),
+                Action::MidiDevice(name, on) => self.sh.midi.set_device(&name, on),
+                Action::ComputerKeys(on) => {
+                    self.sh.midi.set_keys(&self.sh, on);
+                    // (what it held was let go)
+                    self.piano.down.clear();
+                    self.say(if on {
+                        format!("The computer keyboard plays notes: A W S E D F... from {}, Z/X octave, C/V velocity, M to stop", self.piano_from())
+                    } else {
+                        "The computer keyboard no longer plays notes".into()
+                    });
+                }
+            }
+        }
+    }
+
+    /// Start recording onto the selected track (the song plays live from the playhead), or stop.
+    fn record(&mut self) {
+        if self.sh.midi.recording().is_some() {
+            let m = self.sh.midi.end_take(&self.sh).unwrap_or_else(|| "Recording stopped: nothing was played".into());
+            self.say(m);
+            return;
+        }
+        let target = self.sh.midi.target();
+        let name = target.and_then(|id| self.sh.lock().session.project.tracks.iter().find(|t| t.id == id).map(|t| t.name.clone()));
+        let (Some(id), Some(name)) = (target, name) else {
+            self.say("Select an instrument track to record on (click its name in the arrangement)".into());
+            return;
+        };
+        if self.sh.player.mode() != Mode::Live {
+            self.sh.player.set_mode(Mode::Live);
+        }
+        self.sh.midi.record(&self.sh, id);
+        // (tests have no audio output: their feed stands in for the player)
+        if !cfg!(test)
+            && !self.sh.player.is_playing()
+            && let Err(e) = self.sh.play()
+        {
+            self.sh.midi.end_take(&self.sh);
+            self.say(e);
+            return;
+        }
+        self.say(if self.sh.midi.can_play() {
+            format!("Recording on {name}")
+        } else {
+            format!("Recording on {name}. No MIDI keyboard is connected: press M to play with the computer keyboard")
+        });
+    }
+
+    /// Notes played in go to the selected track (one that can hold notes); the computer keyboard plays them.
+    fn play_in(&mut self, ctx: &egui::Context, st: &State, act: &mut Vec<Action>) {
+        let target = self.selected.filter(|id| st.session.project.tracks.iter().any(|t| t.id == *id && !t.is_audio()));
+        self.sh.midi.set_target(target);
+        self.piano(ctx, act);
+    }
+
+    /// The lowest note the computer keyboard plays.
+    fn piano_from(&self) -> String {
+        flux_core::pitch::name((60 + 12 * self.piano.octave).clamp(0, 127) as u8)
+    }
+
+    /// The computer keyboard as a piano (when on), and the play-in shortcuts: R records, M turns the piano on/off.
+    /// Keys let go always stop their notes, even once typing in a field has started.
+    fn piano(&mut self, ctx: &egui::Context, act: &mut Vec<Action>) {
+        let blocked = self.open.is_some() || self.about || ctx.egui_wants_keyboard_input();
+        let on = self.sh.midi.keys_on();
+        // a key held with the mouse in the piano roll, which is no longer shown
+        if self.view != View::Roll
+            && let Some(k) = self.roll.key_down.take()
+        {
+            act.push(Action::Play(Input::Mouse, Ev::Off(k)));
+        }
+        let events = ctx.input(|i| i.events.clone());
+        for e in events {
+            match e {
+                egui::Event::Key { key, physical_key, pressed: false, .. } => {
+                    let k = physical_key.unwrap_or(key);
+                    self.piano.down.retain(|&(d, p)| {
+                        let up = d == k;
+                        if up {
+                            act.push(Action::Play(Input::Keys, Ev::Off(p)));
+                        }
+                        !up
+                    });
+                }
+                egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers } if !blocked && !modifiers.command && !modifiers.ctrl && !modifiers.alt => {
+                    let k = physical_key.unwrap_or(key);
+                    match key {
+                        egui::Key::M => {
+                            act.push(Action::ComputerKeys(!on));
+                            continue;
+                        }
+                        egui::Key::R => {
+                            act.push(Action::Record);
+                            continue;
+                        }
+                        _ if !on => continue,
+                        _ => {}
+                    }
+                    match k {
+                        egui::Key::Z | egui::Key::X => {
+                            self.piano.octave = (self.piano.octave + if k == egui::Key::Z { -1 } else { 1 }).clamp(-5, 4);
+                            self.say(format!("Computer keyboard from {}", self.piano_from()));
+                        }
+                        egui::Key::C | egui::Key::V => {
+                            let v = self.piano.vel as i32 + if k == egui::Key::C { -20 } else { 20 };
+                            self.piano.vel = v.clamp(1, 127) as u8;
+                            self.say(format!("Computer keyboard velocity {}", self.piano.vel));
+                        }
+                        _ => {
+                            let Some(semi) = PIANO_KEYS.iter().position(|x| *x == k) else { continue };
+                            let p = 60 + 12 * self.piano.octave + semi as i32;
+                            if !(0..=127).contains(&p) || self.piano.down.iter().any(|d| d.0 == k) {
+                                continue;
+                            }
+                            if self.sh.midi.target().is_none() {
+                                self.say("Select a track to play: notes go to the selected track".into());
+                            }
+                            self.piano.down.push((k, p as u8));
+                            act.push(Action::Play(Input::Keys, Ev::On(p as u8, self.piano.vel)));
+                        }
+                    }
+                }
+                // keys held when the window loses focus never see their release
+                egui::Event::WindowFocused(false) => {
+                    for (_, p) in self.piano.down.drain(..) {
+                        act.push(Action::Play(Input::Keys, Ev::Off(p)));
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -611,6 +791,32 @@ impl Gui {
                     if menu_row(ui, "Play last render", "", Some(f.source() == Mode::Render), st.render.is_some()) {
                         act.push(Action::Source(Mode::Render));
                     }
+                    ui.separator();
+                    let recording = self.sh.midi.recording().is_some();
+                    if menu_row(ui, if recording { "Stop recording" } else { "Record" }, "R", None, true) {
+                        act.push(Action::Record);
+                    }
+                    ui.separator();
+                    // a heading in line with the entries' text
+                    let (hr, _) = ui.allocate_exact_size(vec2(232.0, 20.0), Sense::hover());
+                    ui.painter().text(Pos2::new(hr.left() + 26.0, hr.center().y), Align2::LEFT_CENTER, "MIDI inputs", medium(11.0), TEXT3);
+                    let devices = self.sh.midi.devices();
+                    if devices.is_empty() {
+                        menu_row(ui, "None connected", "", None, false);
+                    }
+                    for d in devices {
+                        let text = match (&d.error, d.on) {
+                            (Some(_), true) => format!("{} (unavailable)", d.name),
+                            _ => d.name.clone(),
+                        };
+                        if menu_row(ui, &text, "", Some(d.on), true) {
+                            act.push(Action::MidiDevice(d.name, !d.on));
+                        }
+                    }
+                    let keys = self.sh.midi.keys_on();
+                    if menu_row(ui, "Computer keyboard", "M", Some(keys), true) {
+                        act.push(Action::ComputerKeys(!keys));
+                    }
                 });
                 ui.menu_button(item("View"), |ui| {
                     for (v, name) in [(View::Arrange, "Arrangement"), (View::Roll, "Piano roll")] {
@@ -643,6 +849,34 @@ impl Gui {
             Some(a) => status_dot(&mut ru, AGENT, &format!("{a} connected"), TEXT2).on_hover_text(format!("MCP client · project revision {}", st.session.revision)),
             None => status_dot(&mut ru, TEXT3, "No agent connected", TEXT3).on_hover_text("Start `flux mcp --gui` from an MCP client to let an agent work here"),
         };
+        self.midi_status(&mut ru, st);
+    }
+
+    /// What plays in and where it goes (shown once something can: a MIDI input or the computer keyboard). The dot
+    /// lights as notes come in.
+    fn midi_status(&self, ui: &mut egui::Ui, st: &State) {
+        let midi = &self.sh.midi;
+        if !midi.can_play() {
+            return;
+        }
+        let target = midi.target().and_then(|id| st.session.project.tracks.iter().find(|t| t.id == id));
+        let lit = midi.last_event().is_some_and(|t| t.elapsed() < Duration::from_millis(150));
+        if lit {
+            ui.ctx().request_repaint_after(Duration::from_millis(60));
+        }
+        let (text, color) = match target {
+            Some(t) => (format!("MIDI \u{2192} {}", t.name), TEXT2),
+            None => ("MIDI: no track selected".to_string(), TEXT3),
+        };
+        let mut inputs: Vec<String> = midi.devices().into_iter().filter(|d| d.connected).map(|d| d.name).collect();
+        if midi.keys_on() {
+            inputs.push("the computer keyboard (M)".into());
+        }
+        ui.add_space(14.0);
+        status_dot(ui, if lit { ACCENT } else if target.is_some() { OK } else { TEXT3 }, &text, color).on_hover_text(format!(
+            "Playing in from {}.\nNotes go to the selected track; R records onto it. Inputs: Transport menu.",
+            inputs.join(", ")
+        ));
     }
 
     // -----------------------------------------------------------------------------------------
@@ -778,6 +1012,16 @@ impl Gui {
                 };
                 if icon_button_ex(ui, if f.playing { Icon::Stop } else { Icon::Play }, f.playing, true, 26.0, play_hint).clicked() {
                     act.push(Action::TogglePlay);
+                }
+                let recording = self.sh.midi.recording();
+                let target = self.sh.midi.target().and_then(|id| p.tracks.iter().find(|t| t.id == id));
+                let rec_hint = match (recording, target) {
+                    (Some(_), _) => "Stop recording (R)".to_string(),
+                    (None, Some(t)) => format!("Record onto {} (R): play a MIDI keyboard or the computer keyboard (M)", t.name),
+                    (None, None) => "Record (R): select an instrument track first".to_string(),
+                };
+                if record_button(ui, recording.is_some(), 26.0, &rec_hint).clicked() {
+                    act.push(Action::Record);
                 }
                 if icon_button_ex(ui, Icon::Loop, p.looped, true, 26.0, if p.looped { "Seamless loop: on" } else { "Seamless loop: off" }).clicked() {
                     act.push(project_cmd(None, None, Some(!p.looped)));
@@ -983,6 +1227,13 @@ impl Gui {
             if cmd && i.key_pressed(egui::Key::O) {
                 act.push(Action::ShowOpen);
             }
+            if !typing
+                && self.view == View::Arrange
+                && (i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+                && let Some(clip) = self.clips.selected
+            {
+                act.push(Action::Apply(vec![Command::RemoveClip { clip }]));
+            }
         });
     }
 
@@ -1113,6 +1364,7 @@ impl Gui {
                 self.title = title;
             }
             self.keys(&ctx, &mut act);
+            self.play_in(&ctx, &st, &mut act);
             let st: &State = &st;
             self.panels(ui, st, &f, &mut act);
             self.dialogs(&ctx, st, &mut act);
@@ -1122,8 +1374,11 @@ impl Gui {
         }
         self.toast(&ctx);
         self.run_actions(act);
-        // repaint while something moves: playback, falling meters, instruments loading
-        if f.playing || self.sh.player.is_playing() {
+        if let Some(m) = self.sh.midi.tick(&self.sh) {
+            self.say(m);
+        }
+        // repaint while something moves: playback, notes played in, falling meters, instruments loading
+        if f.playing || self.sh.player.is_playing() || self.sh.player.monitoring() || self.sh.midi.recording().is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if self.meters.active() {
             ctx.request_repaint_after(Duration::from_millis(33));

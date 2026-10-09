@@ -624,6 +624,19 @@ pub fn place_s(l: &mut [f32], r: &mut [f32], pan: f64, width: f64) {
     }
 }
 
+/// [`place_s`] with the pan of each sample from `pan`.
+pub fn place_moving(l: &mut [f32], r: &mut [f32], pan: impl Fn(usize) -> f64, width: f64) {
+    let w = width as f32;
+    for i in 0..l.len() {
+        let th = (pan(i).clamp(-1.0, 1.0) + 1.0) * PI / 4.0;
+        let (gl, gr) = ((2f64.sqrt() * th.cos()) as f32, (2f64.sqrt() * th.sin()) as f32);
+        let m = (l[i] + r[i]) * 0.5;
+        let s = (l[i] - r[i]) * 0.5 * w;
+        l[i] = (m + s) * gl;
+        r[i] = (m - s) * gr;
+    }
+}
+
 /// Sidechain-style gain envelope: dips by depth_db at each trigger (5 ms attack), exponential recovery.
 pub fn duck_envelope(n: usize, sr: f64, triggers_s: &[f64], depth_db: f64, release_ms: f64) -> Vec<f32> {
     let mut d = vec![0f64; n];

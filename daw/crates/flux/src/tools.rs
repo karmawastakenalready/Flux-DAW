@@ -5,7 +5,9 @@ use crate::audio::{Clip, Mode};
 use crate::state::{letter, Audition, Focus, MainMsg, RenderStatus, Shared, State, Variant};
 use anyhow::{anyhow, bail, Context, Result};
 use flux_core::commands::Command;
-use flux_core::{pitch, CommentOp, Insert, InsertPosition, Instrument, Mixer, Project, Source, TimeMap, Track, TrackRef};
+use flux_core::automation::Shape;
+use flux_core::clip;
+use flux_core::{pitch, CommentOp, Insert, InsertPosition, Instrument, Lane, Mixer, Project, Source, TimeMap, Track, TrackRef};
 use flux_engine::{analysis, import, paths, sfizz};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Map, Value};
@@ -75,9 +77,20 @@ fn instrument_s() -> Value {
                    "preset": {"type": "string", "description": ".vstpreset file (the plugin's whole state); without one the plugin starts from its default state"},
                    "preset_name": {"type": "string", "description": "what the preset is called (shown to people)"},
                    "class": {"type": "string", "description": "which plugin in a bundle that holds several (name or class id); default: the first one"}}), &["kind", "path"]),
-        obj(json!({"kind": {"const": "audio"}, "path": {"type": "string", "description": "WAV file at the project sample rate, starting at time 0"}}), &["kind", "path"]),
+        obj(json!({"kind": {"const": "audio"}, "path": {"type": "string", "description": "an audio file to play from the top of the song: it becomes the track's one clip (place more with add_clip)"}}), &["kind"]),
         obj(json!({"kind": {"const": "none"}}), &["kind"]),
     ]})
+}
+
+/// A clip command's fields: `extra` plus where it goes, its gain and fades.
+fn clip_props(extra: Value) -> Map<String, Value> {
+    let mut m = when_props();
+    m.insert("track".into(), track_ref());
+    m.insert("gain_db".into(), json!({"type": "number", "minimum": clip::MIN_GAIN_DB, "maximum": clip::MAX_GAIN_DB, "description": "clip gain, before the track's channel strip (default 0)"}));
+    m.insert("fade_in".into(), json!({"type": "number", "minimum": 0, "description": "seconds, from silence (linear)"}));
+    m.insert("fade_out".into(), json!({"type": "number", "minimum": 0, "description": "seconds, to silence (linear)"}));
+    m.extend(props(extra));
+    m
 }
 
 fn eq_s() -> Value {
@@ -180,6 +193,20 @@ fn command_s() -> Value {
         }),
         &["value"],
     );
+    let auto_point = obj(
+        Value::Object({
+            let mut m = when_props();
+            m.insert("value".into(), json!({"type": "number", "description": "volume: dB on top of the fader (-90 = silent, max +12); pan: -1 left to 1 right; reverb_send: 0-1; param: the parameter's display units (dB, Hz, %), or 0-1 with normalized"}));
+            m.insert("shape".into(), json!({"enum": ["linear", "smooth", "hold"],
+                "description": "how the value gets to the next point: linear (default), smooth (an S-curve, for swells and fades) or hold (stays, then jumps there)"}));
+            m
+        }),
+        &["value"],
+    );
+    let auto_target = || {
+        json!({"enum": ["volume", "pan", "reverb_send", "param"],
+            "description": "volume, pan and reverb_send move the track's mixer (volume in dB on top of its fader; pan and reverb_send replace the mixer's while the lane exists); param moves a VST3 parameter"})
+    };
     let t = || track_ref();
     json!({"oneOf": [
         op("set_project", "project properties (bpm replaces the tempo map with one tempo)", props(json!({
@@ -244,10 +271,45 @@ fn command_s() -> Value {
         op("clear_cc", "delete CC points (one controller or all) in a bar range",
             range_props(props(json!({"track": t(), "cc": {"type": "integer"}}))), &["track"]),
         op("add_bend", "pitch-bend points", props(json!({"track": t(), "points": {"type": "array", "items": bend_point}})), &["track", "points"]),
-        op("copy_bars", "copy notes and CCs from a bar range to another bar (one track or all)", props(json!({"track": t(),
+        op("add_automation", "write an automation lane: a track's volume, pan or reverb send over time, or a VST3 parameter of its instrument \
+(no insert) or of one of its inserts; with bus \"master\", a parameter of an insert on the master or the reverb return. The points replace the \
+lane from the first given beat to the last (points elsewhere stay). Before the first point the lane holds the first value, after the last the \
+last value; two points at one beat make a jump. Jumps play as 5 ms ramps (no clicks), and a looped song's lanes run from its end back into \
+its start, so end a loop where it starts for a seamless seam. Heard live while playing; rigs' stages can't be automated (use an insert)",
+            props(json!({
+                "track": t(), "bus": {"enum": ["master"], "description": "instead of track: the master's lanes (parameters of master and reverb-return inserts)"},
+                "target": auto_target(),
+                "insert": {"type": "integer", "description": "param: the insert whose parameter moves (omit for the track's VST3 instrument)"},
+                "param": {"type": "string", "description": "param: the parameter's title (any case, or snake_case), short title or \"#<id>\" (plugins params lists them)"},
+                "normalized": {"type": "boolean", "description": "param: values are 0-1 of the parameter's range (needed when a plugin can't read its own display values back); a lane is all one or the other"},
+                "replace": {"type": "boolean", "description": "the points become the whole lane (default: they replace only the span they cover); with no points, the lane is deleted"},
+                "points": {"type": "array", "items": auto_point}})), &["target", "points"]),
+        op("clear_automation", "delete automation: the points in a bar range, or whole lanes without one; target, insert and param narrow it to some lanes",
+            range_props(props(json!({"track": t(), "bus": {"enum": ["master"], "description": "instead of track: the master's lanes"},
+                "target": auto_target(), "insert": {"type": "integer"}, "param": {"type": "string"}}))), &[]),
+        op("copy_bars", "copy a bar range to another bar (one track, or every track and the master): notes, CCs, bends and audio clips join what is there; automation replaces the lanes over the copied span",
+            props(json!({"track": t(),
             "from_bar": {"type": "integer", "minimum": 1}, "bars": {"type": "integer", "minimum": 1}, "to_bar": {"type": "integer", "minimum": 1}})), &["from_bar", "bars", "to_bar"]),
-        op("clear_bars", "delete notes, CCs and bends in a bar range (one track or all)", props(json!({"track": t(),
+        op("clear_bars", "delete notes, CCs, bends, audio and automation points in a bar range (one track, or every track and the master); clips across its edges are cut there", props(json!({"track": t(),
             "from_bar": {"type": "integer", "minimum": 1}, "bars": {"type": "integer", "minimum": 1}})), &["from_bar", "bars"]),
+        op("add_clip", "place an audio file on an audio track (returns clip_id), anywhere and as often as you like; clips that overlap play \
+together (fade one out over the other's fade in to crossfade). WAV, FLAC or Ogg Vorbis at any sample rate (resampled to the project's), played \
+at its own speed (not stretched to the tempo). A track without an instrument becomes an audio track", clip_props(json!({
+            "path": {"type": "string", "description": "audio file (absolute or relative to the project root)"},
+            "offset": {"type": "number", "minimum": 0, "description": "seconds into the file where it starts playing (default 0)"},
+            "length": {"type": "number", "exclusiveMinimum": 0, "description": "seconds it plays (default: to the end of the file)"}})), &["track", "path"]),
+        op("update_clip", "change a clip; only the given fields change. bar/beat move the whole clip; with trim=true they move only its start, \
+and the audio stays where it was (its front is cut off, or more of the file uncovered). track moves it to another audio track", clip_props(json!({
+            "clip": {"type": "integer", "description": "clip id (get_notes and get_project list them)"},
+            "trim": {"type": "boolean", "description": "bar/beat move only the clip's start (not with offset)"},
+            "path": {"type": "string", "description": "play another file"},
+            "offset": {"type": "number", "minimum": 0, "description": "seconds into the file where it starts playing"},
+            "length": {"type": ["number", "null"], "exclusiveMinimum": 0, "description": "seconds it plays; null: to the end of the file"}})), &["clip"]),
+        op("remove_clip", "delete a clip", props(json!({"clip": {"type": "integer"}})), &["clip"]),
+        op("split_clip", "cut a clip in two (returns clip_id: the part after the cut); the audio plays on exactly as before", props(json!({
+            "clip": {"type": "integer"},
+            "bar": bar_s("bar of the cut (1-based); omit to make `beat` absolute"),
+            "beat": {"type": "number", "minimum": 0, "description": "the cut: offset inside `bar`, or absolute"}})), &["clip"]),
     ]})
 }
 
@@ -260,10 +322,10 @@ pub fn list() -> Vec<Value> {
         tool("get_project", "Overview of the open project: tempo, sections, master settings, every track (instrument, note count, \
 pitch range, bars used, non-default mixer settings), undo state and whether the last render is stale. detail=full returns the entire project JSON.",
             json!({"detail": {"enum": ["summary", "full"]}}), &[]),
-        tool("get_notes", "List a track's notes bar by bar as `beat pitch dur vel` (beat = 0-based offset inside the bar), plus CC automation.",
+        tool("get_notes", "List a track's notes bar by bar as `beat pitch dur vel` (beat = 0-based offset inside the bar), plus its CCs and automation lanes.",
             json!({"track": track_ref(), "from_bar": bar_s("default 1"), "to_bar": bar_s("default last bar"), "include_cc": {"type": "boolean", "description": "default true"}}), &["track"]),
         tool("edit", "Apply a batch of edit commands atomically (all succeed or nothing changes; one undo step). Every change to the \
-project goes through here: tracks, instruments, notes, CCs, tempo, sections, mixer and master.",
+project goes through here: tracks, instruments, notes, CCs, automation, tempo, sections, mixer and master.",
             json!({"commands": {"type": "array", "items": command_s(), "minItems": 1}}), &["commands"]),
         tool("undo", "Undo the last change(s), whoever made them.", json!({"steps": {"type": "integer", "minimum": 1}}), &[]),
         tool("redo", "Redo undone change(s).", json!({"steps": {"type": "integer", "minimum": 1}}), &[]),
@@ -303,11 +365,11 @@ list files in the output folders that no set makes.", json!({
             "dry_run": {"type": "boolean", "description": "build: report what would be done without writing"},
             "only": {"type": "array", "items": {"type": "string"}, "description": "build: only these instruments"}}), &["action"]),
         tool("sfz_derive", "Make a fixed copy of an SFZ instrument (the source is never changed, and nothing is ever written in instruments/): \
-tighten (short release, no release samples: tight palm mutes), retune (measure each sample's pitch and correct its tune) or even (bring \
+tighten (short release, no release samples: tight palm mutes), retune (measure each sample's pitch from its harmonics and correct its tune; noise and release samples are left alone) or even (bring \
 every key to the median level of its velocity layer, measured through sfizz). Returns the files written and a summary.", json!({
             "tool": {"enum": ["tighten", "retune", "even"]},
             "source": {"type": "string", "description": "SFZ file (absolute or relative to the project root)"},
-            "out": {"type": "string", "description": "where the copy goes (default sfz/derived/<library>/<name>_<tool>.sfz)"},
+            "out": {"type": "string", "description": "where the copy goes (default sfz/derived/<library>/<name>_<tool>.sfz; a copy of a copy goes next to it)"},
             "sample_paths": {"enum": ["relative", "absolute"], "description": "how the copy names the original samples (default relative)"},
             "release_s": {"type": "number", "minimum": 0, "description": "tighten (required): the new release time; even: also set every ampeg_release"},
             "note": {"type": "string", "description": "tighten: added to the provenance comment"},
@@ -527,9 +589,53 @@ fn instrument_json(i: &Instrument) -> Value {
     match i {
         Instrument::Sfz { path, init_cc } => json!({"kind": "sfz", "path": path, "init_cc": init_cc}),
         Instrument::Vst3 { path, params, preset, preset_name, class } => json!({"kind": "vst3", "path": path, "params": params, "preset": preset, "preset_name": preset_name, "class": class}),
-        Instrument::Audio { path } => json!({"kind": "audio", "path": path}),
+        Instrument::Audio { .. } => json!({"kind": "audio"}),
         Instrument::None => json!({"kind": "none"}),
     }
+}
+
+/// get_project lists this many of a track's clips.
+const MAX_CLIPS_LISTED: usize = 24;
+
+/// A clip in a line: id, file, where it plays (bar:beat to bar:beat), and what differs from the whole file as is.
+fn clip_text(tm: &TimeMap, c: &clip::Clip) -> String {
+    let at = |beat: f64| {
+        let bar = tm.bar_of(beat + clip::EPS);
+        format!("{bar}:{}", num(beat - tm.bar_beat(bar)))
+    };
+    let file = flux_engine::clips::info(&paths::resolve(&c.path));
+    let mut s = format!("#{} {} at {}", c.id, c.path, at(c.start));
+    if let Some(e) = c.end(tm, file.as_ref().ok().map(|i| i.seconds())) {
+        s += &format!(" to {}", at(e));
+    }
+    if c.offset != 0.0 {
+        s += &format!(", from {} s into the file", num(c.offset));
+    }
+    if let Some(l) = c.length {
+        s += &format!(", {} s long", num(l));
+    }
+    if c.gain_db != 0.0 {
+        s += &format!(", {} dB", num(c.gain_db));
+    }
+    if c.fade_in != 0.0 || c.fade_out != 0.0 {
+        s += &format!(", fades {}/{} s", num(c.fade_in), num(c.fade_out));
+    }
+    if let Err(e) = file {
+        s += &format!(" (can't read the file: {e})");
+    }
+    s
+}
+
+/// Automation lanes in a line each: what moves, how many points, over which bars.
+fn lanes_json(tm: &TimeMap, lanes: &[Lane]) -> Value {
+    json!(lanes
+        .iter()
+        .filter_map(|l| {
+            let (first, last) = (l.points.first()?, l.points.last()?);
+            let norm = if l.normalized { ", normalized" } else { "" };
+            Some(format!("{}: {} points{norm}, bars {}-{}", l.target.label(), l.points.len(), tm.bar_of(first.beat + 1e-9), tm.bar_of(last.beat + 1e-9)))
+        })
+        .collect::<Vec<_>>())
 }
 
 fn track_summary(tm: &TimeMap, t: &Track) -> Value {
@@ -571,6 +677,16 @@ fn track_summary(tm: &TimeMap, t: &Track) -> Value {
     if !t.mixer.inserts.is_empty() {
         o.insert("inserts".into(), inserts_json(&t.mixer.inserts));
     }
+    if !t.automation.is_empty() {
+        o.insert("automation".into(), lanes_json(tm, &t.automation));
+    }
+    if !t.clips.is_empty() {
+        let mut v: Vec<Value> = t.clips.iter().take(MAX_CLIPS_LISTED).map(|c| json!(clip_text(tm, c))).collect();
+        if t.clips.len() > MAX_CLIPS_LISTED {
+            v.push(json!(format!("... {} more (get_notes lists them by bar)", t.clips.len() - MAX_CLIPS_LISTED)));
+        }
+        o.insert("clips".into(), json!(v));
+    }
     if let Some(s) = t.meta.get("sfz")
         && !matches!(t.instrument, Instrument::Sfz { .. }) {
             o.insert("sfz_hint".into(), json!(rel(Path::new(s))));
@@ -608,6 +724,11 @@ fn get_project(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
             if !chain.is_empty() {
                 m.insert(k.into(), inserts_json(chain));
             }
+        }
+        if p.master.automation.is_empty() {
+            m.remove("automation");
+        } else {
+            m.insert("automation".into(), lanes_json(&tm, &p.master.automation));
         }
     }
     o.insert("master".into(), master);
@@ -696,7 +817,66 @@ fn get_notes(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
     if !t.bends.is_empty() {
         out.push_str(&format!("{} pitch-bend points\n", t.bends.len()));
     }
+    let (a0, a1) = (tm.bar_beat(from), tm.bar_beat(to + 1));
+    for l in &t.automation {
+        out.push_str(&lane_text(&tm, l, a0, a1, from, to));
+    }
+    // the clips playing in these bars
+    let clips: Vec<String> = t
+        .clips
+        .iter()
+        .filter(|c| {
+            let len = flux_engine::clips::info(&paths::resolve(&c.path)).ok().map(|i| i.seconds());
+            c.start < a1 - clip::EPS && c.end(&tm, len).is_none_or(|e| e > a0 + clip::EPS)
+        })
+        .map(|c| clip_text(&tm, c))
+        .collect();
+    if !clips.is_empty() {
+        out.push_str(&format!("audio clips (bar:beat; offset, length and fades in seconds):\n  {}\n", clips.join("\n  ")));
+    } else if !t.clips.is_empty() {
+        out.push_str(&format!("no audio clips in these bars ({} elsewhere)\n", t.clips.len()));
+    }
     Ok(vec![Content::Text(out)])
+}
+
+/// A lane's points in beats `[a0, a1)` (bars `from`-`to`) as `bar:beat=value`, a shape after one that isn't linear;
+/// a long lane as each bar's range of values.
+fn lane_text(tm: &TimeMap, l: &Lane, a0: f64, a1: f64, from: u32, to: u32) -> String {
+    let pts: Vec<_> = l.points.iter().filter(|q| q.beat >= a0 - 1e-9 && q.beat < a1 - 1e-9).collect();
+    let unit = match (&l.target, l.normalized) {
+        (_, true) => ", normalized",
+        (flux_core::automation::Target::Volume, _) => ", dB",
+        _ => "",
+    };
+    let label = l.target.label();
+    if pts.is_empty() {
+        return format!("automation {label}: no points in these bars ({} elsewhere)\n", l.points.len());
+    }
+    if pts.len() <= 48 {
+        let s: Vec<String> = pts
+            .iter()
+            .map(|q| {
+                let bar = tm.bar_of(q.beat + 1e-9);
+                let shape = match q.shape {
+                    Shape::Linear => "",
+                    Shape::Smooth => " smooth",
+                    Shape::Hold => " hold",
+                };
+                format!("{bar}:{}={}{shape}", num(q.beat - tm.bar_beat(bar)), num(q.value))
+            })
+            .collect();
+        return format!("automation {label} (bar:beat=value{unit}): {}\n", s.join(" "));
+    }
+    let mut per_bar = vec![];
+    for bar in from..=to {
+        let v: Vec<f64> = pts.iter().filter(|q| tm.bar_of(q.beat + 1e-9) == bar).map(|q| q.value).collect();
+        let lo = v.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if !v.is_empty() {
+            per_bar.push(if lo == hi { format!("{bar}:{}", num(lo)) } else { format!("{bar}:{}..{}", num(lo), num(hi)) });
+        }
+    }
+    format!("automation {label} ({} points{unit}; per-bar range): {}\n", pts.len(), per_bar.join(" "))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1321,11 +1501,17 @@ fn analyze(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
     if o.true_peak_dbtp > r.project.master.ceiling_dbtp + 0.05 {
         warn.push(format!("true peak {:.2} dBTP is above the ceiling", o.true_peak_dbtp));
     }
+    // the inserts that can keep a loop from repeating exactly (the linear ones fold and always do)
+    let suspects = if o.lead_in_inserts.is_empty() {
+        "a time-varying strip effect".to_string()
+    } else {
+        format!("inserts that aren't linear: {}", o.lead_in_inserts.join(", "))
+    };
     match (o.seam_error_db, o.seam_crossfade_ms) {
         (Some(s), Some(ms)) => warn.push(format!(
-            "loop seam: the loop isn't periodic ({s:.1} dB; an effect with free-running modulation or a sound of its own, or a time-varying strip effect), so its first {ms:.0} ms fade in from what follows its end and the wrap doesn't click"
+            "loop seam: the loop isn't periodic ({s:.1} dB; suspects: {suspects}), so its first {ms:.0} ms fade in from what follows its end and the wrap doesn't click"
         )),
-        (Some(s), None) if s > -60.0 => warn.push(format!("loop seam error {s:.1} dB: something is not loop-safe (time-varying effect?)")),
+        (Some(s), None) if s > -60.0 => warn.push(format!("loop seam error {s:.1} dB: something is not loop-safe (suspects: {suspects})")),
         _ => {}
     }
     if (o.lufs - r.project.master.target_lufs).abs() > 0.5 {
@@ -1569,6 +1755,15 @@ fn transport(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
         if !odd.is_empty() {
             o["tracks"] = json!(odd);
         }
+    }
+    // the human playing in: MIDI inputs, and a recording in progress
+    let inputs: Vec<String> = sh.midi.devices().into_iter().filter(|d| d.connected).map(|d| d.name).collect();
+    if !inputs.is_empty() {
+        o["midi_inputs"] = json!(inputs);
+    }
+    if let Some(id) = sh.midi.recording() {
+        let name = sh.lock().session.project.tracks.iter().find(|t| t.id == id).map(|t| t.name.clone());
+        o["recording"] = json!(name.unwrap_or_else(|| id.to_string()));
     }
     text(o)
 }
