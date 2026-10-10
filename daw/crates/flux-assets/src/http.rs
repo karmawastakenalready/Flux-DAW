@@ -7,6 +7,7 @@
 //! guarded by `If-Range`, so a file that changed on the server restarts from zero instead of being spliced.
 //! Only when the size and SHA-256 match is the part file renamed to `dest`.
 
+use crate::cancel::{Cancel, Cancelled};
 use crate::fsutil;
 use crate::manifest::{host_allowed, url_host};
 use anyhow::{Context, Result, anyhow, bail};
@@ -38,6 +39,8 @@ pub struct HttpConfig {
     pub max_redirects: u32,
     /// Base delay between retries (doubled each failed attempt, capped at 30 s).
     pub retry_delay: Duration,
+    /// Stops a download between chunks; the part file is kept so the next download resumes it.
+    pub cancel: Cancel,
 }
 
 impl HttpConfig {
@@ -52,6 +55,7 @@ impl HttpConfig {
             max_failed_attempts: 4,
             max_redirects: 10,
             retry_delay: Duration::from_secs(1),
+            cancel: Cancel::default(),
         }
     }
 }
@@ -215,8 +219,16 @@ impl HttpClient {
 
     /// Download a small document (license text, web page) into memory, at most `max_bytes`.
     pub fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>> {
+        self.get_bytes_if_found(url, max_bytes)?.ok_or_else(|| anyhow!("{url}: server answered 404 Not Found"))
+    }
+
+    /// Like [`get_bytes`](Self::get_bytes), but `None` when the server says there is no such document (404).
+    pub fn get_bytes_if_found(&self, url: &str, max_bytes: u64) -> Result<Option<Vec<u8>>> {
         let (resp, final_url) = self.get(url, &[]).map_err(failure_error)?;
         let st = resp.status();
+        if st == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
         if !st.is_success() {
             bail!("{url}: server answered {st}");
         }
@@ -229,7 +241,7 @@ impl HttpClient {
         if out.len() as u64 > max_bytes {
             bail!("{url} is larger than {max_bytes} bytes");
         }
-        Ok(out)
+        Ok(Some(out))
     }
 
     /// Download `url` to `dest`, resuming a previous partial download when possible. See the module docs.
@@ -253,6 +265,7 @@ impl HttpClient {
         let mut failed = 0u32;
         let mut last_err = None;
         while failed < self.cfg.max_failed_attempts {
+            self.cfg.cancel.check()?;
             let before = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
             requests += 1;
             match self.attempt(url, &part, &meta_path, &mut meta, expect, progress) {
@@ -285,7 +298,11 @@ impl HttpClient {
                     last_err = Some(e);
                     if failed < self.cfg.max_failed_attempts {
                         let delay = self.cfg.retry_delay.saturating_mul(1 << failed.min(5)).min(Duration::from_secs(30));
-                        std::thread::sleep(delay);
+                        let until = Instant::now() + delay;
+                        while Instant::now() < until {
+                            self.cfg.cancel.check()?;
+                            std::thread::sleep((until - Instant::now()).min(Duration::from_millis(100)));
+                        }
                     }
                 }
             }
@@ -412,6 +429,10 @@ impl HttpClient {
             }
             file.write_all(&buf[..n]).with_context(|| format!("writing {}", part.display()))?;
             done += n as u64;
+            if self.cfg.cancel.is_cancelled() {
+                let _ = file.sync_all();
+                return Err(Failure::Fatal(anyhow::Error::new(Cancelled)));
+            }
             if last_report.elapsed() >= Duration::from_millis(200) {
                 progress(done, full);
                 last_report = Instant::now();

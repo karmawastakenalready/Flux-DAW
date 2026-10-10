@@ -139,7 +139,7 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
     </td>
     <td width="33%" valign="top">
       <h4>📦 Assets you can ship</h4>
-      One manifest (<code>assets.toml</code>) with a license policy. <code>flux assets fetch</code> downloads only from official sources, pins checksums and refuses anything else. Then <code>verify</code> and <code>repair</code> the installs, audit the licenses, and generate <a href="LICENSES.md">LICENSES.md</a> and the in-game credits.
+      One manifest (<code>assets.toml</code>) with a license policy. Setup and the Library window install instruments in packs, from official sources only, with pinned checksums. <code>flux assets</code> verifies and repairs the installs, audits the licenses, and generates <a href="LICENSES.md">LICENSES.md</a> and the in-game credits.
     </td>
     <td width="33%" valign="top">
       <h4>🖥️ The app</h4>
@@ -152,7 +152,11 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
 
 ## Built for agents
 
-Flux runs as an MCP server on stdio. The [`.mcp.json`](.mcp.json) in this repo registers it with Claude Code, and `--gui` opens the window too, so you can watch the agent work and edit alongside it:
+Flux runs as an MCP server on stdio, so any agent that speaks MCP can drive it. Setup connects the agents it finds on your computer: Claude Code, Claude Desktop, Codex, Cursor, VS Code, Gemini CLI, Windsurf, Zed and a dozen more. Later, use **Help › Connect agents** or `flux agents connect`. For anything else, `flux agents show generic` prints the config to paste.
+
+Agents get two more things besides the tools. A guide to working in Flux comes as the `flux://guide` resource and as a prompt. The library comes as `flux://library`: what's installed and how to get what isn't. `list_instruments` and `plugins scan` also list the supported instruments and plugins that are missing, so an agent can tell you exactly what to install.
+
+The [`.mcp.json`](.mcp.json) in this repo registers a source build with Claude Code. `--gui` opens the window too, so you can watch the agent work and edit alongside it:
 
 ```json
 { "mcpServers": { "flux": { "command": "daw/target/debug/flux.exe", "args": ["mcp", "--gui"] } } }
@@ -189,12 +193,30 @@ Whole songs can be scripts too: a Python build script pushes a song into a runni
 - **One command system:** a pure-data project model and the commands that change it live in `flux-core`. The GUI and the MCP server are thin layers on top, so a human and an agent can't drift apart.
 - **Plugins out of process:** each VST3 plugin runs in a `flux plugin-host` child process. Flux gives plugins the song's tempo and position, so synced LFOs, arpeggiators and delays follow along.
 - **Offline and live:** the offline renderer runs every effect over the end of the loop, the loop itself and its start, which makes the wrap identical to continuous playback. The live engine plays through cpal with the same channel-strip DSP.
-- **Nine crates:** `flux` (app, MCP server, CLI) · `flux-core` (model, commands) · `flux-engine` (instruments, DSP, rendering) · `flux-vst3` (plugin hosting) · `flux-nam` (amp-capture inference, cabinets) · `flux-score` (theory, compose, lint) · `flux-analysis` (measurements) · `flux-sfz` (SFZ parsing and tools) · `flux-assets` (manifest, fetcher, licenses, FLAC).
-- **Tested:** about 480 Rust tests, including pixel snapshots of the GUI (egui_kittest) and click-through tests of its panels.
+- **Ten crates:** `flux` (app, MCP server, CLI) · `flux-core` (model, commands) · `flux-engine` (instruments, DSP, rendering) · `flux-vst3` (plugin hosting) · `flux-nam` (amp-capture inference, cabinets) · `flux-score` (theory, compose, lint) · `flux-analysis` (measurements) · `flux-sfz` (SFZ parsing and tools) · `flux-assets` (manifest, fetcher, licenses, FLAC) · `flux-setup` (packs, install, agent connections, updates).
+- **One program:** the released `flux.exe` is also its own Setup and uninstaller, and its terminal launcher. It's built by a GitHub Actions workflow with the C runtime linked in and the third-party notices inside.
+- **Tested:** about 590 Rust tests, including pixel snapshots of the GUI (egui_kittest) and click-through tests of its panels.
 
 ## Get started
 
-You need Windows (tested on Windows 11) and a recent Rust toolchain (edition 2024).
+### Install
+
+Download `FluxSetup-<version>.exe` from [Releases](https://github.com/karmawastakenalready/Flux-DAW/releases) and run it. No release is out yet, so for now [build from source](#build-from-source).
+
+Setup needs no admin rights. It installs Flux for your user only (in `%LOCALAPPDATA%\Programs\Flux`) and walks you through:
+
+1. **Library:** where the instruments go. Any folder or drive works, and Setup shows the free space.
+2. **Instruments:** Minimal, Recommended or Everything, or pick packs and single libraries. Each one shows its size and license. The metal guitar rigs can't be downloaded directly, so Setup opens their pages and imports the files from your Downloads folder by checksum.
+3. **Plugins:** the free VST3 plugins Flux supports (Vital, Decent Sampler, Valhalla Supermassive, Surge XT and more). It shows which ones you have, downloads the open-source ones and links to the makers' installers for the rest.
+4. **Agents:** the AI agents it found, ticked to connect.
+
+Your songs go in `Documents\Flux`. Change any of this later in **File › Library**, which also tells you when a new version is out. It checks at most once a day, you can turn that off, and it never updates without your click. Uninstall from Windows Settings: your songs stay, and it asks before deleting the instrument library.
+
+Setup isn't code-signed yet, so Windows SmartScreen may warn on first run: choose **More info › Run anyway**.
+
+### Build from source
+
+You need Windows (tested on Windows 11) and a recent stable Rust (1.88 or newer).
 
 ```
 git clone https://github.com/karmawastakenalready/Flux-DAW
@@ -207,6 +229,8 @@ daw\target\debug\flux.exe                           # the window, with a new pro
 A few assets have no direct download link (the guitar library and the amp captures). `flux assets status` lists what's missing, and [LICENSES.md](LICENSES.md) links each one's official page. The VST3 plugins Flux is built around are free downloads from their makers: [Vital](https://vital.audio), [Decent Sampler](https://www.decentsamples.com/product/decent-sampler-plugin/) and [Valhalla Supermassive](https://valhalladsp.com/shop/reverb/valhalla-supermassive/). Install them to `C:\Program Files\Common Files\VST3`; `flux assets status` shows which ones it finds.
 
 To work with an agent, open this folder in Claude Code. It picks up `.mcp.json` and opens the Flux window when the agent connects.
+
+To work *on* Flux, read [AGENTS.md](AGENTS.md) first, whether you're a person or an agent. It covers the ground rules (licenses, sources, no AI audio), how to build and test, and step-by-step guides for adding a VST3 plugin, an instrument library, an MCP tool or an agent client.
 
 > [!IMPORTANT]
 > **Status:** Flux is in early alpha and built around one composer's workflow: game music for a Roblox game. It runs on Windows only, because the VST3 host is Win32. Some parts are rough, and the original Python pipeline that made the first songs (`compose.py`, `render.py` and friends at the root) is retired but still here.
@@ -225,6 +249,8 @@ Upload the FLAC (not MP3: encoder padding adds a gap at the loop point) and set 
 | [`sfz/`](sfz/), [`catalog/`](catalog/) | our own SFZ mappings and fixed instrument copies; instrument report cards |
 | [`assets.toml`](assets.toml), [`assets.lock`](assets.lock) | every instrument, tool and plugin: official source, pinned checksums, license |
 | [`docs/images/`](docs/images/) | the screenshots in this README |
+| [`AGENTS.md`](AGENTS.md) | the guide to working on Flux: rules, building, testing, extending |
+| [`.github/workflows/`](.github/workflows/) | the release build: `FluxSetup-<version>.exe` on a draft GitHub release |
 | `compose.py`, `render.py`, `master.py`, … | the original Python pipeline (retired) |
 
 Not in the repo: the songs, the sample libraries (fetched with `flux assets fetch`), the plugins (installed by you), saved plugin states (they hold vendors' preset data) and reference tracks.

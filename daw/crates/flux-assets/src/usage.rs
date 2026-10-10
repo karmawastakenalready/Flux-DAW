@@ -80,6 +80,11 @@ fn key(p: &Path) -> String {
 /// Scan the usage roots of the manifest below `root`; install locations of assets installed by another tool are
 /// looked for in `places`.
 pub fn scan(root: &Path, loaded: &Loaded, places: &Places) -> Result<Usage> {
+    scan_with(root, loaded, places, &[])
+}
+
+/// [`scan`], also following `extra` files outside the root (an installed Flux keeps its projects in Documents).
+pub fn scan_with(root: &Path, loaded: &Loaded, places: &Places, extra: &[PathBuf]) -> Result<Usage> {
     let mut dirs: Vec<AssetDir> = Vec::new();
     for a in loaded.assets() {
         if let Some(rel) = &a.path {
@@ -99,6 +104,9 @@ pub fn scan(root: &Path, loaded: &Loaded, places: &Places) -> Result<Usage> {
         for f in glob::expand(root, pat)? {
             roots.insert(f);
         }
+    }
+    for f in extra.iter().filter(|f| f.is_file()) {
+        roots.insert(fsutil::relative_to(root, f).unwrap_or_else(|| f.to_string_lossy().replace('\\', "/")));
     }
     let mut usage = Usage { roots: roots.iter().cloned().collect(), ..Default::default() };
     let mut found: BTreeMap<String, BTreeSet<UsageRef>> = BTreeMap::new();

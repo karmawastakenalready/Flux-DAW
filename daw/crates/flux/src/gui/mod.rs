@@ -6,8 +6,12 @@ mod arrange;
 mod automation;
 mod clips;
 mod dialogs;
+mod library;
 mod panels;
 mod roll;
+// Setup and Uninstall are windows of the released build only (`dist`)
+#[cfg_attr(not(feature = "dist"), allow(dead_code))]
+mod setup;
 mod side;
 #[cfg(test)]
 mod tests;
@@ -27,6 +31,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use theme::*;
 use widgets::*;
+
+#[cfg(feature = "dist")]
+pub use setup::{run_setup, run_uninstall};
 
 enum Action {
     Apply(Vec<Command>),
@@ -257,6 +264,10 @@ pub struct Gui {
     auditions: side::AuditionsUi,
     open: Option<dialogs::OpenDialog>,
     about: bool,
+    /// The Library window (instruments, plugins, agents, updates): kept while its work runs, also hidden.
+    library: Option<library::LibraryWindow>,
+    /// The daily look for a newer Flux and the update being downloaded.
+    updates: library::Updates,
     /// Loaded app marks by pixel size.
     marks: Vec<(u32, egui::TextureHandle)>,
     /// The window title last sent (project name and unsaved state).
@@ -375,6 +386,8 @@ fn menu_item(ui: &mut egui::Ui, w: f32, text: &str, shortcut: &str, check: Optio
 
 impl Gui {
     fn new(sh: Arc<Shared>) -> Gui {
+        let mut updates = library::Updates::current();
+        updates.start_daily();
         Gui {
             sh,
             view: View::Arrange,
@@ -395,6 +408,8 @@ impl Gui {
             auditions: Default::default(),
             open: None,
             about: false,
+            library: None,
+            updates,
             marks: vec![],
             title: String::new(),
             center_w: 560.0,
@@ -661,7 +676,7 @@ impl Gui {
     /// The computer keyboard as a piano (when on), and the play-in shortcuts: R records, M turns the piano on/off.
     /// Keys let go always stop their notes, even once typing in a field has started.
     fn piano(&mut self, ctx: &egui::Context, act: &mut Vec<Action>) {
-        let blocked = self.open.is_some() || self.about || ctx.egui_wants_keyboard_input();
+        let blocked = self.open.is_some() || self.about || self.library_shown() || ctx.egui_wants_keyboard_input();
         let on = self.sh.midi.keys_on();
         // a key held with the mouse in the piano roll, which is no longer shown
         if self.view != View::Roll
@@ -761,6 +776,10 @@ impl Gui {
                     if menu_row(ui, "Render", "Ctrl+R", None, !running) {
                         act.push(Action::Render);
                     }
+                    ui.separator();
+                    if menu_row(ui, "Library\u{2026}", "", None, true) {
+                        self.show_library(library::LibTab::Instruments);
+                    }
                 });
                 ui.menu_button(item("Edit"), |ui| {
                     if menu_row(ui, "Undo", "Ctrl+Z", None, st.session.can_undo()) {
@@ -838,6 +857,13 @@ impl Gui {
                     }
                 });
                 ui.menu_button(item("Help"), |ui| {
+                    if menu_row(ui, "Connect agents\u{2026}", "", None, true) {
+                        self.show_library(library::LibTab::Agents);
+                    }
+                    if menu_row(ui, "Check for updates\u{2026}", "", None, true) {
+                        self.show_library(library::LibTab::Updates);
+                    }
+                    ui.separator();
                     if menu_row(ui, "About Flux", "", None, true) {
                         self.about = true;
                     }
@@ -850,6 +876,7 @@ impl Gui {
             None => status_dot(&mut ru, TEXT3, "No agent connected", TEXT3).on_hover_text("Start `flux mcp --gui` from an MCP client to let an agent work here"),
         };
         self.midi_status(&mut ru, st);
+        self.library_notes(&mut ru);
     }
 
     /// What plays in and where it goes (shown once something can: a MIDI input or the computer keyboard). The dot
@@ -1200,7 +1227,7 @@ impl Gui {
     }
 
     fn keys(&self, ctx: &egui::Context, act: &mut Vec<Action>) {
-        if self.open.is_some() || self.about {
+        if self.open.is_some() || self.about || self.library_shown() {
             return;
         }
         let typing = ctx.egui_wants_keyboard_input();

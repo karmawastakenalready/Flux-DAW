@@ -6,12 +6,14 @@
 //! runs with `core.autocrlf=false` and `core.eol=lf`, clones store those settings in the repository, and
 //! `.git/info/attributes` turns off text conversion, filters and `ident` expansion for all paths.
 
+use crate::cancel::{Cancel, Cancelled};
 use crate::manifest::GitSource;
 use anyhow::{Context, Result, bail};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// Attributes that make checkouts byte-exact copies of the blobs.
 pub const EXACT_ATTRIBUTES: &str = "* -text -eol -filter -ident -working-tree-encoding\n";
@@ -38,24 +40,47 @@ impl GitEntry {
     }
 }
 
+/// Where Flux's own copy of git (MinGit, the `mingit` tool asset) lives, below the root.
+pub const BUNDLED_GIT: &str = "tools/mingit/cmd/git.exe";
+
 /// The `git` executable.
 #[derive(Clone, Debug)]
 pub struct Git {
     exe: PathBuf,
     /// Show git's own progress output (stderr) for long operations.
     pub show_progress: bool,
+    /// Stops a running command (it is killed) at the next check, every few milliseconds.
+    pub cancel: Cancel,
 }
 
 impl Git {
     /// Use `git` from PATH (or `FLUX_GIT`), checking that it runs.
     pub fn find() -> Result<Self> {
         let exe = std::env::var_os("FLUX_GIT").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("git"));
-        let g = Self { exe, show_progress: false };
-        let v = g.run(None, &["--version"], None).context("git is required for git sources; install Git and make sure `git` is on PATH")?;
+        Self::at(exe).context("git is required for git sources; install Git and make sure `git` is on PATH")
+    }
+
+    /// [`Git::find`], else the copy of git installed with Flux below `root` ([`BUNDLED_GIT`]).
+    pub fn find_in(root: &Path) -> Result<Self> {
+        Self::find().or_else(|e| {
+            let bundled = root.join(BUNDLED_GIT);
+            if bundled.is_file() { Self::at(bundled) } else { Err(e.context("(Flux's own copy of git, the mingit asset, is not installed either)")) }
+        })
+    }
+
+    /// The git at `exe`, checking that it runs.
+    pub fn at(exe: impl Into<PathBuf>) -> Result<Self> {
+        let g = Self { exe: exe.into(), show_progress: false, cancel: Cancel::default() };
+        let v = g.run(None, &["--version"], None)?;
         if !v.starts_with("git version") {
             bail!("unexpected `git --version` output: {v:?}");
         }
         Ok(g)
+    }
+
+    /// The program that runs.
+    pub fn exe(&self) -> &Path {
+        &self.exe
     }
 
     /// `git --version`.
@@ -76,21 +101,69 @@ impl Git {
         c
     }
 
-    fn exec(&self, mut c: Command, args: &[&str], stdin: Option<&[u8]>, progress: bool) -> Result<String> {
+    /// Run git. `progress`: let git print its own progress to our stderr. `watch`: instead, report the size of
+    /// a folder (the clone's object store) as it grows, every half second.
+    fn exec_watch(&self, mut c: Command, args: &[&str], stdin: Option<&[u8]>, progress: bool, mut watch: Option<Watch>) -> Result<String> {
+        self.cancel.check()?;
         c.args(args);
         c.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
         c.stdout(Stdio::piped());
-        c.stderr(if progress { Stdio::inherit() } else { Stdio::piped() });
+        let inherit = progress && watch.is_none();
+        c.stderr(if inherit { Stdio::inherit() } else { Stdio::piped() });
+        if !inherit {
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                c.creation_flags(CREATE_NO_WINDOW);
+            }
+        }
         let mut child = c.spawn().with_context(|| format!("starting {}", self.exe.display()))?;
+        let drain = |r: Option<Box<dyn Read + Send>>| {
+            r.map(|mut r| {
+                std::thread::spawn(move || {
+                    let mut v = Vec::new();
+                    let _ = r.read_to_end(&mut v);
+                    v
+                })
+            })
+        };
+        let out_reader = drain(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+        let err_reader = drain(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
         if let (Some(data), Some(mut si)) = (stdin, child.stdin.take()) {
             si.write_all(data).context("writing to git")?;
         }
-        let out = child.wait_with_output().context("waiting for git")?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            bail!("`git {}` failed ({}): {}", args.join(" "), out.status, err.trim());
+        let mut nap = Duration::from_millis(2);
+        let mut last_watch = Instant::now();
+        let status = loop {
+            if let Some(st) = child.try_wait().context("waiting for git")? {
+                break st;
+            }
+            if self.cancel.is_cancelled() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Cancelled.into());
+            }
+            if let Some(w) = watch.as_mut()
+                && last_watch.elapsed() >= Duration::from_millis(500)
+            {
+                (w.report)(crate::fsutil::tree_size(w.dir, &[]).map_or(0, |(bytes, _)| bytes));
+                last_watch = Instant::now();
+            }
+            std::thread::sleep(nap);
+            nap = (nap * 2).min(Duration::from_millis(50));
+        };
+        let stdout = out_reader.and_then(|h| h.join().ok()).unwrap_or_default();
+        let stderr = err_reader.and_then(|h| h.join().ok()).unwrap_or_default();
+        if !status.success() {
+            let err = String::from_utf8_lossy(&stderr);
+            bail!("`git {}` failed ({}): {}", args.join(" "), status, err.trim());
         }
-        String::from_utf8(out.stdout).context("git printed something that is not UTF-8")
+        String::from_utf8(stdout).context("git printed something that is not UTF-8")
+    }
+
+    fn exec(&self, c: Command, args: &[&str], stdin: Option<&[u8]>, progress: bool) -> Result<String> {
+        self.exec_watch(c, args, stdin, progress, None)
     }
 
     fn run(&self, dir: Option<&Path>, args: &[&str], stdin: Option<&[u8]>) -> Result<String> {
@@ -108,7 +181,16 @@ impl Git {
     /// Clone `src` into `dest` (which must not exist or be empty) and check out exactly `src.rev`.
     /// Returns the checked-out commit.
     pub fn clone_pinned(&self, src: &GitSource, dest: &Path) -> Result<String> {
+        self.clone_pinned_with(src, dest, &mut |_| {})
+    }
+
+    /// [`Git::clone_pinned`], reporting the bytes received so far (the size of the clone's object store).
+    pub fn clone_pinned_with(&self, src: &GitSource, dest: &Path, received: &mut dyn FnMut(u64)) -> Result<String> {
         let dest_s = dest.to_str().context("destination path is not valid Unicode")?;
+        let objects = dest.join(".git").join("objects");
+        let long = |dir: Option<&Path>, args: &[&str], received: &mut dyn FnMut(u64)| {
+            self.exec_watch(self.command(dir, false), args, None, self.show_progress, Some(Watch { dir: &objects, report: received }))
+        };
         let mut args = vec!["clone", "--no-checkout", "--depth", "1", "--no-tags"];
         let filtered = !src.sparse.is_empty();
         if filtered {
@@ -118,22 +200,22 @@ impl Git {
             args.extend(["--branch", b.as_str(), "--single-branch"]);
         }
         args.extend(["--", src.url.as_str(), dest_s]);
-        self.run_long(None, &args).with_context(|| format!("cloning {}", src.url))?;
+        long(None, &args, received).with_context(|| format!("cloning {}", src.url))?;
         self.make_byte_exact(dest)?;
         if !src.sparse.is_empty() {
             self.set_sparse(dest, &src.sparse, src.cone)?;
         }
         let head = self.head(dest)?;
         if head == src.rev {
-            self.run_long(Some(dest), &["checkout"])?;
+            long(Some(dest), &["checkout"], received)?;
         } else {
             let mut fetch = vec!["fetch", "--depth", "1", "--no-tags"];
             if filtered {
                 fetch.push("--filter=blob:none");
             }
             fetch.extend(["origin", src.rev.as_str()]);
-            self.run_long(Some(dest), &fetch).with_context(|| format!("fetching pinned commit {}", src.rev))?;
-            self.run_long(Some(dest), &["checkout", "--detach", src.rev.as_str()])?;
+            long(Some(dest), &fetch, received).with_context(|| format!("fetching pinned commit {}", src.rev))?;
+            long(Some(dest), &["checkout", "--detach", src.rev.as_str()], received)?;
         }
         let now = self.head(dest)?;
         if now != src.rev {
@@ -243,6 +325,12 @@ impl Git {
     pub fn reapply_sparse(&self, repo: &Path) -> Result<()> {
         self.run_long(Some(repo), &["sparse-checkout", "reapply"]).map(|_| ())
     }
+}
+
+/// A folder whose size is reported while a command runs.
+struct Watch<'a> {
+    dir: &'a Path,
+    report: &'a mut dyn FnMut(u64),
 }
 
 /// Parse `git ls-files -s -t -z` output: `TAG MODE BLOB STAGE\tPATH\0`.

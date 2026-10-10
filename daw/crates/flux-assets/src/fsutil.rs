@@ -7,6 +7,20 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// A command for a helper program (git, tar) that opens no console window of its own, so running it from Flux's
+/// window does not flash one up. Its output must be captured (a child without a console cannot write to ours).
+pub fn quiet_command(exe: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut c = std::process::Command::new(exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 /// Write `bytes` to `path` atomically: a temporary file in the same directory is written, flushed to disk and
 /// then renamed over `path`, so readers never see a half-written file.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {

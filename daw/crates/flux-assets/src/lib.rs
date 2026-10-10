@@ -49,6 +49,7 @@
 //! ```
 
 pub mod audit;
+pub mod cancel;
 pub mod cli;
 pub mod credits;
 pub mod extract;
@@ -59,10 +60,13 @@ pub mod git;
 pub mod glob;
 pub mod hash;
 pub mod http;
+pub mod import;
 pub mod license;
 pub mod lock;
 pub mod manifest;
+pub mod packs;
 pub mod places;
+pub mod remove;
 pub mod usage;
 pub mod verify;
 pub mod workspace;

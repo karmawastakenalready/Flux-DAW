@@ -268,7 +268,7 @@ fn full(ws: &Workspace, a: &Asset, dir: &Path, c: &mut AssetCheck, ui: &mut dyn 
     for src in &a.sources {
         match src {
             Source::Git(g) => {
-                let git = Git::find()?;
+                let git = ws.git()?;
                 check_git_meta(&git, dir, g, c)?;
                 let cmp = compare_git(&git, dir, &tree)?;
                 covered.extend(cmp.tracked.iter().cloned());
@@ -520,7 +520,7 @@ fn quick(ws: &Workspace, a: &Asset, dir: &Path, c: &mut AssetCheck) -> Result<()
                 Source::Manual(m) => m.files.iter().map(|x| (x.path.clone(), x.size)).collect(),
                 Source::Vendored(v) => v.files.iter().map(|x| (x.path.clone(), x.size)).collect(),
                 Source::Git(_) => {
-                    let git = Git::find()?;
+                    let git = ws.git()?;
                     for e in git.ls_files(dir)?.into_iter().filter(|e| e.is_checked_out()) {
                         covered.insert(e.path.clone());
                         if !sizes.contains_key(e.path.as_str()) {

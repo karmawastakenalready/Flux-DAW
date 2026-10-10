@@ -91,6 +91,11 @@ pub struct Manifest {
     pub licenses: Vec<CustomLicense>,
     #[serde(default, rename = "asset")]
     pub assets: Vec<Asset>,
+    /// How assets are offered to people installing Flux (see [`crate::packs`]).
+    #[serde(default, rename = "pack", skip_serializing_if = "Vec::is_empty")]
+    pub packs: Vec<crate::packs::Pack>,
+    #[serde(default, rename = "selection", skip_serializing_if = "Vec::is_empty")]
+    pub selections: Vec<crate::packs::Selection>,
 }
 
 /// Download and audit policy.
@@ -346,6 +351,15 @@ pub struct ArchiveSource {
     /// must match or extraction fails.
     #[serde(default)]
     pub skipped_entries: usize,
+    /// The host only hands the file to a browser (Google Drive answers big downloads with a virus-scan page), so
+    /// it is downloaded by hand from `page` and installed from that copy (`import`), or from the cache.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub by_hand: bool,
+}
+
+/// Leaves `false` out of serialised specs, so lock digests of entries written before a flag existed still match.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// Individual files downloaded over HTTPS.
@@ -595,6 +609,7 @@ fn validate(l: &Loaded) -> Result<()> {
             paths.push((p.as_str(), a.id.as_str()));
         }
     }
+    crate::packs::validate(l)?;
     // Asset folders must not overlap: verifying one would otherwise see the other's files.
     for (i, (p, id)) in paths.iter().enumerate() {
         for (q, other) in &paths[i + 1..] {
@@ -720,6 +735,9 @@ fn validate_source(l: &Loaded, s: &Source) -> Result<()> {
             if x.skipped_entries > 0 && !x.format.is_external() {
                 bail!("skipped_entries only applies to RAR and 7z archives");
             }
+            if x.by_hand && x.page.is_none() {
+                bail!("an archive downloaded by hand needs the page it is downloaded from");
+            }
         }
         Source::Files(f) => {
             l.check_url(&f.base_url)?;
@@ -784,7 +802,7 @@ fn check_web(u: &str) -> Result<()> {
     Ok(())
 }
 
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     let b = id.as_bytes();
     !b.is_empty()
         && b.len() <= 64

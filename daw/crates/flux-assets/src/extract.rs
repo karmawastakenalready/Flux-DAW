@@ -22,7 +22,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Archive container formats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -471,7 +470,7 @@ pub fn system_bsdtar() -> Result<PathBuf> {
     } else {
         PathBuf::from("bsdtar")
     };
-    let out = Command::new(&exe)
+    let out = crate::fsutil::quiet_command(&exe)
         .arg("--version")
         .output()
         .with_context(|| format!("running {} (needed for RAR/7z archives)", exe.display()))?;
@@ -494,7 +493,7 @@ const UNREADABLE: &str = "Archive entry has empty or unreadable filename";
 
 /// Run bsdtar and split its stderr into "unreadable name" skips and real problems.
 fn run_bsdtar(exe: &Path, args: &[&std::ffi::OsStr]) -> Result<(String, usize)> {
-    let out = Command::new(exe).args(args).output().with_context(|| format!("running {}", exe.display()))?;
+    let out = crate::fsutil::quiet_command(exe).args(args).output().with_context(|| format!("running {}", exe.display()))?;
     let stderr = String::from_utf8_lossy(&out.stderr);
     let mut unreadable = 0;
     let mut problems = Vec::new();

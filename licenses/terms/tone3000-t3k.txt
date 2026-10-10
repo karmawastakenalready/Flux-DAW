@@ -1,0 +1,24 @@
+TONE3000 "T3K" terms for the Neural Amp Modeler captures used by Flux's metal guitar rigs
+(assets nam-jp-5150-mesa and nam-ob1-5150iii in assets.toml)
+
+As shown on each capture's TONE3000 page when it was downloaded (October 2026):
+
+  "Users may download and use the data file in software and publish the resulting outputs without
+  royalties or restrictions. However, they may not upload, republish, or distribute the data file
+  without the author's permission."
+
+So: music rendered through the captures may be published, sold and used in games; the .nam files
+themselves must never be shipped, uploaded or shared. Flux never bundles them; everyone downloads
+them from TONE3000 (free account) and Flux installs them from those downloads.
+
+nam-jp-5150-mesa
+  Source: https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868
+  Author: jp_is_out_of_tune
+  Captures: lismqguuhn_a2 = No boost SM57; sjjldv8e8k_a2 = MXR SM58; ck11sqw4ued_a2 = MXR SM57;
+            4gjmrwyacbq_a2 = Maxon SM58; 0ff5x0ot7r6c_a2 = Maxon SM57
+
+nam-ob1-5150iii
+  Source: https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247
+  Author: obijuan
+  Captures: zqzege5008p_a2 = Red 805; ofcsfj5mm7b_a2 = Red Precision Drive; 82oordbgujm_a2 = Red TC Spark;
+            k8ufdvyk59m_a2 = Red Fortin 33

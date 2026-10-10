@@ -34,6 +34,8 @@ pub enum LockMethod {
     Fetch,
     /// An existing install that `lock` checked against its sources.
     Adopt,
+    /// Installed by `import` from files downloaded by hand.
+    Import,
 }
 
 /// One installed asset.

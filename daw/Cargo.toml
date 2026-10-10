@@ -10,6 +10,7 @@ members = [
     "crates/flux-analysis",
     "crates/flux-score",
     "crates/flux-sfz",
+    "crates/flux-setup",
 ]
 
 [workspace.package]

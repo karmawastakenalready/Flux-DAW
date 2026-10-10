@@ -155,9 +155,11 @@ fn scan(a: &Value) -> Result<Vec<Content>> {
         "total": list.len(), "shown": list.len().min(limit), "failed_to_scan": failed,
         "plugins": list.into_iter().take(limit).collect::<Vec<_>>(),
         "folders": plugin_dirs().iter().map(|d| rel(d)).collect::<Vec<_>>(),
+        "not_installed": crate::supported::missing(&crate::supported::packs(), flux_assets::packs::Section::Plugins, &q),
         "seconds": (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0,
         "use": "an instrument plays on a track (add_track/update_track instrument {kind: vst3, path}); an effect goes in an insert slot \
-(edit add_insert on a track, the master or the reverb return)",
+(edit add_insert on a track, the master or the reverb return). not_installed: plugins Flux supports that aren't installed here, and how \
+the user gets them",
     }))
 }
 

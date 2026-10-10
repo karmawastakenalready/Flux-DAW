@@ -13,6 +13,7 @@ pub mod paths;
 pub mod render;
 pub mod resample;
 pub mod rig;
+pub mod settings;
 pub mod sfizz;
 pub mod vst;
 pub mod worker;

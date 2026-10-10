@@ -414,7 +414,7 @@ impl std::ops::DerefMut for Stage {
     }
 }
 
-static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A harness at 1 point per pixel with the app's theme, drawing `part` of `gui`.
 fn stage(w: f32, h: f32, gui: Gui, part: Part) -> Stage {
@@ -509,6 +509,21 @@ fn top_bars() {
     let mut h = stage(1100.0, 70.0, g, Part::TopBars);
     results.add(h.try_snapshot("top_bars_compact_stale"));
     results.unwrap();
+}
+
+#[test]
+fn top_bar_notes_open_the_library() {
+    let mut g = demo_gui(|p| stopped_feed(p, 1, Mode::Live));
+    g.updates = library::Updates::sample(Some("v0.5.0"));
+    g.library = Some(library::LibraryWindow::sample("top-bar", library::LibTab::Plugins).finished_hidden());
+    let mut h = stage(1440.0, 70.0, g, Part::TopBars);
+    settle(&mut h);
+    h.snapshot("top_bars_notes");
+    h.get_by_label("Flux 0.5.0 is available").click();
+    h.run();
+    let w = h.state().library.as_ref().unwrap();
+    assert!(w.shown && w.tab == library::LibTab::Updates);
+    assert!(h.query_by_label("Library: done").is_none(), "notes show only while the window is hidden");
 }
 
 #[test]

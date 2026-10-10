@@ -8,7 +8,6 @@
 
 use crate::extract::{self, ExtractOptions, Limits};
 use crate::fsutil;
-use crate::git::Git;
 use crate::hash::{self, TreeIndex};
 use crate::http::{Expect, HttpClient};
 use crate::lock::{BusyGuard, LockMethod, LockedAsset, LockedSource, spec_digest, write_index};
@@ -37,6 +36,9 @@ pub struct FetchOptions {
     pub check_urls: bool,
     /// Replace existing installs.
     pub force: bool,
+    /// Delete downloaded archives once their asset is installed (Setup does, to save space; by default they stay
+    /// cached so nothing is downloaded twice).
+    pub drop_archives: bool,
 }
 
 /// What fetch decided to do with an asset.
@@ -64,7 +66,8 @@ pub enum Plan {
 pub struct FetchOutcome {
     pub id: String,
     pub plan: Plan,
-    /// `installed`, `replaced`, `updated`, `present`, `skipped`, `planned`, `failed`, `refused`, `checked`.
+    /// `installed`, `replaced`, `updated`, `present`, `skipped`, `planned`, `failed`, `refused`, `checked`,
+    /// `cancelled`.
     pub result: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -89,6 +92,21 @@ fn plan_for(ws: &Workspace, a: &Asset, opts: &FetchOptions) -> Result<Plan> {
         return Ok(Plan::Present);
     }
     let installed = ws.is_installed(a);
+    for s in &a.sources {
+        if let Source::Archive(x) = s
+            && x.by_hand
+            && (!installed || opts.force)
+            && !fs::metadata(ws.archive_cache(a, x)).is_ok_and(|m| m.len() == x.size)
+        {
+            let page = x.page.clone().unwrap_or_else(|| x.url.clone());
+            let instructions = format!(
+                "Download the archive ({}) from this page in a browser; `flux assets import {}` (or Flux's Library window) then finds it in Downloads and installs it.",
+                fsutil::fmt_bytes(x.size),
+                a.id
+            );
+            return Ok(Plan::Manual { page, instructions });
+        }
+    }
     if !installed || opts.force {
         let mut download = 0;
         for s in &a.sources {
@@ -174,14 +192,25 @@ pub fn fetch(ws: &mut Workspace, ids: &[String], opts: &FetchOptions, ui: &mut d
     let mut out = Vec::new();
     for (a, p) in plans {
         let t0 = Instant::now();
-        let (result, message, downloaded) = match &p {
+        let failed = |e: anyhow::Error| {
+            if crate::cancel::is_cancelled(&e) { ("cancelled".to_string(), None, 0) } else { ("failed".to_string(), Some(format!("{e:#}")), 0) }
+        };
+        let (result, message, downloaded) = if ws.cancel.is_cancelled() && matches!(p, Plan::Install { .. } | Plan::AddFiles { .. }) {
+            ("cancelled".to_string(), None, 0)
+        } else {
+            match &p {
             Plan::Install { replace, .. } => match install(ws, a, *replace, ui) {
-                Ok(n) => ((if *replace { "replaced" } else { "installed" }).to_string(), None, n),
-                Err(e) => ("failed".to_string(), Some(format!("{e:#}")), 0),
+                Ok(n) => {
+                    if opts.drop_archives {
+                        drop_archives(ws, a, ui);
+                    }
+                    ((if *replace { "replaced" } else { "installed" }).to_string(), None, n)
+                }
+                Err(e) => failed(e),
             },
             Plan::AddFiles { files, .. } => match add_files(ws, a, files, ui) {
                 Ok(n) => ("updated".to_string(), Some(format!("{} file(s) added", files.len())), n),
-                Err(e) => ("failed".to_string(), Some(format!("{e:#}")), 0),
+                Err(e) => failed(e),
             },
             Plan::Present => ("present".to_string(), None, 0),
             Plan::TooLarge { download, limit } => (
@@ -195,6 +224,7 @@ pub fn fetch(ws: &mut Workspace, ids: &[String], opts: &FetchOptions, ui: &mut d
                 0,
             ),
             Plan::Manual { .. } | Plan::External { .. } | Plan::NotApplicable => ("skipped".to_string(), None, 0),
+            }
         };
         if let Some(m) = &message {
             ui.line(&format!("  {}: {result}: {m}", a.id));
@@ -286,7 +316,7 @@ fn check_sources(ws: &Workspace, a: &Asset, ui: &mut dyn Ui) -> (String, Option<
                     notes.push(format!("files with problems: {}", bad.join("; ")));
                 }
             }
-            Source::Git(g) => match Git::find().and_then(|git| git.ls_remote(&g.url, Some(g.branch.as_deref().unwrap_or("HEAD")))) {
+            Source::Git(g) => match ws.git().and_then(|git| git.ls_remote(&g.url, Some(g.branch.as_deref().unwrap_or("HEAD")))) {
                 Ok(refs) => {
                     let tip = refs.first().map(|(h, _)| h.as_str());
                     if tip == Some(g.rev.as_str()) {
@@ -338,10 +368,12 @@ fn install(ws: &mut Workspace, a: &Asset, replace: bool, ui: &mut dyn Ui) -> Res
     for (i, s) in a.sources.iter().enumerate() {
         match s {
             Source::Git(g) => {
-                let mut git = Git::find()?;
-                git.show_progress = true;
+                let git = ws.git()?;
                 ui.line(&format!("  {}: cloning {} at {}", a.id, g.url, verify::short(&g.rev)));
-                let head = git.clone_pinned(g, staging.path())?;
+                let label = format!("{} download", a.id);
+                let total = g.download_size.map(|s| s.0);
+                let head = git.clone_pinned_with(g, staging.path(), &mut |n| ui.progress(&label, n, total))?;
+                ui.progress_end();
                 downloaded += g.download_size.map_or(0, |s| s.0);
                 sources.push(LockedSource { kind: "git".into(), url: Some(g.url.clone()), rev: Some(head), verified: String::new(), ..Default::default() });
                 git_used = Some((git, sources.len() - 1));
@@ -371,8 +403,10 @@ fn install(ws: &mut Workspace, a: &Asset, replace: bool, ui: &mut dyn Ui) -> Res
             }
             other => bail!("source {} ({}) cannot be fetched automatically", i + 1, other.type_name()),
         }
+        ws.cancel.check()?;
     }
     let tree = hash_with_progress(staging.path(), ws.threads, &format!("hashing {}", a.id), ui)?;
+    ws.cancel.check()?;
     if let Some((git, idx)) = &git_used {
         let cmp = compare_git(git, staging.path(), &tree)?;
         if !(cmp.missing.is_empty() && cmp.modified.is_empty() && cmp.eol_only.is_empty() && cmp.special.is_empty()) {
@@ -409,8 +443,22 @@ fn install(ws: &mut Workspace, a: &Asset, replace: bool, ui: &mut dyn Ui) -> Res
     Ok(downloaded)
 }
 
+/// Delete the cached archives of an installed asset.
+fn drop_archives(ws: &Workspace, a: &Asset, ui: &mut dyn Ui) {
+    for s in &a.sources {
+        if let Source::Archive(x) = s {
+            let cache = ws.archive_cache(a, x);
+            if cache.is_file()
+                && let Err(e) = fs::remove_file(&cache)
+            {
+                ui.line(&format!("  {}: could not delete the download {}: {e}", a.id, cache.display()));
+            }
+        }
+    }
+}
+
 /// Remove a folder tree, clearing read-only flags (git marks pack files read-only on Windows).
-fn remove_tree(p: &Path) -> Result<()> {
+pub fn remove_tree(p: &Path) -> Result<()> {
     if fs::remove_dir_all(p).is_ok() {
         return Ok(());
     }
@@ -485,7 +533,7 @@ fn download_file(http: &HttpClient, f: &FilesSource, x: &FileSpec, to: &Path, id
 }
 
 /// Every pinned file of files/manual/vendored sources must be in `index` with its checksum.
-fn check_pinned_files(a: &Asset, index: &TreeIndex) -> Result<()> {
+pub(crate) fn check_pinned_files(a: &Asset, index: &TreeIndex) -> Result<()> {
     let mut bad = Vec::new();
     let mut check = |path: String, sha: &str| match index.get(&path) {
         Some(e) if e.sha256.eq_ignore_ascii_case(sha) => {}
@@ -506,7 +554,7 @@ fn check_pinned_files(a: &Asset, index: &TreeIndex) -> Result<()> {
     Ok(())
 }
 
-fn record_lock(ws: &mut Workspace, a: &Asset, index: &TreeIndex, method: LockMethod, sources: Vec<LockedSource>) -> Result<()> {
+pub(crate) fn record_lock(ws: &mut Workspace, a: &Asset, index: &TreeIndex, method: LockMethod, sources: Vec<LockedSource>) -> Result<()> {
     write_index(&ws.lock_path, &a.id, index)?;
     ws.lock.put(LockedAsset {
         id: a.id.clone(),
@@ -606,7 +654,7 @@ fn adopt(ws: &mut Workspace, a: &Asset, ui: &mut dyn Ui) -> Result<(TreeIndex, S
     for s in &a.sources {
         match s {
             Source::Git(g) => {
-                let git = Git::find()?;
+                let git = ws.git()?;
                 let head = git.head(&dir)?;
                 for issue in verify::git_meta_issues(&git, &dir, g)? {
                     let detail = issue.detail.unwrap_or_default();
@@ -776,7 +824,7 @@ pub fn repair(ws: &mut Workspace, id: &str, yes: bool, ui: &mut dyn Ui) -> Resul
         .collect();
     let mut restored = Vec::new();
     if let Some(g) = &git_src {
-        let mut git = Git::find()?;
+        let mut git = ws.git()?;
         git.show_progress = true;
         git.make_byte_exact(&dir)?;
         if sparse_wrong {

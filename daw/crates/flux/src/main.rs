@@ -1,6 +1,11 @@
 //! Flux: an agent-first DAW. Agents drive it over MCP; humans watch and edit in the same window.
 
+// the released build is a windowed program: no console flashes up behind the window (terminals use flux.com)
+#![cfg_attr(all(windows, feature = "dist"), windows_subsystem = "windows")]
+
 mod audio;
+#[cfg(feature = "dist")]
+mod dist;
 mod gui;
 mod mcp;
 mod measure;
@@ -8,7 +13,11 @@ mod midi;
 mod plugins;
 mod state;
 mod stdio;
+mod supported;
 mod tools;
+#[cfg(feature = "dist")]
+#[path = "../shim/window.rs"]
+mod window;
 
 use anyhow::{bail, Context, Result};
 use flux_core::{Project, Session, Source};
@@ -26,10 +35,20 @@ usage:
   flux live FILE OUT.wav [--seconds S] [--from-bar B] [--match-render]
                                      run the live playback engine headless (speed + sound check)
   flux import SOURCE OUT.flux.json convert a pipeline song or MIDI file into a Flux project
-  flux assets status|verify|fetch|lock|repair|licenses [...]
-                                     instruments, tools and plugins (assets.toml): install from official
-                                     sources, verify installs, license audit and credits (`flux assets help`)
+  flux agents [list|connect|disconnect|show] [...]
+                                     connect AI agents (Claude Code, Codex, Cursor, VS Code...) to Flux over
+                                     MCP (`flux agents help`)
+  flux packs [list|install|remove|import] [...]
+                                     the instrument library: install and remove packs, import the guitar
+                                     rigs downloaded in a browser (`flux packs help`)
+  flux assets status|verify|fetch|import|remove|lock|repair|licenses [...]
+                                     instruments, tools and plugins (assets.toml) one by one: install from
+                                     official sources, verify installs, license audit and credits
+                                     (`flux assets help`)
+  flux setup [--quiet ...]          install or update Flux for this user (`flux setup --help`)
+  flux uninstall [--quiet ...]      remove Flux; songs stay, the instrument library goes only if asked
   flux flac IN.wav OUT.flac [...]   encode FLAC (16-bit, dithered; `flux flac --help`)
+  flux version                      print Flux's version
   flux sfz check|build|untracked|info|ranges|check-paths|samples|tighten|retune|even [...]
                                      SFZ instruments: build and check the wrapper sets (sfz/sets/), describe
                                      and check instruments, make tightened/retuned/evened copies (`flux sfz help`)
@@ -37,7 +56,8 @@ usage:
 environment: FLUX_ROOT (music project root), FLUX_SFIZZ (sfizz.dll); the BATON_* names still work";
 
 fn main() -> std::process::ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    #[allow(unused_mut)]
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
     // VST3 plugins run in child processes of this same executable (`flux plugin-host serve`), so a
     // plugin that crashes or hangs can't take Flux down
     if args.first().map(String::as_str) == Some("plugin-host") {
@@ -51,16 +71,29 @@ fn main() -> std::process::ExitCode {
     if args.first().map(String::as_str) == Some("card-worker") {
         return std::process::ExitCode::from(flux_analysis::card::catalog::worker_main(&args[1..]).clamp(0, 255) as u8);
     }
+    // a downloaded Setup, Setup and Uninstall, the terminal for commands
+    #[cfg(feature = "dist")]
+    if let Some(code) = dist::start(&mut args) {
+        return code;
+    }
     // these report through their exit code: 0 ok, 1 problems found, 2 couldn't run
     match args.first().map(String::as_str) {
         Some("assets") => return flux_assets::cli::assets_main(flux_engine::paths::root(), &args[1..]),
         Some("flac") => return flux_assets::cli::flac_main(&args[1..]),
         Some("sfz") => return flux_sfz::cli::sfz_main(flux_engine::paths::root(), &args[1..]),
+        Some("agents") => return flux_setup::cli::agents_main(&args[1..]),
+        Some("packs") => return flux_setup::cli::packs_main(flux_engine::paths::root(), &args[1..]),
         _ => {}
     }
+    #[cfg(feature = "dist")]
+    let window = window::opens_window(&args);
     match real_main(args) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
+            #[cfg(feature = "dist")]
+            if window {
+                return dist::report(Err(e));
+            }
             eprintln!("flux: {e:#}");
             std::process::ExitCode::FAILURE
         }
@@ -83,6 +116,11 @@ fn real_main(args: Vec<String>) -> Result<()> {
             println!("{HELP}");
             Ok(())
         }
+        Some("version" | "-V" | "--version") => {
+            println!("flux {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        Some("setup" | "uninstall") => bail!("this build of Flux has no Setup: it is part of the released build (`cargo build --release --features dist`)"),
         Some(f) if !f.starts_with('-') && std::path::Path::new(f).exists() => gui::run(Shared::new(open_session(Some(f))?)),
         Some(other) => bail!("unknown command '{other}'\n\n{HELP}"),
     }
@@ -94,7 +132,11 @@ fn open_session(path: Option<&str>) -> Result<Session> {
         s.note(Source::System, "new project".into());
         return Ok(s);
     };
-    let path = flux_engine::paths::resolve(p);
+    // a file named on the command line is where it is; else it is in the library (`songs/...`)
+    let path = match std::path::Path::new(p) {
+        f if f.exists() => std::path::absolute(f).with_context(|| format!("finding {p}"))?,
+        _ => flux_engine::paths::resolve(p),
+    };
     let (project, native) = tools::load_any(&path)?;
     let mut s = Session::new(project);
     if native {

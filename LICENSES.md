@@ -55,8 +55,8 @@ Synth sounds: Vital by Vital Audio (https://vital.audio)
 | **Bottles - The Sound of Air, Glass and Water**, by Botskiz | git bbea692 (2023-04-16) | Creative Commons Zero v1.0 Universal | No | https://github.com/Botskiz/decentsampler-bottles (commit `bbea692`) |
 | **GeneralUser GS**, by S. Christian Collins | 2.0.3 (git 684543d) | GeneralUser GS License v2.0 | No | https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/684543d5e5efaef08d02be50dcda8d552478fa60 |
 | **METAL-GTX**, by Unreal Instruments | UI_METAL-GTX.rar (Google Drive, Last-Modified 2019-07-06) | **Unreal Instruments free-use terms** | No | https://unreal-instruments.wixsite.com/unreal-instruments/metal-gtx |
-| **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**, by jp_is_out_of_tune | TONE3000 tone 32868 (5 captures, a2) | **TONE3000 T3K license** | No | https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868 (manual download); our download note |
-| **5150 III full rig (NAM captures)**, by obijuan | TONE3000 tone 30247 (4 captures, a2) | **TONE3000 T3K license** | No | https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247 (manual download); our download note |
+| **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**, by jp_is_out_of_tune | TONE3000 tone 32868 (5 captures, a2) | **TONE3000 T3K license** | No | https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868 (manual download) |
+| **5150 III full rig (NAM captures)**, by obijuan | TONE3000 tone 30247 (4 captures, a2) | **TONE3000 T3K license** | No | https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247 (manual download) |
 | **Spectrasonics Omnisphere 2**, by Spectrasonics | 2 (purchased license) | **Spectrasonics Omnisphere 2 license (purchased)** | No | https://www.spectrasonics.net/products/omnisphere/ |
 | **Vital**, by Vital Audio (Matt Tytel) | 1.0.7 (Vital Basic, free account) | **Vital end user license agreement** | No | https://vital.audio |
 
@@ -71,9 +71,9 @@ Notes:
 - **METAL-GTX**: owner approval: Owner approved these terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the samples are never shipped or shared.
 - **METAL-GTX**: The operation manual is a separate download (METAL-GTX_Manual.rar, 65,636,514 bytes, sha256 d4496bd5533c8e5732cd60c8ed7bcedf6a87b22ccb9e0dd950d45b86ecf6eae5, Drive id 1iAVanIze4j_o2xVRysDHwmv23MmLts7P), cached in instruments/vst/_dl/metal_gtx/.
 - **METAL-GTX**: Fetching from Google Drive: files this large get a virus-scan confirmation page instead of the file, which the fetcher refuses (it never follows HTML). Download it by hand from the author's page into the cache path; `fetch` then checks the SHA-256 and installs from the cache.
-- **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**: SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page.
+- **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**: The T3K terms shown on the capture's page when it was downloaded are quoted in licenses/terms/tone3000-t3k.txt, with what each capture is.
 - **Peavey 5150 + Mesa 4x12 full rig (NAM captures)**: owner approval: Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.
-- **5150 III full rig (NAM captures)**: SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page.
+- **5150 III full rig (NAM captures)**: The T3K terms shown on the capture's page when it was downloaded are quoted in licenses/terms/tone3000-t3k.txt, with what each capture is.
 - **5150 III full rig (NAM captures)**: owner approval: Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.
 - **Spectrasonics Omnisphere 2**: Layered game exports (base / melody / percussion uploaded separately) can expose a part on its own; ask Spectrasonics (info@spectrasonics.net) for written confirmation before shipping adaptive layers that contain it.
 - **Spectrasonics Omnisphere 2**: owner approval: Owner bought the license (Oct 2026) as an explicit exception to the CC0/CC BY rule. Use only inside full mixes or layers mixed with other instruments; never export an Omnisphere part on its own stem or layer; never use it for sound effects.
@@ -97,6 +97,7 @@ None: every asset's license allows commercial use in the game and its text was f
 | Dexed | 1.0.1 | **GNU General Public License v3.0** | https://github.com/asb2m10/dexed/releases/tag/v1.0.1 |
 | AIDA-X | 1.1.0 | **GNU General Public License v3.0** | https://github.com/AidaDSP/AIDA-X/releases/tag/1.1.0 |
 | sfizz | 1.2.3 | BSD 2-Clause "Simplified" License | https://github.com/sfztools/sfizz/releases/tag/1.2.3 |
+| MinGit (Git for Windows, minimal) | 2.56.0.windows.2 | **GNU General Public License v2.0** | https://github.com/git-for-windows/git/releases/tag/v2.56.0.windows.2 |
 | FluidSynth | 2.6.1 | **GNU Lesser General Public License v2.1 or later** | https://github.com/FluidSynth/fluidsynth/releases/tag/v2.6.1 |
 | pedalboard (Python) | 0.9.26 | **GNU General Public License v3.0** | https://pypi.org/project/pedalboard/0.9.26/ |
 | pretty_midi (Python) | 0.2.11.post0 | MIT License | https://pypi.org/project/pretty-midi/0.2.11.post0/ |
@@ -131,8 +132,8 @@ None: every asset's license allows commercial use in the game and its text was f
 - Bottles - The Sound of Air, Glass and Water: `instruments/decentsampler-bottles/LICENSE` (CC0-1.0)
 - GeneralUser GS: `instruments/GeneralUser-GS/LICENSE.txt` (LicenseRef-GeneralUser-GS-2.0)
 - METAL-GTX: https://unreal-instruments.wixsite.com/unreal-instruments/about (LicenseRef-UnrealInstruments-Free)
-- Peavey 5150 + Mesa 4x12 full rig (NAM captures): `instruments/nam/jp-5150-mesa-fullrig/SOURCE.txt` (LicenseRef-TONE3000-T3K)
-- 5150 III full rig (NAM captures): `instruments/nam/ob1-5150iii-fullrig/SOURCE.txt` (LicenseRef-TONE3000-T3K)
+- Peavey 5150 + Mesa 4x12 full rig (NAM captures): https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868 (LicenseRef-TONE3000-T3K)
+- 5150 III full rig (NAM captures): https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247 (LicenseRef-TONE3000-T3K)
 - Spectrasonics Omnisphere 2: https://support.spectrasonics.net/manual/Omnisphere/legal/all.htm (LicenseRef-Spectrasonics-EULA)
 - Vital: https://vital.audio/eula (LicenseRef-Vital-EULA)
 - Decent Sampler: **not recorded** (LicenseRef-DecentSampler-Freeware)
@@ -144,6 +145,7 @@ None: every asset's license allows commercial use in the game and its text was f
 - Dexed: `plugins/dexed/LICENSE` (GPL-3.0)
 - AIDA-X: https://raw.githubusercontent.com/AidaDSP/AIDA-X/1027cdd1756505fd2ab1a4adb91a394a3af9df57/LICENSE (GPL-3.0)
 - sfizz: https://raw.githubusercontent.com/sfztools/sfizz/4e70dc0bef53b41f2853ed46e26f5911114c92d0/LICENSE (BSD-2-Clause)
+- MinGit (Git for Windows, minimal): `tools/mingit/LICENSE.txt` (GPL-2.0)
 - FluidSynth: https://raw.githubusercontent.com/FluidSynth/fluidsynth/71e85b2ca6bf48641ba7e2261d8f2640ae473773/LICENSE (LGPL-2.1-or-later)
 - pedalboard (Python): https://raw.githubusercontent.com/spotify/pedalboard/05e8f0b3c4851e77485d7e842dc0355b44106471/LICENSE (GPL-3.0)
 - pretty_midi (Python): https://raw.githubusercontent.com/craffel/pretty-midi/646f7d3b938ba8216f9dd5c4d3f23d017fa0d22e/LICENSE.txt (MIT)

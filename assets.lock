@@ -244,8 +244,8 @@ verified = "511 of 759 checked-out files match their git blob ids; 248 differ on
 id = "metal-gtx"
 path = "instruments/unreal.metal-gtx"
 method = "adopt"
-locked_at = "2026-10-09T01:14:27Z"
-spec_sha256 = "2bdafdb0c04b86977c7a0f745bd78b86257ec9adfbcfb2bbb74e98494236c458"
+locked_at = "2026-10-10T01:02:02Z"
+spec_sha256 = "dfeec5327c3af2eeabc90820c05ff8dabca25dfa3b48a48d9912b1a154e38b02"
 files = 3391
 bytes = 1339119178
 tree_sha256 = "0c21caffb47239a5c875ddf7489211eb765c11ab98201514034d2969d1b5e751"
@@ -262,8 +262,8 @@ verified = "archive sha256 checked; 3391 files extracted and checked against the
 id = "nam-jp-5150-mesa"
 path = "instruments/nam/jp-5150-mesa-fullrig"
 method = "adopt"
-locked_at = "2026-10-09T01:14:27Z"
-spec_sha256 = "3daaea447d2625c7a9b211b870d307cde4415ef3c6abbfb9d427af1bc51f56c7"
+locked_at = "2026-10-10T01:02:02Z"
+spec_sha256 = "4ccbf6efafeed0a5e243379aa1bcb7e50bd7273b3be06e82a06825c045768668"
 files = 6
 bytes = 1475763
 tree_sha256 = "e48ef4889be540754461772e35c2c384b21d55dc64605161ac516998884cbd3b"
@@ -274,17 +274,12 @@ url = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868"
 files = 5
 verified = "5 files match their pinned sha256"
 
-[[asset.source]]
-type = "vendored"
-files = 1
-verified = "1 files match their pinned sha256"
-
 [[asset]]
 id = "nam-ob1-5150iii"
 path = "instruments/nam/ob1-5150iii-fullrig"
 method = "adopt"
-locked_at = "2026-10-09T01:14:27Z"
-spec_sha256 = "1dd7d23df8fd33382cb356756d0bd35d61ad9a386cc0fdf079b802c60c10c4af"
+locked_at = "2026-10-10T01:02:02Z"
+spec_sha256 = "c35319e6fa2dbb0774790138dff8ccf1bc1cf6f6b63154b00e695b047dadf5e8"
 files = 5
 bytes = 1175452
 tree_sha256 = "6df028037e4ed1288b9f39e2a9229eb15de6dc668b952cf6b5fe71b0e05241d6"
@@ -294,11 +289,6 @@ type = "manual"
 url = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247"
 files = 4
 verified = "4 files match their pinned sha256"
-
-[[asset.source]]
-type = "vendored"
-files = 1
-verified = "1 files match their pinned sha256"
 
 [[asset]]
 id = "salamander-grand-piano"

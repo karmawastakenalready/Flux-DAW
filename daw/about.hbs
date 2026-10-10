@@ -1,0 +1,25 @@
+THIRD-PARTY NOTICES FOR FLUX
+
+Flux is licensed under the MIT License or the Apache License 2.0, at your option (LICENSE-MIT.txt and
+LICENSE-APACHE.txt). It is built from the open-source Rust crates below, each under its own license; every
+license's text follows, with the crates that use it.
+
+The instruments and plugins Flux downloads come with their own licenses, which Setup writes into the instrument
+library (LICENSES.md and the licenses folder there).
+
+Licenses
+{{#each overview}}
+  {{{name}}}: {{count}} crate{{#if (gt count 1)}}s{{/if}}
+{{/each}}
+{{#each licenses}}
+
+================================================================================
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+  {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

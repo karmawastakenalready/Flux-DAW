@@ -387,7 +387,7 @@ fn game_audio_check(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
         }
         None => {
             let mut found = vec![];
-            let dir = paths::root().join("output");
+            let dir = paths::exports_dir();
             if dir.is_dir() {
                 deliverables(&dir, 0, &mut found)?;
             }

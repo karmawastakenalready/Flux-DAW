@@ -1,0 +1,124 @@
+# Release: builds the released Flux on Windows and puts it on a DRAFT GitHub release as FluxSetup-<version>.exe.
+#
+# The released Flux is one program: flux.exe built with `--features dist` carries Setup, the terminal launcher
+# (flux.com), the library's seed files and the third-party notices. Named FluxSetup-*.exe it runs as Setup, which
+# installs it as flux.exe. Flux's update check only sees published releases, so nothing reaches users until a
+# person reviews the draft and publishes it.
+#
+# Start it by pushing a tag that matches the version in daw/Cargo.toml (git tag v0.2.0 && git push origin v0.2.0),
+# or by hand from the Actions tab: that builds the Setup as a workflow artifact and makes no release.
+#
+# Code signing: add the repository secrets FLUX_SIGNING_CERT (a base64 .pfx) and FLUX_SIGNING_PASSWORD and the Sign
+# step signs the Setup. Without them it is skipped and the Setup is unsigned (Windows SmartScreen warns on first run).
+
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      # the C runtime linked in: Flux runs on a Windows without the Visual C++ redistributable
+      RUSTFLAGS: -C target-feature=+crt-static
+      HAS_CERT: ${{ secrets.FLUX_SIGNING_CERT != '' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Version
+        id: version
+        run: |
+          $meta = cargo metadata --no-deps --format-version 1 --manifest-path daw/Cargo.toml | ConvertFrom-Json
+          $v = ($meta.packages | Where-Object name -eq 'flux').version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "the tag $env:GITHUB_REF_NAME doesn't match Flux's version $v (daw/Cargo.toml)"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Test the installer crates
+        working-directory: daw
+        run: cargo test --locked -p flux-setup -p flux-assets
+
+      - name: Third-party notices
+        working-directory: daw
+        run: |
+          cargo install cargo-about --locked --features cli --version 0.9.2
+          cargo about generate --locked -m crates/flux/Cargo.toml --features dist about.hbs -o "$env:RUNNER_TEMP/notices.txt"
+
+      - name: Build
+        working-directory: daw
+        env:
+          FLUX_NOTICES: ${{ runner.temp }}/notices.txt
+        run: cargo build --locked --release -p flux --features dist
+
+      - name: Name the Setup
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $setup = "out/FluxSetup-${{ steps.version.outputs.version }}.exe"
+          Copy-Item daw/target/release/flux.exe $setup
+          # a smoke test: the Setup knows its version and answers on the console
+          & daw/target/release/flux.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "flux --version failed" }
+
+      - name: Sign
+        if: env.HAS_CERT == 'true'
+        env:
+          CERT: ${{ secrets.FLUX_SIGNING_CERT }}
+          CERT_PASSWORD: ${{ secrets.FLUX_SIGNING_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'flux-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT))
+          try {
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+            & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:CERT_PASSWORD /tr http://timestamp.digicert.com /td SHA256 /d Flux (Get-ChildItem out/*.exe).FullName
+            if ($LASTEXITCODE -ne 0) { throw "signing failed" }
+          } finally {
+            Remove-Item $pfx -Force
+          }
+
+      - name: Checksum
+        run: |
+          Get-ChildItem out/*.exe | ForEach-Object {
+            "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" | Out-File -Encoding ascii -NoNewline "$($_.FullName).sha256"
+          }
+
+      - name: Keep as an artifact
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FluxSetup-${{ steps.version.outputs.version }}
+          path: out/*
+          if-no-files-found: error
+
+      - name: Draft the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $files = (Get-ChildItem out/*).FullName
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # a re-run: replace the files of the draft already made
+            gh release upload $tag $files --clobber
+          } else {
+            gh release create $tag $files --draft --verify-tag --title "Flux ${{ steps.version.outputs.version }}" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "making the draft release failed" }

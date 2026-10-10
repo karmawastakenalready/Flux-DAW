@@ -653,6 +653,74 @@ pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> bool {
     resp.clicked()
 }
 
+/// A checkbox's state: `Mixed` for a group partly chosen.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Check {
+    Off,
+    On,
+    Mixed,
+}
+
+impl Check {
+    pub fn from(on: bool) -> Check {
+        if on { Check::On } else { Check::Off }
+    }
+}
+
+/// A 14 px checkbox with an optional label (20 px high). A disabled box that is on stays faintly lit: something
+/// chosen that can't be unchosen here (an installed library in Setup).
+pub fn checkbox(ui: &mut Ui, state: Check, enabled: bool, label: &str) -> Response {
+    let g = (!label.is_empty()).then(|| ui.painter().layout_no_wrap(label.to_string(), body(12.0), Color32::PLACEHOLDER));
+    let gw = g.as_ref().map_or(0.0, |g| g.size().x + 8.0);
+    let (r, resp) = ui.allocate_exact_size(vec2(14.0 + gw, 20.0), if enabled { Sense::click() } else { Sense::hover() });
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, state == Check::On, label));
+    let hot = enabled && resp.hovered();
+    let p = ui.painter();
+    let b = Rect::from_min_size(Pos2::new(r.left(), (r.center().y - 7.0).round()), vec2(14.0, 14.0));
+    let (fill, stroke) = match (state != Check::Off, enabled) {
+        (true, true) => (if hot { ACCENT_HOVER } else { ACCENT }, Stroke::NONE),
+        (true, false) => (PANEL.lerp_to_gamma(ACCENT, 0.4), Stroke::NONE),
+        (false, true) => (if hot { HOVER } else { FIELD }, Stroke::new(1.0, if hot { TEXT3 } else { LINE_STRONG })),
+        (false, false) => (PANEL, Stroke::new(1.0, LINE)),
+    };
+    p.rect(b, CornerRadius::same(R_CTRL), fill, stroke, StrokeKind::Inside);
+    focus_ring(p, b, &resp);
+    let mark = if enabled { Color32::WHITE } else { TEXT2 };
+    match state {
+        Check::On => paint_icon(p, b.shrink(1.5), Icon::Check, mark),
+        Check::Mixed => {
+            p.line_segment([b.center() - vec2(3.5, 0.0), b.center() + vec2(3.5, 0.0)], Stroke::new(1.5, mark));
+        }
+        Check::Off => {}
+    }
+    if let Some(g) = g {
+        p.galley(Pos2::new(b.right() + 8.0, (r.center().y - g.size().y * 0.5).round()), g, if enabled { TEXT } else { TEXT3 });
+    }
+    resp
+}
+
+/// A thin determinate progress bar (`None`: an indeterminate stripe sweeping across).
+pub fn progress_bar(ui: &mut Ui, fraction: Option<f32>, width: f32) -> Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(width, 4.0), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(r, CornerRadius::same(2), FIELD);
+    match fraction {
+        Some(f) => {
+            let w = r.width() * f.clamp(0.0, 1.0);
+            p.rect_filled(Rect::from_min_size(r.min, vec2(w, r.height())), CornerRadius::same(2), ACCENT);
+        }
+        None => {
+            let t = ui.input(|i| i.time) as f32;
+            let w = r.width() * 0.3;
+            let x = r.left() + (t * 0.6).fract() * (r.width() + w) - w;
+            let bar = Rect::from_min_max(Pos2::new(x.max(r.left()), r.top()), Pos2::new((x + w).min(r.right()), r.bottom()));
+            p.rect_filled(bar, CornerRadius::same(2), ACCENT);
+            ui.ctx().request_repaint();
+        }
+    }
+    resp
+}
+
 // ---------------------------------------------------------------------------------------------
 // tab strips, segmented controls, tags
 
@@ -838,6 +906,11 @@ pub enum Icon {
     Up,
     Down,
     Record,
+    /// A chevron pointing right (a collapsed row).
+    Right,
+    /// An arrow leaving a box: opens a web page.
+    External,
+    Copy,
 }
 
 pub fn paint_icon(p: &Painter, r: Rect, icon: Icon, c: Color32) {
@@ -914,6 +987,18 @@ pub fn paint_icon(p: &Painter, r: Rect, icon: Icon, c: Color32) {
         }
         Icon::Record => {
             p.circle_filled(o, 4.6 * u, c);
+        }
+        Icon::Right => {
+            p.add(Shape::line(vec![pt(6.0, 4.0), pt(10.5, 8.0), pt(6.0, 12.0)], st));
+        }
+        Icon::External => {
+            p.add(Shape::line(vec![pt(7.0, 3.5), pt(3.0, 3.5), pt(3.0, 13.0), pt(12.5, 13.0), pt(12.5, 9.0)], st));
+            p.line_segment([pt(7.5, 8.5), pt(13.0, 3.0)], st);
+            p.add(Shape::line(vec![pt(9.0, 3.0), pt(13.0, 3.0), pt(13.0, 7.0)], st));
+        }
+        Icon::Copy => {
+            p.add(Shape::closed_line(vec![pt(5.5, 5.5), pt(13.0, 5.5), pt(13.0, 14.0), pt(5.5, 14.0)], st));
+            p.add(Shape::line(vec![pt(3.0, 11.0), pt(3.0, 2.5), pt(10.5, 2.5)], st));
         }
         Icon::Up | Icon::Down => {
             let s = if matches!(icon, Icon::Up) { -1.0 } else { 1.0 };

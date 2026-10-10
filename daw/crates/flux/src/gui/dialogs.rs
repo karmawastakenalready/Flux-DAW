@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 pub(super) struct OpenDialog {
-    /// Projects in daw/projects, newest first, with when they were last written.
+    /// Projects in the projects folder, newest first, with when they were last written.
     files: Vec<(PathBuf, Option<SystemTime>)>,
     sel: Option<usize>,
     /// A file typed in by path (wins over the selection).
@@ -90,7 +90,7 @@ fn stem(p: &std::path::Path) -> String {
 }
 
 /// A dialog's title bar: the title and a close button. Returns true when closed.
-fn dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
+pub(super) fn dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::hover());
     ui.painter().text(Pos2::new(r.left() + 16.0, r.center().y), Align2::LEFT_CENTER, title, semibold(13.0), TEXT);
     ui.painter().hline(r.x_range(), px(r.bottom()) - 1.0, Stroke::new(1.0, LINE));
@@ -100,7 +100,7 @@ fn dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
 }
 
 /// A dialog's button row: `left` from the left edge, `right` from the right edge.
-fn dialog_footer(ui: &mut egui::Ui, left: impl FnOnce(&mut egui::Ui), right: impl FnOnce(&mut egui::Ui)) {
+pub(super) fn dialog_footer(ui: &mut egui::Ui, left: impl FnOnce(&mut egui::Ui), right: impl FnOnce(&mut egui::Ui)) {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::hover());
     ui.painter().hline(r.x_range(), px(r.top()), Stroke::new(1.0, LINE));
     let inner = r.shrink2(vec2(16.0, 0.0));
@@ -112,7 +112,7 @@ fn dialog_footer(ui: &mut egui::Ui, left: impl FnOnce(&mut egui::Ui), right: imp
     right(&mut ru);
 }
 
-fn modal(id: &str) -> egui::Modal {
+pub(super) fn modal(id: &str) -> egui::Modal {
     egui::Modal::new(Id::new(id)).frame(dialog_frame()).backdrop_color(Color32::from_black_alpha(130))
 }
 
@@ -127,6 +127,7 @@ impl Gui {
         if self.about {
             self.about = self.about_dialog(ctx);
         }
+        self.library_window(ctx, st.session.is_dirty());
         self.auto_picker(ctx, st, act);
     }
 
@@ -185,7 +186,8 @@ impl Gui {
             let mut go = false;
             egui::Frame::new().inner_margin(Margin { left: 16, right: 16, top: 12, bottom: 16 }).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
-                ui.label(RichText::new("Projects in daw/projects, newest first").font(body(11.5)).color(TEXT2));
+                let dir = flux_engine::paths::portable(&flux_engine::paths::projects_dir());
+                ui.label(RichText::new(format!("Projects in {dir}, newest first")).font(body(11.5)).color(TEXT2));
                 let list = egui::Frame::new().fill(FIELD).stroke(Stroke::new(1.0, LINE)).corner_radius(R_CTRL).inner_margin(Margin::same(1));
                 list.show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -241,7 +243,7 @@ impl Gui {
                 });
                 ui.add_space(10.0);
                 ui.label(RichText::new("Or open a file by path: a .flux.json project, a pipeline song .json or a .mid file").font(body(11.5)).color(TEXT2));
-                let field = ui.add(text_field(&mut d.path, ui.available_width(), "daw/projects/my_song.flux.json").font(mono(11.5)));
+                let field = ui.add(text_field(&mut d.path, ui.available_width(), &format!("{dir}/my_song.flux.json")).font(mono(11.5)));
                 if field.changed() {
                     d.error = None;
                 }

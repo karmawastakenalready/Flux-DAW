@@ -55,7 +55,52 @@ tracks behind masking, buried parts, mud, harshness, reverb smear and mono loss;
 with a reference track (keep them in refs/) at equal loudness; spectrogram draws the master, the dry mix, tracks or \
 files; game_audio_check judges all the game's exported music together (loudness target, peaks, loop seams, layer \
 sums, file size); instrument_card measures an SFZ (range, levels, tuning, attack) before you choose it. Looped \
-projects render as seamless loops (seam_error_db should be below -60).";
+projects render as seamless loops (seam_error_db should be below -60).
+
+Not every instrument Flux supports is installed on every computer: list_instruments and plugins scan also list \
+what is missing here (`not_installed`) and how the user gets it. Downloading is the user's call: suggest it when a \
+song would gain from it, with its size. The flux://library resource lists every pack.";
+
+/// The guide resource and prompt: the instructions, and where to find more.
+fn guide() -> String {
+    format!(
+        "# Using Flux\n\n{INSTRUCTIONS}\n\n## More\n\nEvery tool's description in tools/list says what it takes and returns. The \
+flux://library resource lists the instrument library's packs, what is installed, and how the user gets the rest. Projects are \
+.flux.json files; renders and exports go to the exports folder (export says where)."
+    )
+}
+
+const GUIDE_URI: &str = "flux://guide";
+const LIBRARY_URI: &str = "flux://library";
+
+fn resources() -> Value {
+    json!([
+        {"uri": GUIDE_URI, "name": "guide", "title": "Using Flux", "description": "How to drive Flux: workflow, time, instruments, mixing, measuring", "mimeType": "text/markdown"},
+        {"uri": LIBRARY_URI, "name": "library", "title": "Instrument library", "description": "The instrument library's packs and plugins: what is installed here, and how the user gets the rest", "mimeType": "application/json"},
+    ])
+}
+
+fn read_resource(params: &Value) -> Result<Value, (i64, String)> {
+    let uri = params["uri"].as_str().unwrap_or("");
+    let (mime, text) = match uri {
+        GUIDE_URI => ("text/markdown", guide()),
+        LIBRARY_URI => ("application/json", serde_json::to_string_pretty(&crate::supported::library_json(&crate::supported::packs())).unwrap_or_default()),
+        // -32002: resource not found
+        _ => return Err((-32002, format!("no resource {uri:?} (resources/list shows them)"))),
+    };
+    Ok(json!({"contents": [{"uri": uri, "mimeType": mime, "text": text}]}))
+}
+
+fn prompts() -> Value {
+    json!([{"name": "guide", "title": "Flux guide", "description": "Put Flux's guide into the conversation (for clients that don't show the server's instructions)"}])
+}
+
+fn get_prompt(params: &Value) -> Result<Value, (i64, String)> {
+    match params["name"].as_str().unwrap_or("") {
+        "guide" => Ok(json!({"description": "Flux guide", "messages": [{"role": "user", "content": {"type": "text", "text": guide()}}]})),
+        n => Err((-32602, format!("no prompt {n:?} (prompts/list shows them)"))),
+    }
+}
 
 pub fn serve(shared: Arc<Shared>, mut out: std::fs::File) {
     let stdin = std::io::stdin();
@@ -96,9 +141,11 @@ fn handle(shared: &Arc<Shared>, msg: Value) -> Option<Value> {
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools": tools::list()})),
         "tools/call" => Ok(tools::call(shared, &params)),
-        "resources/list" => Ok(json!({"resources": []})),
+        "resources/list" => Ok(json!({"resources": resources()})),
+        "resources/read" => read_resource(&params),
         "resources/templates/list" => Ok(json!({"resourceTemplates": []})),
-        "prompts/list" => Ok(json!({"prompts": []})),
+        "prompts/list" => Ok(json!({"prompts": prompts()})),
+        "prompts/get" => get_prompt(&params),
         m if m.starts_with("notifications/") => return None,
         m => Err((-32601, format!("method not found: {m}"))),
     };
@@ -121,8 +168,37 @@ fn initialize(shared: &Arc<Shared>, params: &Value) -> Value {
     }
     json!({
         "protocolVersion": version,
-        "capabilities": {"tools": {"listChanged": false}},
+        "capabilities": {"tools": {"listChanged": false}, "resources": {}, "prompts": {}},
         "serverInfo": {"name": "flux", "title": "Flux DAW", "version": env!("CARGO_PKG_VERSION")},
         "instructions": INSTRUCTIONS,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_core::{Project, Session};
+
+    fn ask(method: &str, params: Value) -> Value {
+        let sh = Shared::new(Session::new(Project::new("Test", 120.0, 8)));
+        handle(&sh, json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})).unwrap()
+    }
+
+    #[test]
+    fn the_guide_is_a_resource_and_a_prompt() {
+        let caps = &ask("initialize", json!({"protocolVersion": "2025-06-18"}))["result"]["capabilities"];
+        assert!(caps["resources"].is_object() && caps["prompts"].is_object());
+        let list = ask("resources/list", json!({}));
+        let uris: Vec<&str> = list["result"]["resources"].as_array().unwrap().iter().map(|r| r["uri"].as_str().unwrap()).collect();
+        assert_eq!(uris, ["flux://guide", "flux://library"]);
+        let read = ask("resources/read", json!({"uri": "flux://guide"}));
+        let text = read["result"]["contents"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("# Using Flux") && text.contains("not_installed"), "{text}");
+        assert_eq!(ask("resources/read", json!({"uri": "flux://nope"}))["error"]["code"], -32002);
+        let prompts = ask("prompts/list", json!({}));
+        assert_eq!(prompts["result"]["prompts"][0]["name"], "guide");
+        let p = ask("prompts/get", json!({"name": "guide"}));
+        assert_eq!(p["result"]["messages"][0]["content"]["text"].as_str(), Some(text));
+        assert_eq!(ask("prompts/get", json!({"name": "nope"}))["error"]["code"], -32602);
+    }
 }

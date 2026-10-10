@@ -1,6 +1,8 @@
 //! The project an asset command works on: root folder, manifest, lock file, and how to talk to the user.
 
+use crate::cancel::Cancel;
 use crate::fsutil;
+use crate::git::Git;
 use crate::http::HttpConfig;
 use crate::lock::Lock;
 use crate::manifest::{self, ArchiveSource, Asset, Loaded, Source};
@@ -122,6 +124,8 @@ pub struct Workspace {
     pub threads: usize,
     /// The standard folders assets installed by another tool are looked for in.
     pub places: Places,
+    /// Raised to stop a running fetch (downloads, clones and installs check it); shared with `http`.
+    pub cancel: Cancel,
 }
 
 impl Workspace {
@@ -138,6 +142,7 @@ impl Workspace {
         let lock = Lock::load(&lock_path)?;
         let mut http = HttpConfig::new(loaded.manifest.policy.allowed_hosts.clone());
         http.allow_loopback_http = loaded.allow_local_urls;
+        let cancel = http.cancel.clone();
         Ok(Self {
             root: root.to_path_buf(),
             manifest_path,
@@ -147,7 +152,16 @@ impl Workspace {
             http,
             threads: crate::hash::default_threads(),
             places: Places::from_env(),
+            cancel,
         })
+    }
+
+    /// The git to use: `FLUX_GIT`, git on PATH, else the copy installed with Flux (the `mingit` asset). It stops
+    /// when [`Workspace::cancel`] is raised.
+    pub fn git(&self) -> Result<Git> {
+        let mut g = Git::find_in(&self.root)?;
+        g.cancel = self.cancel.clone();
+        Ok(g)
     }
 
     /// Absolute install folder of an asset.

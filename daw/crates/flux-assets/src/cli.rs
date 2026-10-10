@@ -1,4 +1,4 @@
-//! Command-line front end: `flux assets status|fetch|verify|lock|repair|licenses` and `flux flac`.
+//! Command-line front end: `flux assets status|fetch|import|remove|verify|lock|repair|licenses` and `flux flac`.
 //!
 //! [`assets_main`] and [`flac_main`] are what the `flux` binary calls; [`run_assets`] is the same with an
 //! injectable [`Ui`] and an exit code instead of printing errors, for tests and embedding.
@@ -11,9 +11,11 @@ use crate::credits;
 use crate::fetch::{self, FetchOptions};
 use crate::flac::{self, BitDepth, Dither, FlacOptions};
 use crate::fsutil;
+use crate::import;
 use crate::license::Scope;
 use crate::lock::spec_digest;
 use crate::manifest::Asset;
+use crate::remove::{self, RemoveOptions};
 use crate::usage::{self, Usage};
 use crate::verify::{self, IssueKind, State, VerifyOptions};
 use crate::workspace::{ConsoleUi, OpenOptions, Ui, Workspace};
@@ -32,6 +34,11 @@ Commands:
   verify   [ID...] [--quick]    re-hash installs and compare them with their sources and the lock
   fetch    ID... | --all        install from the official sources pinned in assets.toml
            [--yes] [--dry-run [--check-urls]] [--force] [--max-size SIZE]
+  import   [ID...] [--from PATH]... [--dry-run]
+                                install what was downloaded by hand (sign-in pages, Google Drive): finds the
+                                files by size and checksum in PATH (default: Downloads), loose or in zips
+  remove   ID... [--yes] [--keep-downloads]
+                                delete installs (and their downloaded archives) and their lock entries
   lock     [ID...]              check existing installs against their sources and record them in assets.lock
   repair   ID [--yes]           restore drifted files (git line endings, edits, deletions; pinned files)
   licenses [--out FILE] [--credits FILE] [--check FILE] [--texts DIR] [--print] [--no-usage]
@@ -186,6 +193,8 @@ fn parse_command(args: &[String], ui: &mut dyn Ui) -> Result<Result<(String, Arg
         "status" => (&["no-usage"], &[]),
         "verify" => (&["quick"], &[]),
         "fetch" => (&["all", "yes", "dry-run", "check-urls", "force"], &["max-size"]),
+        "import" => (&["dry-run"], &["from"]),
+        "remove" => (&["yes", "keep-downloads"], &[]),
         "lock" => (&[], &[]),
         "repair" => (&["yes"], &[]),
         "licenses" => (&["print", "no-usage"], &["out", "credits", "check", "texts"]),
@@ -205,6 +214,8 @@ fn dispatch(ws: &mut Workspace, cmd: &str, a: &Args, ui: &mut dyn Ui) -> Result<
         "status" => cmd_status(ws, a, json, ui),
         "verify" => cmd_verify(ws, a, json, ui),
         "fetch" => cmd_fetch(ws, a, json, ui),
+        "import" => cmd_import(ws, a, json, ui),
+        "remove" => cmd_remove(ws, a, json, ui),
         "lock" => cmd_lock(ws, a, json, ui),
         "repair" => cmd_repair(ws, a, json, ui),
         "licenses" => cmd_licenses(ws, a, json, ui),
@@ -437,6 +448,7 @@ fn cmd_fetch(ws: &mut Workspace, a: &Args, json: bool, ui: &mut dyn Ui) -> Resul
         dry_run: a.flag("dry-run"),
         check_urls: a.flag("check-urls"),
         force: a.flag("force"),
+        drop_archives: false,
     };
     if opts.check_urls && !opts.dry_run {
         bail!("--check-urls only works with --dry-run");
@@ -458,6 +470,89 @@ fn cmd_fetch(ws: &mut Workspace, a: &Args, json: bool, ui: &mut dyn Ui) -> Resul
         ui.line(&format!("Summary: {}; downloaded {}", parts.join(", "), fsutil::fmt_bytes(dl)));
     }
     Ok(u8::from(bad))
+}
+
+fn cmd_import(ws: &mut Workspace, a: &Args, json: bool, ui: &mut dyn Ui) -> Result<u8> {
+    let places: Vec<PathBuf> = match a.opts.get("from") {
+        Some(v) => v.iter().map(PathBuf::from).collect(),
+        None => {
+            let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).context("no home folder; pass --from")?;
+            vec![PathBuf::from(home).join("Downloads")]
+        }
+    };
+    let wanted = import::wanted(ws, &a.pos)?;
+    if wanted.is_empty() {
+        if json {
+            print_json(&import::ImportReport::default())?;
+        } else {
+            ui.line("Nothing to import: every asset downloaded by hand is installed (or its archive is cached).");
+        }
+        return Ok(0);
+    }
+    let cancel = ws.cancel.clone();
+    let found = import::search(&wanted, &places, &cancel, ui)?;
+    if a.flag("dry-run") {
+        if json {
+            print_json(&found)?;
+        } else {
+            for w in &wanted {
+                match found.iter().find(|f| f.wanted.target == w.target) {
+                    Some(f) => ui.line(&format!("{:<20} {:<28} found: {}", w.asset, w.name, f.origin.describe())),
+                    None => ui.line(&format!("{:<20} {:<28} not found; download it from {}", w.asset, w.name, w.page)),
+                }
+            }
+        }
+        return Ok(u8::from(found.len() < wanted.len()));
+    }
+    let r = import::import(ws, &found, &FetchOptions::default(), ui)?;
+    if json {
+        print_json(&r)?;
+    } else {
+        for id in &r.installed {
+            ui.line(&format!("{id}: installed"));
+        }
+        for o in &r.fetched {
+            ui.line(&format!("{}: {}{}", o.id, o.result, o.message.as_ref().map_or(String::new(), |m| format!(": {m}"))));
+        }
+        for (id, why) in &r.failed {
+            ui.line(&format!("{id}: failed: {why}"));
+        }
+        let mut pending: BTreeMap<&str, (Vec<&str>, &str)> = BTreeMap::new();
+        for w in wanted.iter().filter(|w| !found.iter().any(|f| f.wanted.target == w.target)) {
+            let e = pending.entry(w.asset.as_str()).or_insert((vec![], w.page.as_str()));
+            e.0.push(w.name.as_str());
+        }
+        for (id, (files, page)) in &pending {
+            ui.line(&format!("{id}: still needs {} from {page}", files.join(", ")));
+        }
+    }
+    let bad = !r.failed.is_empty() || r.fetched.iter().any(|o| !matches!(o.result.as_str(), "installed" | "present" | "replaced"));
+    Ok(u8::from(bad || found.len() < wanted.len()))
+}
+
+fn cmd_remove(ws: &mut Workspace, a: &Args, json: bool, ui: &mut dyn Ui) -> Result<u8> {
+    if a.pos.is_empty() {
+        bail!("name the assets to remove");
+    }
+    let opts = RemoveOptions { keep_downloads: a.flag("keep-downloads") };
+    if !a.flag("yes") {
+        if json {
+            bail!("--json cannot ask for confirmation; add --yes");
+        }
+        if !ui.confirm(&format!("Delete {} and the files Flux downloaded for them?", a.pos.join(", "))) {
+            bail!("cancelled; nothing was removed");
+        }
+    }
+    let out = remove::remove(ws, &a.pos, &opts, ui)?;
+    if json {
+        print_json(&out)?;
+    } else {
+        for o in &out {
+            let msg = o.message.as_ref().map_or(String::new(), |m| format!(": {m}"));
+            ui.line(&format!("{}: {}{msg} ({} freed)", o.id, o.result, fsutil::fmt_bytes(o.freed)));
+        }
+    }
+    Ok(u8::from(out.iter().any(|o| o.message.is_some() && o.result == "removed")))
 }
 
 fn cmd_lock(ws: &mut Workspace, a: &Args, json: bool, ui: &mut dyn Ui) -> Result<u8> {

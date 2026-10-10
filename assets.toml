@@ -786,6 +786,7 @@ sha256 = "c5756f95fcc30ac680f6034bb2e54c636e67fd0b53b1d40babada7257e782e73"
 size = 1343285011
 format = "rar"
 cache = "instruments/vst/_dl/metal_gtx/METAL-GTX.bin"
+by_hand = true
 # Two documentation files in the archive have Shift-JIS names the system bsdtar cannot decode (plus their folders).
 skipped_entries = 4
 
@@ -799,7 +800,8 @@ version = "TONE3000 tone 32868 (5 captures, a2)"
 authors = ["jp_is_out_of_tune"]
 homepage = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868"
 description = "Amp captures for the METAL-GTX rigs (sfz/rigs)"
-license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868", approved = 'Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.', note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
+license = { id = "LicenseRef-TONE3000-T3K", text_url = "https://www.tone3000.com/tones/full-rig-peavey-5150-mesa-4x12-32868", approved = 'Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.', note = "The T3K terms shown on the capture's page when it was downloaded are quoted in licenses/terms/tone3000-t3k.txt, with what each capture is." }
+ignore = ["SOURCE.txt"]
 credit = { role = "Amp captures", text = "Peavey 5150 full rig captures by jp_is_out_of_tune (TONE3000)", required = false }
 
 [[asset.source]]
@@ -832,15 +834,6 @@ path = "sjjldv8e8k_a2.nam"
 sha256 = "8e78f00d38843c074cbb5055f81f69d445e72d8685c8bd4ba87b5e7585251631"
 size = 294995
 
-[[asset.source]]
-type = "vendored"
-origin = "our download note"
-
-[[asset.source.file]]
-path = "SOURCE.txt"
-sha256 = "139191bb3907c51feaa78616d290a9efb4a9a6f8c4da43e34014a707e5dec5c4"
-size = 486
-
 [[asset]]
 id = "nam-ob1-5150iii"
 name = "5150 III full rig (NAM captures)"
@@ -851,7 +844,8 @@ version = "TONE3000 tone 30247 (4 captures, a2)"
 authors = ["obijuan"]
 homepage = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247"
 description = "Amp captures for the METAL-GTX rigs (sfz/rigs)"
-license = { id = "LicenseRef-TONE3000-T3K", file = "SOURCE.txt", text_url = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247", approved = 'Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.', note = "SOURCE.txt is our note, written at download time, quoting the T3K terms shown on the capture's page." }
+license = { id = "LicenseRef-TONE3000-T3K", text_url = "https://www.tone3000.com/tones/ob1-5150-iii-full-rig-805-fortin-33-precision-drive-tc-spark-30247", approved = 'Owner approved the T3K terms for the music project ("yes", 2026-10-09, asked about METAL-GTX, nam-jp-5150-mesa and nam-ob1-5150iii). Only rendered audio leaves the project; the .nam capture files are never shipped or shared.', note = "The T3K terms shown on the capture's page when it was downloaded are quoted in licenses/terms/tone3000-t3k.txt, with what each capture is." }
+ignore = ["SOURCE.txt"]
 credit = { role = "Amp captures", text = "5150 III full rig captures by obijuan (TONE3000)", required = false }
 
 [[asset.source]]
@@ -878,15 +872,6 @@ size = 294367
 path = "zqzege5008p_a2.nam"
 sha256 = "70c708db77d0cf581bd6f1d3be9b7e0202cf00698e0e19e0b554f51db5d406ac"
 size = 293459
-
-[[asset.source]]
-type = "vendored"
-origin = "our download note"
-
-[[asset.source.file]]
-path = "SOURCE.txt"
-sha256 = "fa4d368223d6c7864d1dc8e301b796dda52041314661033a1c8646590e68f215"
-size = 329
 
 [[asset]]
 id = "omnisphere"
@@ -1115,6 +1100,28 @@ format = "zip"
 cache = "tools/_dl/sfizz.zip"
 
 [[asset]]
+id = "mingit"
+name = "MinGit (Git for Windows, minimal)"
+kind = "tool"
+scope = "tool"
+path = "tools/mingit"
+version = "2.56.0.windows.2"
+authors = ["The Git for Windows contributors"]
+homepage = "https://gitforwindows.org/"
+description = "Git for installing the libraries that come from git repositories on computers without Git; Flux runs tools/mingit/cmd/git.exe when git is not on PATH"
+optional = true
+platforms = ["windows"]
+license = { id = "GPL-2.0", file = "LICENSE.txt", note = "Git and the libraries MinGit bundles (their licenses are in ucrt64/share/licenses) are separate programs Flux runs; nothing of them is linked into Flux or shipped in a game." }
+
+[[asset.source]]
+type = "archive"
+url = "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip"
+page = "https://github.com/git-for-windows/git/releases/tag/v2.56.0.windows.2"
+sha256 = "da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be"
+size = 39806486
+format = "zip"
+
+[[asset]]
 id = "fluidsynth"
 name = "FluidSynth"
 kind = "tool"
@@ -1300,3 +1307,137 @@ size = 273860
 path = "JetBrainsMono-OFL.txt"
 sha256 = "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
 size = 4399
+
+# ---------------------------------------------------------------------------------------------------------------
+# Packs: what Setup and Flux's Library window offer. Assets in no pack (test plugins, the retired Python
+# pipeline, the UI fonts) are for developers only. Selections are the quick choices; "Everything" is every pack.
+# ---------------------------------------------------------------------------------------------------------------
+
+[[pack]]
+id = "engine"
+name = "Flux engine"
+description = "sfizz, the sampler Flux plays every SFZ instrument with."
+section = "core"
+assets = ["sfizz"]
+
+[[pack]]
+id = "piano"
+name = "Piano"
+description = "Salamander Grand Piano: a Yamaha C5 concert grand, sampled note by note at 16 velocities."
+assets = ["salamander-grand-piano"]
+
+[[pack]]
+id = "orchestra"
+name = "Orchestra"
+description = "Strings, woodwinds, brass, organ and orchestral percussion (Versilian Chamber Orchestra 2), and a solo cello."
+assets = ["vsco-2-ce", "karoryfer-bigcat-cello"]
+
+[[pack]]
+id = "drums"
+name = "Drums & percussion"
+description = "A jazz drum kit with kick, snare and overhead microphones, and Sonic Pi's drum, loop and ambient one-shots."
+assets = ["virtuosity-drums", "sonic-pi-samples"]
+
+[[pack]]
+id = "folk"
+name = "Folk & early music"
+description = "Folk harp, strumstick, psaltery, recorders and hand drums, a medieval lyre, a Hungarian zither and a plucked bass tagelharpa."
+assets = ["vcsl", "cithara-barbarica", "hungarian-zither", "karoryfer-horse-pulse"]
+
+[[pack]]
+id = "guitars"
+name = "Guitars & bass"
+description = "A Hofner Club electric guitar and a Squier Jazz Bass, recorded direct."
+assets = ["karoryfer-black-and-green-guitars", "karoryfer-growlybass"]
+
+[[pack]]
+id = "synths"
+name = "Synths & textures"
+description = "Analog synth sounds sampled from a transistor organ, organ, pad and pluck synths, and pads blown on water-filled bottles (played by Decent Sampler)."
+assets = ["karoryfer-caveman-cosmonaut", "karoryfer-cowsynth", "decentsampler-bottles"]
+needs = ["decent-sampler"]
+
+[[pack]]
+id = "voice"
+name = "Voice"
+description = "A sung legato vowel for choir-like lines."
+assets = ["legato-vocal-tutorial"]
+
+[[pack]]
+id = "metal"
+name = "Metal guitar rigs"
+description = "6- and 8-string metal guitar samples played through captured Peavey 5150 amp rigs. Downloaded in your browser: METAL-GTX from its author's Google Drive, the amp captures from TONE3000 (free account)."
+assets = ["metal-gtx", "nam-jp-5150-mesa", "nam-ob1-5150iii"]
+
+[[pack]]
+id = "surge-xt"
+name = "Surge XT"
+description = "A free, open-source hybrid synth with a large factory patch library."
+section = "plugins"
+assets = ["surge-xt"]
+
+[[pack]]
+id = "dexed"
+name = "Dexed"
+description = "A free, open-source FM synth modelled on the Yamaha DX7."
+section = "plugins"
+assets = ["dexed"]
+
+[[pack]]
+id = "vital"
+name = "Vital"
+description = "A wavetable synth; Flux loads its preset banks itself. Install it from vital.audio (free account)."
+section = "plugins"
+assets = ["vital"]
+
+[[pack]]
+id = "decent-sampler"
+name = "Decent Sampler"
+description = "A free sample player; Flux plays Decent Sampler libraries such as Bottles through it."
+section = "plugins"
+assets = ["decent-sampler"]
+
+[[pack]]
+id = "valhalla-supermassive"
+name = "Valhalla Supermassive"
+description = "A free reverb and delay; new Flux projects use it as their reverb."
+section = "plugins"
+assets = ["valhalla-supermassive"]
+
+[[pack]]
+id = "izotope-vinyl"
+name = "iZotope Vinyl"
+description = "A free vinyl and lo-fi effect."
+section = "plugins"
+assets = ["izotope-vinyl"]
+
+[[pack]]
+id = "stl-ignite-emissary"
+name = "STL Ignite Emissary"
+description = "A free tube guitar preamp, an impulse-response loader (NadIR) and cabinet impulse responses."
+section = "plugins"
+assets = ["stl-ignite-emissary"]
+
+[[selection]]
+id = "minimal"
+name = "Minimal"
+description = "A piano and drum one-shots: enough to try Flux."
+assets = ["salamander-grand-piano", "sonic-pi-samples"]
+
+[[selection]]
+id = "recommended"
+name = "Recommended"
+description = "Piano, orchestra, drums, folk instruments, guitar, bass, synths and Surge XT."
+assets = [
+    "salamander-grand-piano",
+    "vsco-2-ce",
+    "karoryfer-bigcat-cello",
+    "virtuosity-drums",
+    "sonic-pi-samples",
+    "vcsl",
+    "karoryfer-black-and-green-guitars",
+    "karoryfer-growlybass",
+    "karoryfer-caveman-cosmonaut",
+    "karoryfer-cowsynth",
+    "surge-xt",
+]

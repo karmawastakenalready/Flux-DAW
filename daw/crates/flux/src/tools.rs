@@ -335,7 +335,7 @@ project goes through here: tracks, instruments, notes, CCs, automation, tempo, s
             "key": {"type": "string"}}), &["name", "bpm", "bars"]),
         tool("open", "Open a Flux project (.flux.json), import a pipeline song (its <title>.json beside the .mid and stems/) or a MIDI file (.mid).",
             json!({"path": {"type": "string"}}), &["path"]),
-        tool("save", "Save the project (default: where it was opened, else daw/projects/<name>.flux.json).", json!({"path": {"type": "string"}}), &[]),
+        tool("save", "Save the project (default: where it was opened, else <name>.flux.json in the projects folder).", json!({"path": {"type": "string"}}), &[]),
         tool("list_instruments", "Find instruments on disk: SFZ programs (instruments/, build/sfz/, sfz/), VST3 plugins and guitar/bass rigs \
 (sfz/rigs/*.rig.json: a sampled guitar or bass into amp captures and cabinets; play one by giving its path as a vst3 instrument). SFZ \
 fragments (files that only work #included by a program) are left out unless programs_only=false. details=true adds each SFZ's regions, \
@@ -524,7 +524,7 @@ pub(crate) fn rel(p: &Path) -> String {
 
 /// Where a project is saved when it has no path yet.
 pub fn default_project_path(name: &str) -> PathBuf {
-    paths::root().join("daw").join("projects").join(format!("{}.flux.json", slug(name)))
+    paths::projects_dir().join(format!("{}.flux.json", slug(name)))
 }
 
 fn slug(name: &str) -> String {
@@ -1005,9 +1005,9 @@ pub fn is_project_file(p: &Path) -> bool {
     name.ends_with(".flux.json") || name.ends_with(".baton.json")
 }
 
-/// Flux projects in daw/projects, newest first.
+/// Flux projects in the projects folder, newest first.
 pub fn project_files() -> Vec<PathBuf> {
-    let dir = paths::root().join("daw").join("projects");
+    let dir = paths::projects_dir();
     let mut v: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&dir)
         .map(|d| {
             d.flatten()
@@ -1166,6 +1166,13 @@ fn list_instruments(a: &Value) -> Result<Vec<Content>> {
         .collect();
     let mut out = json!({"total": total, "shown": instruments.len(), "instruments": instruments, "seconds": secs(t0),
         "hint": "build/sfz/<set>/ holds the patched wrappers the songs use (dynamics on CC1, keyswitches at 120+; see sfz_sets)"});
+    // libraries Flux supports that this computer lacks (plugins scan lists the plugins)
+    if kind != "vst3" {
+        let missing: Vec<Value> = crate::supported::missing(&crate::supported::packs(), flux_assets::packs::Section::Instruments, &q).into_iter().take(limit).collect();
+        if !missing.is_empty() {
+            out["not_installed"] = json!(missing);
+        }
+    }
     if classes.is_some() {
         out["fragments_hidden"] = json!(hidden);
     }
@@ -1614,7 +1621,7 @@ fn export(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
     }
     let path = match get::<String>(a, "path")? {
         Some(p) => paths::resolve(&p),
-        None => paths::root().join("output").join(slug(&name)).join(format!("{}_flux.{ext}", slug(&name))),
+        None => paths::exports_dir().join(slug(&name)).join(format!("{}_flux.{ext}", slug(&name))),
     };
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
