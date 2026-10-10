@@ -13,7 +13,7 @@
 <p align="center">
   <img alt="Rust" src="https://img.shields.io/badge/engine-Rust-b7410e?style=flat-square&logo=rust">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-native-2f7bf5?style=flat-square">
-  <img alt="MCP server: 28 tools" src="https://img.shields.io/badge/MCP-28%20tools-6e56cf?style=flat-square">
+  <img alt="MCP server: 29 tools" src="https://img.shields.io/badge/MCP-29%20tools-6e56cf?style=flat-square">
   <img alt="Sounds: samples and presets, no AI audio" src="https://img.shields.io/badge/sounds-samples%20%26%20presets%2C%20no%20AI-2f9e44?style=flat-square">
   <img alt="Status: early alpha" src="https://img.shields.io/badge/status-early%20alpha-d69e2e?style=flat-square">
   <a href="#license-and-credits"><img alt="License: MIT or Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-8b949e?style=flat-square"></a>
@@ -55,7 +55,7 @@
     </td>
     <td width="25%" valign="top">
       <h3>🎚️ Mixed and mastered</h3>
-      A channel strip on every track, VST3 inserts, sidechain ducking, a glue compressor, and a master that drives the mix to its loudness target under a true-peak ceiling.
+      A channel strip on every track, group buses and aux sends, VST3 inserts, and a master with glue, multiband compression and a true-peak limiter that drives the mix to its loudness target.
     </td>
     <td width="25%" valign="top">
       <h3>🔁 Loops without a seam</h3>
@@ -86,7 +86,9 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
       <br>
       <sub>The lead's channel strip: a Vital preset playing into Valhalla Supermassive.</sub>
       <h3>A channel strip on every track</h3>
-      Gain, pan and width; low and high cuts at 12 to 48 dB per octave; EQ bands; drive, amp, bitcrush and clip; a gate, a compressor, chorus and delay; mono below a frequency; a sidechain duck keyed from any track; a send to the shared reverb.
+      Gain, pan and width; low and high cuts at 12 to 48 dB per octave; EQ bands (peaks, shelves, notches and a tilt); dynamic EQ and a de-esser; oversampled drive, amp, bitcrush and clip; a gate; a compressor with knee, lookahead, RMS or peak detection, a sidechain high-pass, auto release and a parallel mix; chorus, delay and a room, hall or plate reverb; mono below a frequency; a sidechain duck keyed from any track; a send to the shared reverb.
+      <br><br>
+      Route tracks into group buses for shared processing, or send them to aux returns. Latency from plugins, rigs and lookahead is compensated along every route, live as well as in the render.
       <br><br>
       Any VST3 effect goes before or after the strip. Plugin sounds load from the makers' own preset files, headless: Vital banks, Decent Sampler libraries, Valhalla presets.
     </td>
@@ -97,7 +99,7 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
       <br>
       <sub>The master: a loudness target, a glue compressor, and Supermassive in place of the shared reverb.</sub>
       <h3>Mastered to a number</h3>
-      Set a loudness target and a true-peak ceiling, and every render drives the mix to them (−15 LUFS and −1 dBTP for the game's songs). There's a glue compressor with a threshold relative to the mix, master EQ, a shared reverb whose return can be swapped for plugins, and master inserts.
+      Set a loudness target and a true-peak ceiling, and every render drives the mix to them (−15 LUFS and −1 dBTP for the game's songs) through a two-stage limiter: a soft clip for the sharpest peaks, then a lookahead stage that holds the true peak. Before it come a glue compressor with a threshold relative to the mix, master EQ, a multiband compressor, mono below a frequency and stereo width, a shared reverb whose return can be swapped for plugins, and master inserts. Live playback runs the same chain and, once a render has measured the song, matches it sample for sample.
       <br><br>
       Exports are 16-bit dithered FLAC from a pure-Rust encoder, with per-track stems and layers that sum back to the master.
     </td>
@@ -106,7 +108,7 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
       <br>
       <sub>Every render is measured: loudness, true peak, limiting, the loop seam, loudness per bar and spectral balance.</sub>
       <h3>Measure what you can't hear</h3>
-      An agent can't listen, so Flux measures for it. <code>mix_check</code> finds masking, mud, harshness, smearing and mono problems and names the tracks causing them. <code>reference_match</code> compares the mix with a reference track at equal loudness, <code>spectrogram</code> shows where the energy is over time, and <code>game_audio_check</code> checks a game's whole soundtrack as a set.
+      An agent can't listen, so Flux measures for it. <code>mix_check</code> finds masking, mud, harshness, smearing and mono problems, names the tracks causing them and can apply its fixes. <code>master</code> checks the master as a mastering engineer would, scores it and carries out its moves, presets or a match to a reference. <code>reference_match</code> compares the mix with a reference track at equal loudness, <code>spectrogram</code> shows where the energy is over time, and <code>game_audio_check</code> checks a game's whole soundtrack as a set.
       <br><br>
       Instruments get report cards measured from their samples: playable range, tuning per key in cents, level and brightness. The agent picks instruments that are actually in tune.
     </td>
@@ -120,8 +122,8 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
 <table>
   <tr>
     <td width="33%" valign="top">
-      <h4>🧰 28 MCP tools</h4>
-      get_project · edit · undo · redo · compose · lint · get_notes · new_project · open · save · render · analyze · export · mix_check · reference_match · spectrogram · game_audio_check · instrument_card · probe_instrument · list_instruments · sfz_derive · sfz_sets · plugins · transport · gui · activity · comments · audition
+      <h4>🧰 29 MCP tools</h4>
+      get_project · edit · undo · redo · compose · lint · get_notes · new_project · open · save · render · analyze · export · mix_check · master · reference_match · spectrogram · game_audio_check · instrument_card · probe_instrument · list_instruments · sfz_derive · sfz_sets · plugins · transport · gui · activity · comments · audition
     </td>
     <td width="33%" valign="top">
       <h4>✏️ 31 edit commands</h4>

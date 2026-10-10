@@ -14,7 +14,8 @@ mastering, export). A human may be watching the GUI and editing at the same time
 `activity` with source=human, so check it before overwriting their work. They may also play parts in from a \
 keyboard: while `transport` shows `recording`, their take lands on that track at each pass of the loop.
 
-Workflow: get_project -> edit (a batch of commands; atomic; one undo step) -> render -> analyze -> adjust -> export.
+Workflow: get_project -> edit (a batch of commands; atomic; one undo step) -> render -> analyze -> adjust -> mix \
+(mix_check) -> master -> export.
 
 Composing: compose writes musical material in one call (a melody from notation, chords voiced from a chart, a bass \
 line or arpeggio over the chord track, phrasing, swells and CC/bend curves) as one undo step; re-running an action \
@@ -38,16 +39,32 @@ probe_instrument with render=false describes an SFZ (keys, keyswitches, layers, 
 checks and builds the song wrapper sets in build/sfz/, and sfz_derive writes tightened, retuned or level-evened \
 copies to sfz/derived/ (instruments/ is never changed).
 
-Mixing: set_mixer per track (gain, pan, width, HPF/LPF, EQ, drive, gate, compressor, delay, sidechain duck, reverb \
-send). set_master holds glue compression, EQ, the shared reverb, the loudness target (default -15 LUFS) and the \
-true-peak ceiling (default -1 dBTP). VST3 effects go in insert slots (edit add_insert): on a track (pre or post its \
+Mixing: set_mixer per track (gain, pan, width, HPF/LPF, EQ, drive, gate, compressor, dynamic EQ for a resonance \
+that only bites when loud, de-esser at 5-8 kHz, delay, reverb, sidechain duck, reverb send) and its routing: \
+`output` into a group bus, `sends` to aux returns. edit add_bus makes a bus: route tracks to it for shared EQ and \
+glue, or give it a reverb at mix 1 and send tracks to it for an aux reverb (one space shared by many parts). \
+set_master holds the shared reverb, glue compression, EQ, a multiband compressor, mono below, width, the limiter, \
+the loudness target (default -15 LUFS) and the true-peak ceiling (default -1 dBTP). VST3 effects go in insert slots (edit add_insert): on a track (pre or post its \
 strip), on the master, or on the reverb return (which then replaces the built-in reverb); plugins sets them up (params, \
 factory programs, presets in the plugin's own format such as Valhalla's or Vital's, or its window for the human), \
 latency is compensated, and a failing insert passes audio through with a warning. Automation (edit add_automation) \
 moves a track's volume, pan or reverb send, or any VST3 parameter of its instrument or inserts (or of master and reverb-return \
 inserts), over time: fades, swells, a filter opening, a reverb drying up into a drop; renders and live playback both follow it. \
 The master drives the mix to the target automatically, so balance tracks \
-against each other; limiter_max_gr_db beyond about -4 dB means the mix is too peaky.
+against each other.
+
+Mixing and mastering: balance levels and pans first, then buses and aux returns. mix_check finds what to fix per \
+track, and mix_check apply=true (or apply=[indices]) carries out its fixes as one undo step and checks again; repeat \
+until what is left is taste. Then master checks the master as a mastering engineer would and scores it 0-100 (100: \
+nothing to fix; every lost point is an issue saying why, most with an indexed move): action=preset sets a chain \
+(game_loop is the usual start), apply carries out the moves, auto repeats check and apply until the score stops \
+rising, match EQs toward a reference. Export, then game_audio_check judges the files beside the game's other music. \
+A relative threshold (glue, relative compressors, dynamic EQ, de-esser, multiband) counts from the signal's loud \
+level (95th percentile of its short-term level): -4 means 4 dB under its loud moments, whatever the level; render's \
+summary shows each loud level and threshold. The master runs: reverb return joins -> inserts -> glue -> EQ -> \
+multiband -> mono below and width -> loudness drive and limiter (to the target and ceiling). A master EQ move stops \
+at 6 dB: a region further off belongs in the mix (mix_check's regions name the tracks there). limiter_max_gr_db \
+beyond about -4 dB means the mix is too peaky.
 
 You can't listen, so measure: analyze gives per-section loudness, per-track RMS per section, octave bands and \
 per-bar loudness (dropouts and slams show there), and gui screenshot shows the screen. mix_check names the \
@@ -75,7 +92,7 @@ const LIBRARY_URI: &str = "flux://library";
 
 fn resources() -> Value {
     json!([
-        {"uri": GUIDE_URI, "name": "guide", "title": "Using Flux", "description": "How to drive Flux: workflow, time, instruments, mixing, measuring", "mimeType": "text/markdown"},
+        {"uri": GUIDE_URI, "name": "guide", "title": "Using Flux", "description": "How to drive Flux: workflow, time, instruments, mixing, mastering, measuring", "mimeType": "text/markdown"},
         {"uri": LIBRARY_URI, "name": "library", "title": "Instrument library", "description": "The instrument library's packs and plugins: what is installed here, and how the user gets the rest", "mimeType": "application/json"},
     ])
 }
@@ -200,5 +217,19 @@ mod tests {
         let p = ask("prompts/get", json!({"name": "guide"}));
         assert_eq!(p["result"]["messages"][0]["content"]["text"].as_str(), Some(text));
         assert_eq!(ask("prompts/get", json!({"name": "nope"}))["error"]["code"], -32602);
+        for step in ["mix_check apply=true", "add_bus", "action=preset", "auto", "game_audio_check", "loud level"] {
+            assert!(text.contains(step), "the guide's mixing and mastering workflow mentions {step}");
+        }
+    }
+
+    #[test]
+    fn the_tools_are_listed_once_each_and_counted_in_the_readme() {
+        let list = ask("tools/list", json!({}));
+        let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
+        assert_eq!(unique.len(), names.len(), "{names:?}");
+        assert!(names.contains(&"master") && names.contains(&"mix_check"));
+        let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../README.md")).unwrap();
+        assert!(readme.contains(&format!("MCP server: {} tools", names.len())), "update the tool count in README.md's badge");
     }
 }

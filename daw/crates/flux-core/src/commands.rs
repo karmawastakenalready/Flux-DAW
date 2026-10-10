@@ -114,6 +114,31 @@ pub struct MixerPatch {
     #[serde(default, deserialize_with = "double_option")]
     pub duck: Option<Option<DuckSpec>>,
     pub reverb_send: Option<f64>,
+    /// Replaces the dynamic EQ bands.
+    pub dyn_eq: Option<Vec<DynBand>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub deess: Option<Option<DeEss>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub reverb: Option<Option<ReverbFx>>,
+    /// The bus track this one's output goes to; null = the master.
+    #[serde(default, deserialize_with = "double_option")]
+    pub output: Option<Option<TrackRef>>,
+    /// Replaces the track's sends.
+    pub sends: Option<Vec<SendSpec>>,
+}
+
+/// A send as commands write it: the receiving track by name or id.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SendSpec {
+    pub to: TrackRef,
+    pub level: f64,
+}
+
+/// A track sending to a new bus (`add_bus`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BusSend {
+    pub track: TrackRef,
+    pub level: f64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -126,6 +151,12 @@ pub struct MasterPatch {
     pub reverb: Option<ReverbParams>,
     pub edge_fade_ms: Option<f64>,
     pub tail_s: Option<f64>,
+    /// The whole limiter: settings left out take their defaults.
+    pub limiter: Option<Limiter>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub multiband: Option<Option<Multiband>>,
+    pub mono_below_hz: Option<f64>,
+    pub width: Option<f64>,
 }
 
 /// The two buses that have insert chains (tracks are named by `track`).
@@ -184,6 +215,20 @@ pub enum Command {
     },
     RemoveTrack {
         track: TrackRef,
+    },
+    /// Add a bus: a track without an instrument that `tracks` route their output to (a group, for shared EQ,
+    /// compression and level) and that `sends` send to (an aux return: give it a reverb or a delay at mix 1).
+    /// `mixer` sets its strip.
+    AddBus {
+        name: String,
+        #[serde(default)]
+        tracks: Vec<TrackRef>,
+        #[serde(default)]
+        sends: Vec<BusSend>,
+        #[serde(default)]
+        mixer: Option<MixerPatch>,
+        #[serde(default)]
+        color: Option<[u8; 3]>,
     },
     UpdateTrack {
         track: TrackRef,
@@ -457,6 +502,16 @@ impl Command {
             Command::SetHarmony { chords } => format!("set chord track ({} chords)", chords.len()),
             Command::AddTrack { name, instrument, .. } => format!("add track '{name}' ({})", instr_kind(instrument)),
             Command::RemoveTrack { track } => format!("remove track {track}"),
+            Command::AddBus { name, tracks, sends, .. } => {
+                let mut what = vec![];
+                if !tracks.is_empty() {
+                    what.push(format!("{} routed", tracks.len()));
+                }
+                if !sends.is_empty() {
+                    what.push(format!("{} sending", sends.len()));
+                }
+                if what.is_empty() { format!("add bus '{name}'") } else { format!("add bus '{name}' ({})", what.join(", ")) }
+            }
             Command::UpdateTrack { track, name, instrument, color, layer } => {
                 let mut what = vec![];
                 if let Some(n) = name {
@@ -671,6 +726,104 @@ fn range_str(a: Option<u32>, b: Option<u32>) -> String {
     }
 }
 
+/// The track `from` may route or send to (`what`): another track, and not one whose own output or sends lead back
+/// to `from` (the signal would go round for ever).
+fn route_to(p: &Project, from: u64, to: &TrackRef, what: &str) -> Result<u64> {
+    let i = p.track_index(to).ok_or_else(|| anyhow!("no track {to} to {what} to"))?;
+    let id = p.tracks[i].id;
+    if id == from {
+        bail!("a track can't {what} to itself");
+    }
+    if reaches(p, id, from) {
+        bail!("{to} already feeds this track (through its output or sends): {what}ing to it would make a loop");
+    }
+    Ok(id)
+}
+
+/// Whether the signal of track `from` reaches track `to` through outputs and sends.
+pub fn reaches(p: &Project, from: u64, to: u64) -> bool {
+    let mut seen = vec![from];
+    let mut todo = vec![from];
+    while let Some(id) = todo.pop() {
+        let Some(t) = p.tracks.iter().find(|t| t.id == id) else { continue };
+        for next in t.mixer.output.into_iter().chain(t.mixer.sends.iter().map(|s| s.to)) {
+            if next == to {
+                return true;
+            }
+            if !seen.contains(&next) {
+                seen.push(next);
+                todo.push(next);
+            }
+        }
+    }
+    false
+}
+
+/// A compressor's settings brought into range.
+fn check_comp(c: &Comp) -> Comp {
+    Comp {
+        ratio: c.ratio.max(1.0),
+        attack_ms: c.attack_ms.clamp(0.05, 1000.0),
+        release_ms: c.release_ms.clamp(1.0, 5000.0),
+        knee_db: c.knee_db.clamp(0.0, 24.0),
+        sidechain_hpf_hz: c.sidechain_hpf_hz.clamp(0.0, 1000.0),
+        lookahead_ms: c.lookahead_ms.clamp(0.0, 20.0),
+        mix: c.mix.clamp(0.0, 1.0),
+        ..*c
+    }
+}
+
+fn check_dyn_band(b: &DynBand) -> Result<DynBand> {
+    if !matches!(b.kind, EqKind::Peak | EqKind::LowShelf | EqKind::HighShelf) {
+        bail!("a dynamic EQ band is a peak, low_shelf or high_shelf");
+    }
+    Ok(DynBand {
+        hz: b.hz.clamp(20.0, 20000.0),
+        q: b.q.clamp(0.1, 10.0),
+        ratio: b.ratio.max(1.0),
+        range_db: b.range_db.clamp(-24.0, 0.0),
+        attack_ms: b.attack_ms.clamp(0.1, 500.0),
+        release_ms: b.release_ms.clamp(5.0, 2000.0),
+        ..*b
+    })
+}
+
+fn check_reverb(r: &ReverbParams) -> ReverbParams {
+    ReverbParams {
+        room_size: r.room_size.clamp(0.0, 1.0),
+        damping: r.damping.clamp(0.0, 1.0),
+        predelay_ms: r.predelay_ms.clamp(0.0, 500.0),
+        decay_s: r.decay_s.clamp(0.0, 12.0),
+        width: r.width.clamp(0.0, 1.0),
+        ..*r
+    }
+}
+
+fn check_multiband(mb: &Multiband) -> Result<Multiband> {
+    let x = &mb.crossovers_hz;
+    if x.is_empty() || x.len() > 3 {
+        bail!("a multiband compressor has 1 to 3 crossovers (2 to 4 bands)");
+    }
+    if x.windows(2).any(|w| w[1] <= w[0] * 1.5) || x.iter().any(|&f| !(30.0..=16000.0).contains(&f)) {
+        bail!("crossovers go up from 30 Hz to 16 kHz, each at least half an octave above the last");
+    }
+    if mb.bands.len() != x.len() + 1 {
+        bail!("{} crossovers make {} bands: give one setting per band, low to high", x.len(), x.len() + 1);
+    }
+    let bands = mb
+        .bands
+        .iter()
+        .map(|b| MbBand {
+            ratio: b.ratio.max(1.0),
+            attack_ms: b.attack_ms.clamp(0.1, 1000.0),
+            release_ms: b.release_ms.clamp(5.0, 5000.0),
+            gain_db: b.gain_db.clamp(-12.0, 12.0),
+            ..*b
+        })
+        .collect();
+    Ok(Multiband { crossovers_hz: x.clone(), bands })
+}
+
 fn track_mut<'a>(p: &'a mut Project, r: &TrackRef) -> Result<&'a mut Track> {
     let i = p.track_index(r).ok_or_else(|| anyhow!("no track {r}"))?;
     Ok(&mut p.tracks[i])
@@ -876,8 +1029,32 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
                 if o.mixer.duck.map(|d| d.source_track) == Some(t.id) {
                     o.mixer.duck = None;
                 }
+                // what went to a removed bus goes to the master
+                if o.mixer.output == Some(t.id) {
+                    o.mixer.output = None;
+                }
+                o.mixer.sends.retain(|s| s.to != t.id);
             }
             Ok(json!({"removed": t.name}))
+        }
+        Command::AddBus { name, tracks, sends, mixer, color } => {
+            let added = apply(p, &Command::AddTrack { name: name.clone(), instrument: Instrument::None, color: *color })?;
+            let bus = TrackRef::Id(added["track_id"].as_u64().unwrap_or_default());
+            for t in tracks {
+                apply(p, &Command::SetMixer { track: t.clone(), mixer: MixerPatch { output: Some(Some(bus.clone())), ..Default::default() } })?;
+            }
+            for s in sends {
+                let i = p.track_index(&s.track).ok_or_else(|| anyhow!("no track {}", s.track))?;
+                let mut list: Vec<SendSpec> =
+                    p.tracks[i].mixer.sends.iter().map(|x| SendSpec { to: TrackRef::Id(x.to), level: x.level }).collect();
+                list.retain(|x| x.to != bus);
+                list.push(SendSpec { to: bus.clone(), level: s.level });
+                apply(p, &Command::SetMixer { track: s.track.clone(), mixer: MixerPatch { sends: Some(list), ..Default::default() } })?;
+            }
+            if let Some(m) = mixer {
+                apply(p, &Command::SetMixer { track: bus.clone(), mixer: m.clone() })?;
+            }
+            Ok(json!({"track_id": added["track_id"], "routed": tracks.len(), "sending": sends.len()}))
         }
         Command::UpdateTrack { track, name, instrument, color, layer } => {
             if let Some(n) = name
@@ -940,6 +1117,30 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
                     bail!("a filter slope of {s} dB/octave: it can be 12, 24, 36 or 48");
                 }
             }
+            let me = p.tracks[p.track_index(track).ok_or_else(|| anyhow!("no track {track}"))?].id;
+            let output = match &m.output {
+                Some(Some(r)) => Some(Some(route_to(p, me, r, "output")?)),
+                Some(None) => Some(None),
+                None => None,
+            };
+            let sends = match &m.sends {
+                Some(list) => {
+                    let mut v: Vec<AuxSend> = vec![];
+                    for s in list {
+                        let to = route_to(p, me, &s.to, "send")?;
+                        if v.iter().any(|x| x.to == to) {
+                            bail!("two sends to {}: give each receiving track once", s.to);
+                        }
+                        v.push(AuxSend { to, level: s.level.clamp(0.0, 1.0) });
+                    }
+                    Some(v)
+                }
+                None => None,
+            };
+            let dyn_eq = match &m.dyn_eq {
+                Some(bands) => Some(bands.iter().map(check_dyn_band).collect::<Result<Vec<_>>>()?),
+                None => None,
+            };
             let t = track_mut(p, track)?;
             let x = &mut t.mixer;
             if let Some(v) = m.gain_db {
@@ -997,7 +1198,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
                 x.gate = v;
             }
             if let Some(v) = m.comp {
-                x.comp = v;
+                x.comp = v.map(|c| check_comp(&c));
             }
             if let Some(v) = m.delay {
                 x.delay = v;
@@ -1008,12 +1209,32 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
             if let Some(v) = m.reverb_send {
                 x.reverb_send = v.clamp(0.0, 1.0);
             }
+            if let Some(v) = dyn_eq {
+                x.dyn_eq = v;
+            }
+            if let Some(v) = m.deess {
+                x.deess = v.map(|d| DeEss { hz: d.hz.clamp(1000.0, 16000.0), threshold_db: d.threshold_db, range_db: d.range_db.clamp(-24.0, 0.0) });
+            }
+            if let Some(v) = m.reverb {
+                x.reverb = v.map(|r| ReverbFx { params: check_reverb(&r.params), mix: r.mix.clamp(0.0, 1.0) });
+            }
+            if let Some(v) = output {
+                x.output = v;
+            }
+            if let Some(v) = sends {
+                x.sends = v;
+            }
             Ok(json!({"mixer": t.mixer}))
         }
         Command::SetMaster { master: m } => {
+            let multiband = match &m.multiband {
+                Some(Some(mb)) => Some(Some(check_multiband(mb)?)),
+                Some(None) => Some(None),
+                None => None,
+            };
             let x = &mut p.master;
             if let Some(v) = m.glue {
-                x.glue = v;
+                x.glue = v.map(|c| check_comp(&c));
             }
             if let Some(v) = &m.eq {
                 x.eq = v.clone();
@@ -1025,13 +1246,30 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
                 x.ceiling_dbtp = v.min(0.0);
             }
             if let Some(v) = m.reverb {
-                x.reverb = v;
+                x.reverb = check_reverb(&v);
             }
             if let Some(v) = m.edge_fade_ms {
                 x.edge_fade_ms = v.max(0.0);
             }
             if let Some(v) = m.tail_s {
                 x.tail_s = v.clamp(0.0, 30.0);
+            }
+            if let Some(v) = m.limiter {
+                x.limiter = Limiter {
+                    lookahead_ms: v.lookahead_ms.clamp(0.5, 20.0),
+                    release_ms: v.release_ms.clamp(0.0, 2000.0),
+                    auto_release: v.auto_release,
+                    clip_db: v.clip_db.clamp(0.0, 6.0),
+                };
+            }
+            if let Some(v) = multiband {
+                x.multiband = v;
+            }
+            if let Some(v) = m.mono_below_hz {
+                x.mono_below_hz = v.clamp(0.0, 500.0);
+            }
+            if let Some(v) = m.width {
+                x.width = v.clamp(0.0, 2.0);
             }
             Ok(json!({"master": p.master}))
         }
@@ -1582,6 +1820,22 @@ mod tests {
         assert_eq!(old.tracks[0].mixer.mono_below_hz, 0.0);
         run(&mut p, json!({"op": "set_mixer", "track": "glass", "mixer": {"mono_below_hz": 120}}))?;
         assert_eq!(p.tracks[0].mixer.mono_below_hz, 120.0);
+        Ok(())
+    }
+
+    #[test]
+    fn reverb_settings_left_out_take_their_defaults() -> Result<()> {
+        let mut p = Project::new("t", 120.0, 4);
+        run(&mut p, json!({"op": "add_track", "name": "lead"}))?;
+        run(&mut p, json!({"op": "set_mixer", "track": "lead", "mixer": {"reverb": {"algorithm": "plate", "mix": 0.2}}}))?;
+        let fx = p.tracks[0].mixer.reverb.unwrap();
+        let d = ReverbParams::default();
+        assert_eq!((fx.params.algorithm, fx.params.room_size, fx.params.hpf_hz, fx.mix), (ReverbAlgorithm::Plate, d.room_size, d.hpf_hz, 0.2));
+        run(&mut p, json!({"op": "set_master", "master": {"reverb": {"decay_s": 2.5}}}))?;
+        let r = p.master.reverb;
+        assert_eq!((r.decay_s, r.lpf_hz, r.return_db), (2.5, d.lpf_hz, d.return_db));
+        // left out, the algorithm is still the classic one older projects used
+        assert_eq!(r.algorithm, ReverbAlgorithm::Classic);
         Ok(())
     }
 

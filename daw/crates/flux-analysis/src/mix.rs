@@ -13,17 +13,27 @@
 //! against pink noise and against the song's other sections. Transient smearing compares onset contrast and
 //! the ring after each hit between a dry render and the wet mix at the same onsets; without a dry render the
 //! wet values are reported alone.
+//!
+//! The findings end in [`MixFix`]es: one mixer change per track and region of its settings, ranked, each small
+//! (at most 3 dB) so that applying them, rendering and checking again converges. Collisions cut the part the
+//! band matters less to (or, where it is both parts' main energy, gently cut the one that isn't the lead);
+//! buried parts are raised or given presence; the parts behind mud and harshness are cut where they peak in the
+//! region (harshness that comes in bursts is de-essed) and parts with nothing to say in the low end are
+//! high-passed; the parts that ring after the attacks send less to the reverb (or, ringing without smearing,
+//! less to the delay); and the parts that widen the low end are made mono below 120 Hz.
 
 use crate::audio::AudioRef;
+use crate::matcheq::{q_for_bandwidth, round_hz};
 use crate::meta::{Section, check_sections};
-use crate::num::{hann_periodic, median, plan};
+use crate::num::{hann_periodic, median, percentile, plan};
 use crate::profile::{HARSH_HZ, LOW_END_HZ, LOW_END_MATTERS_DB, MUD_HZ, SPECTRUM_N, onsets, pink_level_db, transient_clarity};
 use crate::reference::StemShare;
 use crate::spectral::{StereoSpectrum, k_weight_power, third_octave_centres, third_octave_edges, third_octave_label};
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
 use rustfft::num_complex::Complex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Frame length of the masking analysis.
 pub const MASK_N: usize = 8192;
@@ -162,7 +172,59 @@ pub struct MixReport {
     pub tone: Vec<SectionTone>,
     pub mono: Vec<SectionMono>,
     pub transients: Vec<SectionTransients>,
+    /// What to change, the most important first (empty without stems: the changes are per track).
+    pub fixes: Vec<MixFix>,
+    /// Who plays in each of the mastering report's tonal regions over the whole song (empty without stems): where
+    /// to look when the master's balance is off by more than the master should fix.
+    pub regions: Vec<RegionStems>,
 }
+
+/// The stems playing most in one of the mastering report's tonal regions (`crate::master`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct RegionStems {
+    pub region: &'static str,
+    pub lo_hz: f64,
+    pub hi_hz: f64,
+    /// Those with at least 10 % of the region's energy (at most three), the biggest share first.
+    pub stems: Vec<StemShare>,
+}
+
+/// A change to one track's mixer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MixChange {
+    /// A peak band on the track's EQ, `db` negative.
+    EqCut { hz: f64, db: f64, q: f64 },
+    /// A peak band on the track's EQ, `db` positive.
+    EqBoost { hz: f64, db: f64, q: f64 },
+    /// The track's high-pass filter (`hpf_hz`).
+    HighPass { hz: f64 },
+    /// Change the track's level by `db`.
+    Gain { db: f64 },
+    /// Multiply the track's reverb send by `scale`.
+    ReverbSend { scale: f64 },
+    /// Multiply the track's delay mix by `scale`.
+    DelayMix { scale: f64 },
+    /// Make the track mono below `hz` (`mono_below_hz`).
+    MonoBelow { hz: f64 },
+    /// The track's de-esser: the band above `hz` turned down by at most `range_db` (negative) while it is loud.
+    DeEss { hz: f64, range_db: f64 },
+}
+
+/// A suggested mixer change for one track.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MixFix {
+    /// The stem's name: the track to change.
+    pub track: String,
+    pub change: MixChange,
+    /// Why, in a sentence.
+    pub reason: String,
+    /// The finding it answers: `masking`, `buried`, `muddy`, `harsh`, `smear`, `ring` or `low_end_mono`.
+    pub code: String,
+}
+
+/// Most fixes suggested at once.
+pub const MAX_FIXES: usize = 16;
 
 /// Per stem: band energy and right-minus-left energy per frame and band.
 struct StemFrames {
@@ -494,6 +556,324 @@ fn names_of(v: &[StemShare]) -> String {
     format!(" ({})", v.iter().map(|s| format!("{} {:.0} %", s.stem, s.share * 100.0)).collect::<Vec<_>>().join(", "))
 }
 
+/// Part of a track's settings a change occupies: one fix per track and region in a pass, so two findings never
+/// pull the same control two ways.
+fn fix_region(c: &MixChange) -> &'static str {
+    let by_hz = |hz: f64| match hz {
+        h if h < 150.0 => "low",
+        h if h < 600.0 => "low_mid",
+        h if h < 2000.0 => "mid",
+        h if h < 6000.0 => "high_mid",
+        _ => "high",
+    };
+    match *c {
+        MixChange::EqCut { hz, .. } | MixChange::EqBoost { hz, .. } | MixChange::DeEss { hz, .. } => by_hz(hz),
+        MixChange::HighPass { .. } => "low_cut",
+        MixChange::Gain { .. } => "level",
+        MixChange::ReverbSend { .. } => "reverb",
+        MixChange::DelayMix { .. } => "delay",
+        MixChange::MonoBelow { .. } => "low_width",
+    }
+}
+
+fn name_has(name: &str, words: &[&str]) -> bool {
+    let n = name.to_ascii_lowercase();
+    words.iter().any(|w| n.contains(w))
+}
+
+/// A part meant to stay in front.
+fn is_lead(name: &str) -> bool {
+    name_has(name, &["lead", "melody", "vocal", "vox", "solo", "theme"])
+}
+
+/// A part that owns the low end: never high-passed by the mud fix.
+fn is_low_part(name: &str) -> bool {
+    name_has(name, &["bass", "kick", "sub", "808", "drum", "perc", "timpani", "taiko", "tuba", "contrabass", "cello", "low"])
+}
+
+/// A stem's whole-song spectrum, as the fixes need it.
+struct StemTone {
+    spec: StereoSpectrum,
+    /// (centre, lower edge, power) of each 1/3-octave band.
+    thirds: Vec<(f64, f64, f64)>,
+    total: f64,
+    /// Power above 2 kHz over the total.
+    high_share: f64,
+}
+
+impl StemTone {
+    fn new(a: AudioRef) -> StemTone {
+        let spec = StereoSpectrum::new(a, SPECTRUM_N);
+        let thirds = third_octave_centres()
+            .into_iter()
+            .filter(|&fc| third_octave_edges(fc).1 <= a.sr as f64 / 2.0)
+            .map(|fc| {
+                let (lo, hi) = third_octave_edges(fc);
+                (fc, lo, spec.band(lo, hi).power())
+            })
+            .collect();
+        let total = spec.band(0.0, f64::INFINITY).power();
+        let high = spec.band(2000.0, f64::INFINITY).power();
+        StemTone { thirds, total, high_share: if total > 1e-30 { high / total } else { 0.0 }, spec }
+    }
+
+    /// Centre of the stem's strongest 1/3-octave band in `lo..hi`.
+    fn peak_in(&self, lo: f64, hi: f64) -> Option<f64> {
+        self.thirds.iter().filter(|b| b.0 >= lo && b.0 < hi && b.2 > 0.0).max_by(|a, b| a.2.total_cmp(&b.2)).map(|b| b.0)
+    }
+
+    /// Lower edge of the lowest band within 15 dB of the strongest: where the stem's body starts.
+    fn body_lo(&self) -> Option<f64> {
+        let peak = self.thirds.iter().map(|b| b.2).fold(0.0, f64::max);
+        if peak <= 1e-30 {
+            return None;
+        }
+        self.thirds.iter().find(|b| b.2 >= peak * 10f64.powf(-1.5)).map(|b| b.1)
+    }
+
+    /// Side and mid power below `LOW_END_HZ`.
+    fn low_end(&self) -> (f64, f64) {
+        let b = self.spec.band(0.0, LOW_END_HZ);
+        (b.side(), b.mid())
+    }
+}
+
+/// The stem's 2-5 kHz comes in bursts: its level there jumps at least 10 dB between its usual and its loud
+/// frames (frames within 30 dB of the stem's loud ones).
+fn harsh_in_bursts(s: &StemFrames, bands: &Bands) -> bool {
+    let idx: Vec<usize> = (0..bands.edges.len()).filter(|&b| (HARSH_HZ.0..HARSH_HZ.1).contains(&(bands.edges[b].0 * bands.edges[b].1).sqrt())).collect();
+    let total: Vec<f64> = s.energy.iter().map(|f| f.iter().sum()).collect();
+    let loud = percentile(&total, 95.0);
+    if !loud.is_finite() || loud <= 1e-30 {
+        return false;
+    }
+    let v: Vec<f64> = s
+        .energy
+        .iter()
+        .zip(&total)
+        .filter(|(_, t)| **t >= loud * 1e-3)
+        .filter_map(|(f, _)| db10(idx.iter().map(|&b| f[b]).sum()))
+        .collect();
+    v.len() >= 8 && percentile(&v, 95.0) - percentile(&v, 50.0) >= 10.0
+}
+
+/// The stems that ring on after the section's attacks: each one's energy 100-150 ms after an onset against its
+/// energy around it (-20 to +40 ms), per millisecond, dB. Only stems that carry at least 15 % of the attacks and
+/// play them (their attack at least 3 dB over the 60 ms before it: not a pad that just sustains through), at most
+/// two, the most ringing first.
+fn ringing_stems(stems: &[(&str, AudioRef)], on: &[usize]) -> Vec<(usize, f64)> {
+    let Some((_, first)) = stems.first() else { return vec![] };
+    if on.is_empty() {
+        return vec![];
+    }
+    let ms = |t: f64| (t * first.sr as f64 / 1000.0).round() as isize;
+    let energy = |a: AudioRef, from: isize, to: isize| -> f64 {
+        let (i0, i1) = (from.max(0) as usize, (to.max(0) as usize).min(a.len()));
+        (i0..i1.max(i0)).map(|i| (a.left[i] as f64).powi(2) + (a.right[i] as f64).powi(2)).sum()
+    };
+    let per: Vec<(f64, f64, f64)> = stems
+        .par_iter()
+        .map(|(_, a)| {
+            on.iter().fold((0.0, 0.0, 0.0), |acc, &p| {
+                let p = p as isize;
+                (
+                    acc.0 + energy(*a, p - ms(80.0), p - ms(20.0)),
+                    acc.1 + energy(*a, p - ms(20.0), p + ms(40.0)),
+                    acc.2 + energy(*a, p + ms(100.0), p + ms(150.0)),
+                )
+            })
+        })
+        .collect();
+    let attacks: f64 = per.iter().map(|x| x.1).sum();
+    if attacks <= 1e-30 {
+        return vec![];
+    }
+    let mut v: Vec<(usize, f64)> = per
+        .iter()
+        .enumerate()
+        .filter(|(_, (pre, at, _))| *at / attacks >= 0.15 && *at > 2.0 * pre)
+        .filter_map(|(s, &(_, at, tail))| db10((tail / 50.0) / (at / 60.0)).filter(|&r| r > -15.0).map(|r| (s, r)))
+        .collect();
+    v.sort_by(|a, b| b.1.total_cmp(&a.1));
+    v.truncate(2);
+    v
+}
+
+/// Centre of the 1/3-octave band with this label.
+fn band_centre(label: &str) -> Option<f64> {
+    third_octave_centres().into_iter().find(|&fc| third_octave_label(fc) == label)
+}
+
+/// The fixes for a mix's findings (see the module docs), ranked and one per track and region. `onsets` are the
+/// attacks of `mix` (the dry render when there is one).
+fn mix_fixes(
+    names: &[String],
+    stems: &[(&str, AudioRef)],
+    st: &[StemFrames],
+    bands: &Bands,
+    report: &MixReport,
+    onsets: &[usize],
+    mix: AudioRef,
+    o: &MixOptions,
+) -> Vec<MixFix> {
+    let tones: Vec<StemTone> = stems.par_iter().map(|(_, a)| StemTone::new(*a)).collect();
+    let index = |n: &str| names.iter().position(|x| x == n);
+    let mut cands: Vec<(f64, MixFix)> = vec![];
+    let mut push = |priority: f64, track: &str, change: MixChange, reason: String, code: &str| {
+        cands.push((priority, MixFix { track: track.to_string(), change, reason, code: code.to_string() }));
+    };
+
+    // collisions: cut the part the band matters less to; where it is both parts' main energy, gently cut the one
+    // that isn't the lead (or the quieter)
+    for c in report.conflicts.iter().filter(|c| c.kind == "collision") {
+        let [a, b] = &c.stems;
+        let k = (c.score / 40.0).clamp(0.5, 1.0);
+        let range = format!("{}-{}", hz(c.range_hz[0]), hz(c.range_hz[1]));
+        let (track, db, reason) = match &c.cut {
+            Some(t) => {
+                let keep = if t == a { b } else { a };
+                (t.clone(), -3.0 * k, format!("{a} and {b} fight over {range} in {}: a minor band for {t}, so it gives way to {keep}", c.section))
+            }
+            None => {
+                let t = match (is_lead(a), is_lead(b)) {
+                    (true, false) => b,
+                    (false, true) => a,
+                    _ if c.level_difference_db >= 0.0 => b,
+                    _ => a,
+                };
+                (
+                    t.clone(),
+                    -2.0 * k,
+                    format!("{a} and {b} fight over {range} in {}, both with their main energy there: a gentle cut on {t}; an octave apart or panned apart would separate them better", c.section),
+                )
+            }
+        };
+        let fc = band_centre(&c.band).unwrap_or_else(|| (c.range_hz[0] * c.range_hz[1]).sqrt());
+        let bw = (c.range_hz[1] / c.range_hz[0].max(1.0)).log2().max(2.0 / 3.0);
+        let q = r2(q_for_bandwidth(bw).clamp(0.7, 2.0));
+        push(c.score, &track, MixChange::EqCut { hz: round_hz(fc), db: r1(db), q }, reason, "masking");
+    }
+
+    // buried parts: raised, or given presence where the part covering them has less of it
+    for b in &report.buried {
+        let Some(s) = index(&b.stem) else { continue };
+        let masker = b.masked_by.as_deref().and_then(index);
+        let presence = tones[s].high_share >= 0.1 && masker.is_some_and(|m| tones[m].high_share < tones[s].high_share / 2.0);
+        let (change, how) = if presence {
+            (MixChange::EqBoost { hz: 3000.0, db: 2.0, q: 0.9 }, "lift its presence, where the part covering it has less")
+        } else {
+            (MixChange::Gain { db: if b.audible_share < 0.1 { 3.0 } else { 2.0 } }, "raise it")
+        };
+        let by = b.masked_by.as_ref().map(|m| format!(", mostly under {m}")).unwrap_or_default();
+        let reason = format!("{} is mostly masked in {} (only {:.0} % of it stands out{by}): {how}", b.stem, b.section, b.audible_share * 100.0);
+        push(40.0 + (0.25 - b.audible_share) * 100.0, &b.stem, change, reason, "buried");
+    }
+
+    // mud and harshness: cut the parts behind it where each peaks in the region; bursts of harshness are
+    // de-essed; parts whose body starts above the low end are high-passed
+    for t in &report.tone {
+        let regions = [
+            ("muddy", t.mud_vs_pink_db, t.mud_vs_song_db, o.mud_vs_pink_db, &t.mud_stems, MUD_HZ, 315.0),
+            ("harsh", t.harsh_vs_pink_db, t.harsh_vs_song_db, o.harsh_vs_pink_db, &t.harsh_stems, HARSH_HZ, 3150.0),
+        ];
+        for (code, vs_pink, vs_song, threshold, culprits, (lo, hi), fallback) in regions {
+            let excess = [vs_pink.map(|v| v - threshold), vs_song.map(|v| v - o.section_jump_db)]
+                .into_iter()
+                .flatten()
+                .fold(f64::NEG_INFINITY, f64::max);
+            if excess <= 0.0 {
+                continue;
+            }
+            let e = excess.min(6.0);
+            for c in culprits.iter() {
+                let Some(s) = index(&c.stem) else { continue };
+                let share = c.share * 100.0;
+                let (change, reason) = if code == "harsh" && harsh_in_bursts(&st[s], bands) {
+                    (MixChange::DeEss { hz: 2500.0, range_db: -4.0 }, format!("{} is harsh and {} carries {share:.0} % of its 2-5 kHz, in bursts: de-ess it", t.section, c.stem))
+                } else {
+                    let f = tones[s].peak_in(lo, hi).unwrap_or(fallback);
+                    let db = -(1.5 + 0.5 * excess).clamp(1.5, 3.0) * (0.5 + c.share).min(1.0);
+                    let what = if code == "muddy" { "200-500 Hz" } else { "2-5 kHz" };
+                    (MixChange::EqCut { hz: round_hz(f), db: r1(db), q: 1.0 }, format!("{} is {code} and {} carries {share:.0} % of its {what}: cut it where it peaks", t.section, c.stem))
+                };
+                push(30.0 + 5.0 * e + 20.0 * c.share, &c.stem, change, reason, code);
+            }
+            if code != "muddy" {
+                continue;
+            }
+            for (s, name) in names.iter().enumerate() {
+                let Some(body) = tones[s].body_lo().filter(|&b| b >= 150.0 && !is_low_part(name)) else { continue };
+                let f = ((body / 1.5).clamp(30.0, 250.0) / 5.0).round() * 5.0;
+                let below = tones[s].spec.band(0.0, f).power() / tones[s].total.max(1e-30);
+                if below < 0.005 {
+                    continue;
+                }
+                let reason = format!("{} is muddy and {name}'s body starts around {}: {:.0} % of it lies under {f:.0} Hz, where it only adds mud", t.section, hz(body), below * 100.0);
+                push(20.0 + 5.0 * e, name, MixChange::HighPass { hz: f }, reason, code);
+            }
+        }
+    }
+
+    // reverb smearing the attacks, or hits ringing on: the parts that ring send less
+    for t in &report.transients {
+        let smear = t.smear_db.filter(|&x| x > 6.0);
+        let ring = t.tail_db.zip(t.dry_tail_db).map(|(w, d)| w - d).filter(|&x| x > 6.0);
+        let Some(sec) = report.sections.iter().find(|s| s.name == t.section) else { continue };
+        if smear.is_none() && ring.is_none() {
+            continue;
+        }
+        let (i0, i1) = sec.samples(mix.sr, mix.len());
+        let on: Vec<usize> = onsets.iter().copied().filter(|&x| x >= i0 && x < i1).collect();
+        for (s, r) in ringing_stems(stems, &on) {
+            let name = &names[s];
+            match smear {
+                Some(sm) => push(
+                    30.0 + sm,
+                    name,
+                    MixChange::ReverbSend { scale: 0.7 },
+                    format!("Reverb blurs the attacks in {} ({sm:.1} dB less contrast than dry) and {name} rings on at {r:.0} dB after its hits: send it less", t.section),
+                    "smear",
+                ),
+                None => push(
+                    30.0 + ring.unwrap_or(0.0),
+                    name,
+                    MixChange::DelayMix { scale: 0.7 },
+                    format!("Hits ring on in {} ({:.1} dB more than dry 100-150 ms after the attack), most in {name}: less delay", t.section, ring.unwrap_or(0.0)),
+                    "ring",
+                ),
+            }
+        }
+    }
+
+    // a wide low end: the parts that widen it go mono below 120 Hz
+    let low: Vec<(f64, f64)> = tones.iter().map(StemTone::low_end).collect();
+    let side_total: f64 = low.iter().map(|x| x.0).sum();
+    for m in &report.mono {
+        let (Some(ls), Some(le)) = (m.low_end_side_db, m.low_end_db) else { continue };
+        let loss = 10.0 * (1.0 + 10f64.powf(ls / 10.0)).log10();
+        if le <= LOW_END_MATTERS_DB || loss <= o.low_end_mono_loss_db || side_total <= 1e-30 {
+            continue;
+        }
+        for (s, &(side, mid)) in low.iter().enumerate() {
+            let wide = if mid > 1e-30 { 10.0 * (side / mid).log10() } else { 0.0 };
+            if side / side_total < 0.15 || wide <= -12.0 {
+                continue;
+            }
+            let reason = format!(
+                "The low end loses {loss:.1} dB in mono in {} and {} carries {:.0} % of its width: make it mono below {LOW_END_HZ:.0} Hz",
+                m.section,
+                names[s],
+                side / side_total * 100.0
+            );
+            push(35.0 + 5.0 * loss, &names[s], MixChange::MonoBelow { hz: LOW_END_HZ }, reason, "low_end_mono");
+        }
+    }
+
+    cands.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut seen = HashSet::new();
+    cands.into_iter().map(|c| c.1).filter(|f| seen.insert((f.track.clone(), fix_region(&f.change)))).take(MAX_FIXES).collect()
+}
+
 /// Run every check. `mix` is the master (or the sum of the stems); `stems` are the named parts (same rate and
 /// length as the mix) for masking and attribution; `dry` is the mix rendered without reverb (and other wet
 /// effects), for transient smearing.
@@ -673,7 +1053,20 @@ pub fn check_mix(mix: AudioRef, stems: &[(&str, AudioRef)], dry: Option<AudioRef
             t.flags.push(format!("{m:.1} dB more 200-500 Hz than the song's other sections{}", names_of(&t.mud_stems)));
         }
     }
-    Ok(MixReport { sections, conflicts, buried, tone, mono, transients })
+    let regions = if stems.is_empty() {
+        vec![]
+    } else {
+        let whole: Vec<(String, StereoSpectrum)> = stems.par_iter().map(|(n, x)| (n.to_string(), StereoSpectrum::new(*x, SPECTRUM_N))).collect();
+        crate::master::REGIONS
+            .iter()
+            .map(|&(region, lo, hi, ..)| RegionStems { region, lo_hz: lo, hi_hz: hi.min(sr / 2.0), stems: shares(&whole, lo, hi.min(sr / 2.0)) })
+            .collect()
+    };
+    let mut report = MixReport { sections, conflicts, buried, tone, mono, transients, fixes: vec![], regions };
+    if !stems.is_empty() {
+        report.fixes = mix_fixes(&names, stems, &st, &bands, &report, &all_onsets, mix, o);
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -845,9 +1238,109 @@ mod tests {
         assert_eq!(m.fold_down_lu, Some(-120.0));
         assert!(m.flags.len() >= 2, "{m:?}");
         assert!(rep.conflicts.is_empty() && rep.buried.is_empty());
+        // without stems there is no track to change
+        assert!(rep.fixes.is_empty(), "{:#?}", rep.fixes);
         let p = pink(n, 3);
         let rep = check_mix(AudioRef::new(sr, &p, &p).unwrap(), &[], None, &MixOptions::default()).unwrap();
         assert!(rep.mono[0].flags.is_empty(), "{:?}", rep.mono[0]);
         assert!(rep.tone[0].flags.iter().all(|f| !f.starts_with("muddy")), "{:?}", rep.tone[0]);
+        // with the hits as a stem, the drums send less to the reverb
+        let rep = check_mix(
+            AudioRef::new(sr, &wet, &wet).unwrap(),
+            &[("drums", AudioRef::new(sr, &wet, &wet).unwrap())],
+            Some(AudioRef::new(sr, &dry, &dry).unwrap()),
+            &MixOptions::default(),
+        )
+        .unwrap();
+        let f = rep.fixes.iter().find(|f| f.code == "smear").unwrap_or_else(|| panic!("{:#?}", rep.fixes));
+        assert_eq!((f.track.as_str(), &f.change), ("drums", &MixChange::ReverbSend { scale: 0.7 }));
+    }
+
+    #[test]
+    fn fixes_follow_the_findings() {
+        let sr = 48000u32;
+        let srf = sr as f64;
+        let n = sr as usize * 4;
+        // a lead and a pad in the same band around 300 Hz (the pad 2 dB under), a quiet bell under them, and a
+        // bass whose low end is wide
+        let lead = band_noise(n, 41, srf, 220.0, 400.0);
+        let pad: Vec<f32> = band_noise(n, 42, srf, 220.0, 400.0).iter().map(|v| v * 0.8).collect();
+        let bell: Vec<f32> = band_noise(n, 43, srf, 220.0, 400.0).iter().map(|v| v * 0.1).collect();
+        let (bl, br) = (band_noise(n, 44, srf, 40.0, 100.0), band_noise(n, 45, srf, 40.0, 100.0));
+        let ml: Vec<f32> = (0..n).map(|i| lead[i] + pad[i] + bell[i] + bl[i]).collect();
+        let mr: Vec<f32> = (0..n).map(|i| lead[i] + pad[i] + bell[i] + br[i]).collect();
+        let st = [
+            ("lead", AudioRef::new(sr, &lead, &lead).unwrap()),
+            ("pad", AudioRef::new(sr, &pad, &pad).unwrap()),
+            ("bell", AudioRef::new(sr, &bell, &bell).unwrap()),
+            ("bass", AudioRef::new(sr, &bl, &br).unwrap()),
+        ];
+        // this mix is nothing but low mids: mud is tested on its own below
+        let o = MixOptions { mud_vs_pink_db: 100.0, ..Default::default() };
+        let rep = check_mix(AudioRef::new(sr, &ml, &mr).unwrap(), &st, None, &o).unwrap();
+        let find = |code: &str, track: &str| {
+            rep.fixes.iter().find(|f| f.code == code && f.track == track).unwrap_or_else(|| panic!("{code} {track}: {:#?}", rep.fixes))
+        };
+        // both have their main energy at 300 Hz: the part that isn't the lead gives way, gently
+        let MixChange::EqCut { hz, db, q } = find("masking", "pad").change else { panic!("{:#?}", rep.fixes) };
+        assert!((250.0..=400.0).contains(&hz) && (-2.0..=-1.0).contains(&db) && (0.7..=2.0).contains(&q), "{hz} {db} {q}");
+        assert!(!rep.fixes.iter().any(|f| f.track == "lead"), "{:#?}", rep.fixes);
+        assert!(matches!(find("buried", "bell").change, MixChange::Gain { db } if db > 0.0 && db <= 3.0), "{:#?}", rep.fixes);
+        assert_eq!(find("low_end_mono", "bass").change, MixChange::MonoBelow { hz: 120.0 });
+        // one per track and region
+        let mut seen = HashSet::new();
+        assert!(rep.fixes.iter().all(|f| seen.insert((f.track.clone(), fix_region(&f.change)))), "{:#?}", rep.fixes);
+        let j = serde_json::to_value(find("low_end_mono", "bass")).unwrap();
+        assert_eq!(j["change"], serde_json::json!({"kind": "mono_below", "hz": 120.0}));
+        assert_eq!((&j["track"], &j["code"]), (&serde_json::json!("bass"), &serde_json::json!("low_end_mono")));
+        let c: MixChange = serde_json::from_str(r#"{"kind":"eq_cut","hz":300.0,"db":-2.0,"q":1.0}"#).unwrap();
+        assert_eq!(c, MixChange::EqCut { hz: 300.0, db: -2.0, q: 1.0 });
+    }
+
+    #[test]
+    fn each_tonal_region_names_who_plays_there() {
+        let sr = 48000u32;
+        let srf = sr as f64;
+        let n = sr as usize * 3;
+        let bass = band_noise(n, 61, srf, 45.0, 110.0);
+        let flute: Vec<f32> = band_noise(n, 62, srf, 1100.0, 4500.0).iter().map(|x| 0.5 * x).collect();
+        let mix: Vec<f32> = bass.iter().zip(&flute).map(|(a, b)| a + b).collect();
+        let st = [("bass", AudioRef::new(sr, &bass, &bass).unwrap()), ("flute", AudioRef::new(sr, &flute, &flute).unwrap())];
+        let rep = check_mix(AudioRef::new(sr, &mix, &mix).unwrap(), &st, None, &MixOptions::default()).unwrap();
+        assert_eq!(rep.regions.len(), crate::master::REGIONS.len());
+        let who = |region: &str| rep.regions.iter().find(|r| r.region == region).unwrap().stems.iter().map(|s| s.stem.as_str()).collect::<Vec<_>>();
+        assert_eq!(who("boom"), ["bass"]);
+        assert_eq!(who("honk"), ["flute"]);
+        assert_eq!(who("harsh"), ["flute"]);
+        // without stems there is no one to name
+        assert!(check_mix(AudioRef::new(sr, &mix, &mix).unwrap(), &[], None, &MixOptions::default()).unwrap().regions.is_empty());
+    }
+
+    #[test]
+    fn mud_is_cut_where_its_parts_peak_and_high_parts_are_high_passed() {
+        let sr = 48000u32;
+        let srf = sr as f64;
+        let n = sr as usize * 4;
+        // a loud cello around 300 Hz, and quieter strings from 300 Hz up with some rumble far under their body
+        let cello = band_noise(n, 51, srf, 220.0, 400.0);
+        let rumble = band_noise(n, 52, srf, 40.0, 150.0);
+        let strings: Vec<f32> =
+            band_noise(n, 53, srf, 300.0, 3000.0).iter().zip(&rumble).map(|(a, b)| 0.35 * (a + 0.5 * b)).collect();
+        let mix: Vec<f32> = cello.iter().zip(&strings).map(|(a, b)| a + b).collect();
+        let st = [("cello", AudioRef::new(sr, &cello, &cello).unwrap()), ("strings", AudioRef::new(sr, &strings, &strings).unwrap())];
+        let rep = check_mix(AudioRef::new(sr, &mix, &mix).unwrap(), &st, None, &MixOptions::default()).unwrap();
+        assert!(rep.tone[0].flags.iter().any(|f| f.starts_with("muddy")), "{:?}", rep.tone[0]);
+        let cut = rep.fixes.iter().find(|f| f.track == "cello" && f.code == "muddy").unwrap_or_else(|| panic!("{:#?}", rep.fixes));
+        let MixChange::EqCut { hz, db, .. } = cut.change else { panic!("{cut:?}") };
+        assert!((250.0..=400.0).contains(&hz) && (-3.0..=-1.5).contains(&db), "{cut:?}");
+        let hp = rep.fixes.iter().find(|f| matches!(f.change, MixChange::HighPass { .. })).unwrap_or_else(|| panic!("{:#?}", rep.fixes));
+        assert_eq!((hp.track.as_str(), &hp.change), ("strings", &MixChange::HighPass { hz: 190.0 }));
+        // a cello owns its low end: never high-passed
+        assert!(!rep.fixes.iter().any(|f| f.track == "cello" && matches!(f.change, MixChange::HighPass { .. })));
+        assert!(rep.fixes.iter().all(|f| match f.change {
+            MixChange::EqCut { db, .. } => (-3.0..0.0).contains(&db),
+            MixChange::Gain { db } | MixChange::EqBoost { db, .. } => db <= 3.0,
+            _ => true,
+        }));
     }
 }

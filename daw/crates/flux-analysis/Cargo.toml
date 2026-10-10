@@ -1,6 +1,6 @@
 [package]
 name = "flux-analysis"
-description = "Measurements on rendered audio: game-wide loudness and loop seams, reference matching, mix checks (masking, mud, harshness, smearing, mono), spectrograms, stem balance, time effects and instrument report cards."
+description = "Measurements on rendered audio: game-wide loudness and loop seams, mastering reports, match EQ, reference matching, mix checks (masking, mud, harshness, smearing, mono) with fixes, spectrograms, stem balance, time effects and instrument report cards."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

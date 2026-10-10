@@ -11,8 +11,11 @@
 //! by block in their chains, and their latency is compensated the same way. Audio
 //! tracks play their raw audio from the render cache ("frozen"), refreshed in the background when they
 //! change; a VST3 or rig track's cached render stands in while its plugin or rig loads. The channel strips
-//! run as streaming processors (the same ones the offline render uses), then the shared reverb, glue, EQ,
-//! the master drive and a sample-peak limiter. Edits arrive as new project snapshots while playing.
+//! run as streaming processors (the same ones the offline render uses), in routing order: a group bus or an aux
+//! return runs once everything feeding it has played into it this block. Then the master: the shared reverb, the
+//! master's inserts, glue, EQ, multiband, image, the loudness drive and the true-peak limiter, as the render has them.
+//! Latency (plugins, rigs, inserts, compressor lookahead) is compensated along every route, so whatever meets at a bus
+//! or the master lines up as in the render. Edits arrive as new project snapshots while playing.
 //! Instruments are loaded, and big ones freed, on background threads. Automation plays as it renders: the
 //! volume, pan and reverb send lanes glide across each block from their values at its start to those at its
 //! end, and a live plugin's parameter lanes (resolved against it in the background) go to it with its blocks.
@@ -22,19 +25,24 @@
 //! with the timeline standing still, so only what is played in sounds (and reverb tails ring out).
 //!
 //! The offline render stays the reference for measurement and export. Live playback borrows what the last
-//! render measured (`RenderHints`: the loudness drive and the loud levels behind relative compressor
-//! thresholds), so it sounds like the render; without one it estimates the drive as it plays.
+//! render measured (`RenderHints`: the loudness drive, the limiter's ceiling and the loud levels behind relative
+//! thresholds), so it sounds like the render; without one it estimates the drive as it plays, the strips guess their
+//! loud levels and the multiband passes the audio through.
 
-use crate::dsp::{
-    self, AmpState, Chain, ChorusState, CompState, DelayState, FilterKind, GateState, MonoBelow, PeakLimiter, ReverbState, Stereo,
-};
+use crate::dsp::{self, Chain, MonoBelow, Stereo};
+use crate::fx::dynamics::Compressor;
+use crate::fx::limiter::MasterLimiter;
+use crate::fx::multiband::MultibandComp;
+use crate::fx::reverb::AnyReverb;
 use crate::render::{self, fold_loop, note_events};
+use crate::routing::Routing;
+use crate::strip::{self, Loud, Strip};
 use crate::rig::{self, LiveRig, RigFx};
 use crate::sfizz::{Ev, Synth};
 use crate::vst::{self, Automation, LivePlugin, SlotId};
 use crate::paths;
 use flux_core::automation::{Target, volume_gain};
-use flux_core::{Insert, InsertPosition, Instrument, Mixer, Project, TimeMap, Track};
+use flux_core::{Insert, InsertPosition, Instrument, Project, TimeMap, Track};
 use flux_vst3::client::AudioError;
 use flux_vst3::{Midi, TimedMidi, Transport};
 use std::collections::{BTreeMap, HashMap};
@@ -53,17 +61,33 @@ const STALL_LIMIT: Duration = Duration::from_secs(10);
 #[derive(Clone, Debug, Default)]
 pub struct RenderHints {
     pub drive_db: Option<f64>,
+    /// The ceiling the render's limiter settled on (dBTP).
+    pub ceiling_db: Option<f64>,
     pub glue_loud_db: Option<f64>,
-    pub comp_loud_db: HashMap<u64, f64>,
+    /// Each track's loud levels, which its relative thresholds count from (by track id).
+    pub loud: HashMap<u64, Loud>,
+    /// Each band's loud level at the master's multiband compressor, which its thresholds count from.
+    pub multiband_loud_db: Vec<f64>,
 }
 
 impl RenderHints {
     pub fn from_render(out: &render::RenderOutput) -> RenderHints {
         RenderHints {
             drive_db: out.drive_db.is_finite().then_some(out.drive_db),
+            ceiling_db: out.limiter_ceiling_db.is_finite().then_some(out.limiter_ceiling_db),
             glue_loud_db: out.glue_loud_db,
-            comp_loud_db: out.tracks.iter().filter_map(|t| t.comp_loud_db.map(|l| (t.id, l))).collect(),
+            loud: out
+                .tracks
+                .iter()
+                .map(|t| (t.id, Loud { comp: t.comp_loud_db, dyn_eq: t.dyn_eq_loud_db.clone(), deess: t.deess_loud_db }))
+                .collect(),
+            multiband_loud_db: out.multiband_loud_db.clone(),
         }
+    }
+
+    /// A track's loud levels (until a render has measured them, its strip guesses).
+    fn loud(&self, id: u64) -> Loud {
+        self.loud.get(&id).cloned().unwrap_or_default()
     }
 }
 
@@ -155,164 +179,22 @@ fn fold_if_looped(raw: Arc<Stereo>, p: &Project) -> Arc<Stereo> {
 }
 
 // ------------------------------------------------------------------ channel strip
-struct LiveStrip {
-    sr: f64,
-    m: Mixer,
-    filt: Chain,
-    amp: Option<AmpState>,
-    chorus: Option<ChorusState>,
-    gate: Option<GateState>,
-    comp: Option<CompState>,
-    delay: Option<DelayState>,
-    mono: Option<MonoBelow>,
-    gain: f32,
-    post: f32,
-}
-
-impl LiveStrip {
-    fn new(sr: f64, m: &Mixer, comp_loud: Option<f64>, loop_s: Option<f64>, pos: usize) -> LiveStrip {
-        let mut s = LiveStrip {
-            sr,
-            m: m.clone(),
-            filt: Chain::default(),
-            amp: None,
-            chorus: None,
-            gate: None,
-            comp: None,
-            delay: None,
-            mono: None,
-            gain: dsp::db_to_lin(m.gain_db) as f32,
-            post: dsp::db_to_lin(m.post_gain_db) as f32,
-        };
-        s.update(m, comp_loud, loop_s, pos);
-        s
-    }
-
-    fn filters(sr: f64, m: &Mixer) -> Chain {
-        let mut c = Chain::default();
-        if m.hpf_hz > 0.0 {
-            c.append(dsp::pass_filter(FilterKind::Highpass, sr, m.hpf_hz, m.hpf_slope));
-        }
-        if m.lpf_hz > 0.0 {
-            c.append(dsp::pass_filter(FilterKind::Lowpass, sr, m.lpf_hz, m.lpf_slope));
-        }
-        c.append(dsp::eq_chain(sr, &m.eq));
-        c
-    }
-
-    /// New mixer settings; effect memories (filter states, echoes, envelopes) carry on where they can.
-    fn update(&mut self, m: &Mixer, comp_loud: Option<f64>, loop_s: Option<f64>, pos: usize) {
-        let sr = self.sr;
-        self.filt.retune(Self::filters(sr, m));
-        self.amp = match (&m.amp, self.amp.take()) {
-            (Some(a), Some(old)) if old.params() == a => Some(old),
-            (Some(a), _) => Some(AmpState::new(sr, a)),
-            _ => None,
-        };
-        self.chorus = match (&m.chorus, self.chorus.take()) {
-            (Some(c), old) => {
-                let rate = match loop_s {
-                    Some(ls) if ls > 0.0 => (c.rate_hz * ls).round().max(1.0) / ls,
-                    _ => c.rate_hz,
-                };
-                match old {
-                    Some(o) if o.params().0 == c && o.params().1 == rate => Some(o),
-                    _ => {
-                        let mut s = ChorusState::new(sr, c, rate);
-                        s.set_phase(pos as i64);
-                        Some(s)
-                    }
-                }
-            }
-            _ => None,
-        };
-        self.gate = m.gate.map(|g| match self.gate.take() {
-            Some(mut s) => {
-                s.retune(sr, &g);
-                s
-            }
-            None => GateState::new(sr, &g),
-        });
-        self.comp = m.comp.map(|c| {
-            let thr = if c.relative { comp_loud.unwrap_or(-18.0) + c.threshold_db } else { c.threshold_db };
-            match self.comp.take() {
-                Some(mut s) => {
-                    s.retune(sr, &c, thr);
-                    s
-                }
-                None => CompState::new(sr, &c, thr),
-            }
-        });
-        self.delay = m.delay.map(|d| match self.delay.take() {
-            Some(mut s) => {
-                s.retune(sr, &d);
-                s
-            }
-            None => DelayState::new(sr, &d),
-        });
-        self.mono = (m.mono_below_hz > 0.0).then(|| match self.mono.take() {
-            Some(mut s) => {
-                s.retune(sr, m.mono_below_hz);
-                s
-            }
-            None => MonoBelow::new(sr, m.mono_below_hz),
-        });
-        self.m = m.clone();
-    }
-
-    fn set_phase(&mut self, pos: usize) {
-        if let Some(c) = &mut self.chorus {
-            c.set_phase(pos as i64);
+/// The end of a channel strip, after the post inserts: the volume lane, the duck, mono below, then panning and width.
+/// The lanes glide across the block from `from` to `to`.
+fn finish(strip: &mut Strip, width: f64, l: &mut [f32], r: &mut [f32], duck: Option<&[f32]>, from: MixNow, to: MixNow) {
+    strip::ramp(l, r, &mut { from.gain }, to.gain);
+    if let Some(env) = duck {
+        for i in 0..l.len().min(env.len()) {
+            l[i] *= env[i];
+            r[i] *= env[i];
         }
     }
-
-    /// The strip up to and including the delay (the post inserts follow it).
-    fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let m = &self.m;
-        self.filt.process(l, r);
-        ramp(l, r, &mut self.gain, dsp::db_to_lin(m.gain_db) as f32);
-        dsp::drive_s(l, r, m.drive_db);
-        if let Some(a) = &mut self.amp {
-            a.process(l, r);
-        }
-        if let Some(c) = &mut self.chorus {
-            c.process(l, r);
-        }
-        dsp::bitcrush_s(l, r, m.bitcrush_bits);
-        if let Some(db) = m.clip_db {
-            dsp::clip_s(l, r, db);
-        }
-        ramp(l, r, &mut self.post, dsp::db_to_lin(m.post_gain_db) as f32);
-        if let Some(g) = &mut self.gate {
-            g.process(l, r);
-        }
-        if let Some(c) = &mut self.comp {
-            c.process(l, r, None);
-        }
-        if let Some(d) = &mut self.delay {
-            d.process(l, r);
-        }
-    }
-
-    /// The end of the strip, after the post inserts: the volume lane, the duck, mono below, then panning and
-    /// width. The lanes glide across the block from `from` to `to`.
-    fn finish(&mut self, l: &mut [f32], r: &mut [f32], duck: Option<&[f32]>, from: MixNow, to: MixNow) {
-        ramp(l, r, &mut { from.gain }, to.gain);
-        if let Some(env) = duck {
-            for i in 0..l.len().min(env.len()) {
-                l[i] *= env[i];
-                r[i] *= env[i];
-            }
-        }
-        if let Some(m) = &mut self.mono {
-            m.process(l, r);
-        }
-        if from.pan == to.pan {
-            dsp::place_s(l, r, to.pan, self.m.width);
-        } else {
-            let n = l.len() as f64;
-            dsp::place_moving(l, r, |i| from.pan + (to.pan - from.pan) * (i + 1) as f64 / n, self.m.width);
-        }
+    strip.mono_below(l, r);
+    if from.pan == to.pan {
+        dsp::place_s(l, r, to.pan, width);
+    } else {
+        let n = l.len() as f64;
+        dsp::place_moving(l, r, |i| from.pan + (to.pan - from.pan) * (i + 1) as f64 / n, width);
     }
 }
 
@@ -348,28 +230,6 @@ impl MixNow {
         }
         now
     }
-}
-
-/// Apply a gain that glides from `cur` to `target` across the block (no zipper noise on fader moves).
-fn ramp(l: &mut [f32], r: &mut [f32], cur: &mut f32, target: f32) {
-    let n = l.len();
-    if n == 0 {
-        return;
-    }
-    if (*cur - target).abs() < 1e-6 {
-        if target != 1.0 {
-            l.iter_mut().for_each(|x| *x *= target);
-            r.iter_mut().for_each(|x| *x *= target);
-        }
-    } else {
-        let step = (target - *cur) / n as f32;
-        for i in 0..n {
-            let g = *cur + step * (i + 1) as f32;
-            l[i] *= g;
-            r[i] *= g;
-        }
-    }
-    *cur = target;
 }
 
 /// Sidechain duck driven by another track's note starts.
@@ -749,6 +609,30 @@ impl Delay {
             self.at = if self.at + 1 == n { 0 } else { self.at + 1 };
         }
     }
+
+    /// Forget what it holds (silence comes out next).
+    fn clear(&mut self) {
+        self.l.fill(0.0);
+        self.r.fill(0.0);
+    }
+}
+
+/// Make `d` a delay of `n` samples (starting from silence if that changes its length).
+fn fit(d: &mut Delay, n: usize) {
+    if d.len() != n {
+        *d = Delay::new(n);
+    }
+}
+
+/// The song position `by` frames before `p` (wrapping in loops; a one-shot's start holds).
+fn back(p: usize, by: usize, looped: bool, len: usize) -> usize {
+    if p >= by {
+        p - by
+    } else if looped && len > 0 {
+        (p + len - by % len) % len
+    } else {
+        0
+    }
 }
 
 /// Note-offs for the pitches held (each once).
@@ -812,11 +696,19 @@ struct LiveTrack {
     pending: Vec<Ev>,
     /// Played in from outside (`LiveEngine::input`), for the start of the next block.
     input: Vec<Ev>,
-    /// Plugin delay compensation.
+    /// Plugin delay compensation (see `LiveEngine::compensate`): holds the instrument back to line up with what its
+    /// strip plays alongside.
     delay: Delay,
+    /// How far its strip's input runs behind the song position (samples).
+    at: usize,
+    /// Hold its output back to line up where it arrives: at its bus or the master, at the master's reverb send, and at
+    /// each bus it sends to (in `Routing::sends` order).
+    out_delay: Delay,
+    rev_delay: Delay,
+    send_delays: Vec<Delay>,
     /// Its VST3 inserts, in order (each at its position in the strip).
     inserts: Vec<LiveInsert>,
-    strip: LiveStrip,
+    strip: Strip,
     /// Its volume, pan and reverb send where the last block ended.
     mix: MixNow,
     duck: Option<DuckLive>,
@@ -924,8 +816,12 @@ impl LiveTrack {
             pending: vec![],
             input: vec![],
             delay: Delay::default(),
+            at: 0,
+            out_delay: Delay::default(),
+            rev_delay: Delay::default(),
+            send_delays: vec![],
             inserts: vec![],
-            strip: LiveStrip::new(tg.sr, &t.mixer, hints.comp_loud_db.get(&t.id).copied(), tg.loop_s(), pos),
+            strip: Strip::new(tg.sr, &t.mixer, &hints.loud(t.id), tg.loop_s(), pos as i64),
             mix: MixNow::at(t, tg, len, pos),
             duck: None,
             level: 0.0,
@@ -1122,14 +1018,25 @@ impl LiveTrack {
         }
     }
 
-    /// The latency of this track: its instrument's and its inserts' (samples).
-    fn latency(&self) -> usize {
-        let instrument = match &self.src {
+    /// The latency of its instrument (samples).
+    fn instrument_latency(&self) -> usize {
+        match &self.src {
             Src::Plugin(pl) => pl.latency,
             Src::Rig(rg) => rg.latency(),
             _ => 0,
-        };
-        instrument + chain_latency(&self.inserts)
+        }
+    }
+
+    /// The latency of its strip: its inserts' and the compressor's lookahead (samples).
+    fn strip_latency(&self) -> usize {
+        chain_latency(&self.inserts) + self.strip.latency()
+    }
+
+    /// The strip's LFO phase (its sample index) at song position `pos`: behind it by the strip's input and the pre
+    /// inserts.
+    fn lfo_phase(&self, pos: usize, looped: bool, len: usize) -> i64 {
+        let pre: usize = self.inserts.iter().filter(|x| x.ins.position == InsertPosition::Pre).map(LiveInsert::latency).sum();
+        back(pos, self.at + pre, looped, len) as i64
     }
 
     fn status(&self) -> String {
@@ -1186,10 +1093,18 @@ pub struct LiveEngine {
     len: usize,
     pos: usize,
     tracks: Vec<LiveTrack>,
-    reverb: ReverbState,
-    glue: Option<CompState>,
+    /// How the tracks feed each other (by track index, as `tracks`).
+    routing: Routing,
+    /// What the tracks feeding each bus put into it this block (by track index).
+    bus_in: Vec<Stereo>,
+    /// A track's output on its way along one of its routes.
+    edge: Stereo,
+    reverb: AnyReverb,
+    glue: Option<Compressor>,
     eq: Chain,
-    limiter: PeakLimiter,
+    multiband: Option<MultibandComp>,
+    mono: Option<MonoBelow>,
+    limiter: MasterLimiter,
     hints: RenderHints,
     drive: f32,
     auto_drive_db: f64,
@@ -1205,12 +1120,11 @@ pub struct LiveEngine {
     duck_buf: Vec<f32>,
     /// One-shot projects: playback reached the end.
     pub ended: bool,
-    /// Frames still to render and drop after a seek, so the limiter's lookahead and the plugin delay
-    /// compensation are filled and the output lines up with the song position (same timing as the offline
-    /// render).
+    /// Frames still to render and drop after a seek, so the latencies are filled and the output lines up with the
+    /// song position (same timing as the offline render).
     prime: usize,
-    /// Plugin delay compensation: the latency of the slowest track (its instrument and inserts), which every
-    /// other track is held back to match (samples).
+    /// Plugin delay compensation: how far the mix runs behind the song position where it reaches the master
+    /// (samples; see `compensate`).
     pdc: usize,
     /// The reverb return's VST3 inserts (in place of the built-in reverb when there are any).
     reverb_fx: Vec<LiveInsert>,
@@ -1222,7 +1136,7 @@ pub struct LiveEngine {
     bus_latency: usize,
 }
 
-fn glue_state(p: &Project, hints: &RenderHints, old: Option<CompState>) -> Option<CompState> {
+fn glue_state(p: &Project, hints: &RenderHints, old: Option<Compressor>) -> Option<Compressor> {
     let sr = p.sample_rate as f64;
     p.master.glue.map(|g| {
         let thr = if g.relative { hints.glue_loud_db.unwrap_or(-16.0) + g.threshold_db } else { g.threshold_db };
@@ -1231,9 +1145,39 @@ fn glue_state(p: &Project, hints: &RenderHints, old: Option<CompState>) -> Optio
                 s.retune(sr, &g, thr);
                 s
             }
-            None => CompState::new(sr, &g, thr),
+            None => Compressor::new(sr, &g, thr),
         }
     })
+}
+
+/// The master's multiband compressor, its thresholds counting from the band levels the last render measured (a band
+/// without one passes its audio through).
+fn multiband_state(p: &Project, hints: &RenderHints, old: Option<MultibandComp>) -> Option<MultibandComp> {
+    let sr = p.sample_rate as f64;
+    p.master.multiband.as_ref().map(|mb| match old {
+        Some(mut m) => {
+            m.retune(mb, &hints.multiband_loud_db);
+            m
+        }
+        None => MultibandComp::new(sr, mb, &hints.multiband_loud_db),
+    })
+}
+
+fn mono_state(p: &Project, old: Option<MonoBelow>) -> Option<MonoBelow> {
+    let (sr, hz) = (p.sample_rate as f64, p.master.mono_below_hz);
+    (hz > 0.0).then(|| match old {
+        Some(mut m) => {
+            m.retune(sr, hz);
+            m
+        }
+        None => MonoBelow::new(sr, hz),
+    })
+}
+
+/// The limiter's ceiling (dBTP): the render's, which it lowers until the true peak is under the master's.
+fn ceiling(p: &Project, hints: &RenderHints) -> f64 {
+    let c = p.master.ceiling_dbtp - render::CEILING_MARGIN_DB;
+    hints.ceiling_db.map_or(c, |h| h.min(c))
 }
 
 impl LiveEngine {
@@ -1245,10 +1189,15 @@ impl LiveEngine {
             len: 0,
             pos: 0,
             tracks: vec![],
-            reverb: ReverbState::new(sr, &p.master.reverb),
+            routing: Routing::of(&p),
+            bus_in: vec![],
+            edge: (vec![0.0; BLOCK], vec![0.0; BLOCK]),
+            reverb: AnyReverb::new(sr, &p.master.reverb),
             glue: glue_state(&p, &hints, None),
             eq: dsp::eq_chain(sr, &p.master.eq),
-            limiter: PeakLimiter::new(sr, p.master.ceiling_dbtp - 0.5, 12.0),
+            multiband: multiband_state(&p, &hints, None),
+            mono: mono_state(&p, None),
+            limiter: MasterLimiter::new(sr, &p.master.limiter, ceiling(&p, &hints)),
             drive: dsp::db_to_lin(hints.drive_db.unwrap_or(10.0)) as f32,
             auto_drive_db: 10.0,
             meter: None,
@@ -1281,10 +1230,12 @@ impl LiveEngine {
             tracks.push(lt);
         }
         e.tracks = tracks;
+        e.bus_in = vec![(vec![0.0; BLOCK], vec![0.0; BLOCK]); e.tracks.len()];
         sync_chain(&e.jobs, &mut e.ticket, &p, &mut e.reverb_fx, &p.master.reverb_inserts);
         sync_chain(&e.jobs, &mut e.ticket, &p, &mut e.master_fx, &p.master.inserts);
         e.rebuild_ducks();
-        e.prime = e.limiter.latency();
+        e.compensate();
+        e.prime = e.latency();
         e
     }
 
@@ -1305,27 +1256,21 @@ impl LiveEngine {
         self.out_pos(0)
     }
 
-    /// Song position of output frame `i` from now: plugin delay compensation, the buses' inserts and the
-    /// limiter's lookahead hold the output back.
-    fn out_pos(&self, i: usize) -> usize {
-        let total = self.limiter.latency() + self.pdc + self.bus_latency;
-        self.back(self.pos + i, total - self.prime.min(total))
+    /// How far the output runs behind the song position: the mix's latency at the master, the reverb return's and
+    /// the master's inserts, the glue's lookahead and the limiter's (samples).
+    fn latency(&self) -> usize {
+        self.pdc + self.bus_latency + self.glue.as_ref().map_or(0, Compressor::latency) + self.limiter.latency()
     }
 
-    /// The song position the channel strips are at (plugin delay compensation holds them back).
-    fn strip_pos(&self) -> usize {
-        self.back(self.pos, self.pdc)
+    /// Song position of output frame `i` from now.
+    fn out_pos(&self, i: usize) -> usize {
+        let total = self.latency();
+        self.back(self.pos + i, total - self.prime.min(total))
     }
 
     /// Song position `by` frames before `p` (wrapping in loops).
     fn back(&self, p: usize, by: usize) -> usize {
-        if p >= by {
-            p - by
-        } else if self.tg.looped && self.len > 0 {
-            (p + self.len - by % self.len) % self.len
-        } else {
-            0
-        }
+        back(p, by, self.tg.looped, self.len)
     }
 
     pub fn len(&self) -> usize {
@@ -1374,12 +1319,14 @@ impl LiveEngine {
 
     pub fn set_hints(&mut self, h: RenderHints) {
         self.hints = h;
-        let spos = self.strip_pos();
+        let (pos, looped, len, loop_s) = (self.pos, self.tg.looped, self.len, self.tg.loop_s());
         for t in &mut self.tracks {
-            let m = t.track.mixer.clone();
-            t.strip.update(&m, self.hints.comp_loud_db.get(&t.track.id).copied(), self.tg.loop_s(), spos);
+            let (m, phase) = (t.track.mixer.clone(), t.lfo_phase(pos, looped, len));
+            t.strip.update(&m, &self.hints.loud(t.track.id), loop_s, phase);
         }
         self.glue = glue_state(&self.p, &self.hints, self.glue.take());
+        self.multiband = multiband_state(&self.p, &self.hints, self.multiband.take());
+        self.limiter.set_ceiling(ceiling(&self.p, &self.hints));
     }
 
     /// Load the track's instrument in the background (a new ticket: anything still loading for it is
@@ -1489,7 +1436,8 @@ impl LiveEngine {
             }
         }
         let pos = self.pos;
-        let spos = self.strip_pos();
+        // a new track's strip starts where the mix reaching the master is
+        let spos = self.back(pos, self.pdc);
         let mut old_tracks = std::mem::take(&mut self.tracks);
         let mut tracks = Vec::with_capacity(p.tracks.len());
         for nt in &p.tracks {
@@ -1554,7 +1502,8 @@ impl LiveEngine {
                 }
             }
             if mixer || timing {
-                lt.strip.update(&nt.mixer, self.hints.comp_loud_db.get(&nt.id).copied(), self.tg.loop_s(), spos);
+                let phase = lt.lfo_phase(pos, self.tg.looped, self.len);
+                lt.strip.update(&nt.mixer, &self.hints.loud(nt.id), self.tg.loop_s(), phase);
             }
             sync_chain(&self.jobs, &mut self.ticket, &p, &mut lt.inserts, &nt.mixer.inserts);
             sync_lanes(&self.jobs, &mut self.ticket, &old, &p, &mut lt.inserts);
@@ -1565,6 +1514,8 @@ impl LiveEngine {
             self.retire(t.src);
         }
         self.tracks = tracks;
+        self.routing = Routing::of(&p);
+        self.bus_in.resize(self.tracks.len(), (vec![0.0; BLOCK], vec![0.0; BLOCK]));
         sync_chain(&self.jobs, &mut self.ticket, &p, &mut self.reverb_fx, &p.master.reverb_inserts);
         sync_chain(&self.jobs, &mut self.ticket, &p, &mut self.master_fx, &p.master.inserts);
         sync_lanes(&self.jobs, &mut self.ticket, &old, &p, &mut self.reverb_fx);
@@ -1576,7 +1527,13 @@ impl LiveEngine {
             self.reverb.retune(&p.master.reverb);
             self.glue = glue_state(&p, &self.hints, self.glue.take());
             self.eq.retune(dsp::eq_chain(sr, &p.master.eq));
-            self.limiter.set_ceiling(p.master.ceiling_dbtp - 0.5);
+            self.multiband = multiband_state(&p, &self.hints, self.multiband.take());
+            self.mono = mono_state(&p, self.mono.take());
+            if old.master.limiter != p.master.limiter {
+                self.limiter = MasterLimiter::new(sr, &p.master.limiter, ceiling(&p, &self.hints));
+            } else {
+                self.limiter.set_ceiling(ceiling(&p, &self.hints));
+            }
         }
     }
 
@@ -1584,9 +1541,8 @@ impl LiveEngine {
     pub fn seek(&mut self, frame: usize) {
         self.pos = if self.len > 0 { frame.min(self.len - 1) } else { 0 };
         self.ended = false;
-        self.prime = self.limiter.latency() + self.pdc + self.bus_latency;
-        let spos = self.strip_pos();
-        let (tg, pos) = (&self.tg, self.pos);
+        self.prime = self.latency();
+        let (tg, pos, len) = (&self.tg, self.pos, self.len);
         for t in &mut self.tracks {
             match &mut t.src {
                 Src::Synth(s) => {
@@ -1605,7 +1561,8 @@ impl LiveEngine {
                 Src::Plugin(pl) => pl.resync = true,
                 _ => t.chase(tg, pos),
             }
-            t.strip.set_phase(spos);
+            let phase = t.lfo_phase(pos, tg.looped, len);
+            t.strip.set_phase(phase);
         }
     }
 
@@ -1749,16 +1706,32 @@ impl LiveEngine {
         true
     }
 
-    /// Plugin delay compensation: hold every track back to line up with the one with the most latency (its
-    /// instrument and inserts), and the tracks' sum back to line up with the reverb return's inserts. Called
-    /// when a plugin arrives, goes or changes its latency; the output (and the position reported with it)
-    /// shifts by the change.
+    /// Plugin delay compensation. Every instrument is held back to line up with the slowest one, so the strips of
+    /// the tracks no other feeds take their input that far (`at`) behind the song position; a bus takes its input as
+    /// far behind as its latest feed arrives (or its own instrument). Each route out of a track then holds the
+    /// track's output back to line up where it arrives: at its bus, at its aux sends' buses, or at the master and its
+    /// reverb send, where the whole mix runs `pdc` behind. The tracks' sum waits for the reverb return's inserts.
+    /// Called when a plugin arrives, goes or changes its latency, and when the routing or a strip changes; the output
+    /// (and the position reported with it) shifts by the change.
     fn compensate(&mut self) {
-        let pdc = self.tracks.iter().map(LiveTrack::latency).max().unwrap_or(0);
-        for t in &mut self.tracks {
-            let want = pdc - t.latency();
-            if t.delay.len() != want {
-                t.delay = Delay::new(want);
+        let r = &self.routing;
+        let n = self.tracks.len();
+        let inst: Vec<usize> = self.tracks.iter().map(LiveTrack::instrument_latency).collect();
+        let lead = (0..n).filter(|&i| !r.is_bus(i)).map(|i| inst[i]).max().unwrap_or(0);
+        let (mut at, mut out) = (vec![0usize; n], vec![0usize; n]);
+        for &i in &r.order {
+            at[i] = if r.is_bus(i) { r.inputs[i].iter().map(|&j| out[j]).fold(inst[i], usize::max) } else { lead };
+            out[i] = at[i] + self.tracks[i].strip_latency();
+        }
+        let pdc = out.iter().copied().max().unwrap_or(0);
+        for (i, t) in self.tracks.iter_mut().enumerate() {
+            t.at = at[i];
+            fit(&mut t.delay, at[i].saturating_sub(inst[i]));
+            fit(&mut t.out_delay, r.output[i].map_or(pdc, |b| at[b]).saturating_sub(out[i]));
+            fit(&mut t.rev_delay, pdc - out[i]);
+            t.send_delays.resize_with(r.sends[i].len(), Delay::default);
+            for (d, &(b, _)) in t.send_delays.iter_mut().zip(&r.sends[i]) {
+                fit(d, at[b].saturating_sub(out[i]));
             }
         }
         self.pdc = pdc;
@@ -1902,24 +1875,24 @@ impl LiveEngine {
     fn block(&mut self, n: usize, rolling: bool) {
         let pos = self.pos;
         let sr = self.tg.sr;
-        // the strips run `pdc` behind the instruments' input
-        let strip_t = (pos as f64 - self.pdc as f64) / sr;
-        let spos = self.strip_pos();
         let len = self.len;
-        let LiveEngine { tracks, dry, send, tl, tr, duck_buf, p, tg, jobs, .. } = self;
-        // where the inserts are (they get the song's tempo and position, as instruments do)
-        let fx = {
-            let mut t = vst::transport_at(p, &tg.tm, spos, sr, rolling);
-            if tg.looped {
+        let pdc = self.pdc;
+        let LiveEngine { tracks, routing, bus_in, edge, dry, send, tl, tr, duck_buf, p, tg, jobs, .. } = self;
+        let looped = tg.looped;
+        // the song position `by` frames back, and where a block of the song that starts at `at` ends (for the lanes)
+        let behind = |by: usize| back(pos, by, looped, len);
+        let end = |at: usize| match () {
+            _ if !rolling => at,
+            _ if looped && len > 0 => (at + n) % len,
+            _ => at + n,
+        };
+        // inserts processing the song at `at` get its tempo and position, as instruments do
+        let clock = |at: usize| {
+            let mut t = vst::transport_at(p, &tg.tm, at, sr, rolling);
+            if looped {
                 t.cycle = Some((0.0, p.total_beats()));
             }
-            Clock { transport: t, p, tm: &tg.tm, at: spos }
-        };
-        // where the strips' block ends, for the lanes
-        let spos_end = match () {
-            _ if !rolling => spos,
-            _ if tg.looped && len > 0 => (spos + n) % len,
-            _ => spos + n,
+            Clock { transport: t, p, tm: &tg.tm, at }
         };
         if !rolling {
             tracks.iter_mut().for_each(LiveTrack::hush);
@@ -1927,20 +1900,25 @@ impl LiveEngine {
         for b in [&mut dry.0, &mut dry.1, &mut send.0, &mut send.1] {
             b[..n].iter_mut().for_each(|x| *x = 0.0);
         }
+        for (b, _) in bus_in.iter_mut().zip(&tracks[..]) {
+            b.0[..n].iter_mut().for_each(|x| *x = 0.0);
+            b.1[..n].iter_mut().for_each(|x| *x = 0.0);
+        }
         // phase 1: the plugins get their block first and work on it in their own processes meanwhile
         if tracks.iter().any(|t| matches!(t.src, Src::Plugin(_))) {
             let mut transport = vst::transport_at(p, &tg.tm, pos, sr, rolling);
-            if tg.looped {
+            if looped {
                 transport.cycle = Some((0.0, p.total_beats()));
             }
             for t in tracks.iter_mut() {
                 t.begin_plugin(p, tg, pos, n, &transport, rolling);
             }
         }
-        let any_solo = tracks.iter().any(|t| t.track.mixer.solo);
         let decay = (-(n as f32) / (0.3 * sr as f32)).exp();
         let mut relatch = false;
-        for t in tracks.iter_mut() {
+        // each bus once everything feeding it has played into it
+        for &i in &routing.order {
+            let t = &mut tracks[i];
             let (bl, br) = (&mut tl[..n], &mut tr[..n]);
             if matches!(t.src, Src::Plugin(_)) {
                 // phase 2
@@ -1972,10 +1950,9 @@ impl LiveEngine {
                         br.iter_mut().for_each(|x| *x = 0.0);
                     }
                     Src::Raw(b) => {
-                        for i in 0..n {
-                            let k = pos + i;
-                            bl[i] = b.0.get(k).copied().unwrap_or(0.0);
-                            br[i] = b.1.get(k).copied().unwrap_or(0.0);
+                        for k in 0..n {
+                            bl[k] = b.0.get(pos + k).copied().unwrap_or(0.0);
+                            br[k] = b.1.get(pos + k).copied().unwrap_or(0.0);
                         }
                     }
                     _ => {
@@ -1986,36 +1963,90 @@ impl LiveEngine {
             }
             // runs while muted too, so unmuting doesn't bring back stale audio
             t.delay.process(bl, br);
-            let to = MixNow::at(&t.track, tg, len, spos_end);
+            if !routing.source[i] {
+                bl.iter_mut().for_each(|x| *x = 0.0);
+                br.iter_mut().for_each(|x| *x = 0.0);
+            }
+            if routing.is_bus(i) {
+                let (il, ir) = &bus_in[i];
+                for k in 0..n {
+                    bl[k] += il[k];
+                    br[k] += ir[k];
+                }
+            }
+            // the end of the strip (the lanes and the duck) runs this far behind the song position
+            let lag = t.at + t.strip_latency();
+            let to = MixNow::at(&t.track, tg, len, end(behind(lag)));
             let from = std::mem::replace(&mut t.mix, to);
-            let m = &t.track.mixer;
-            let audible = if any_solo { m.solo } else { !m.mute };
-            if !audible {
+            if !routing.pass[i] {
                 t.level *= decay;
+                for d in [&mut t.out_delay, &mut t.rev_delay].into_iter().chain(t.send_delays.iter_mut()) {
+                    d.clear();
+                }
                 continue;
             }
             let duck = match &t.duck {
                 Some(d) => {
-                    d.env(strip_t, sr, n, duck_buf);
+                    d.env((pos as f64 - lag as f64) / sr, sr, n, duck_buf);
                     Some(&duck_buf[..])
                 }
                 None => None,
             };
-            relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Pre), bl, br, &fx);
-            t.strip.process(bl, br);
-            relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Post), bl, br, &fx);
-            t.strip.finish(bl, br, duck, from, to);
+            if t.inserts.is_empty() {
+                t.strip.process(bl, br);
+            } else {
+                let fx = clock(behind(t.at));
+                relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Pre), bl, br, &fx);
+                t.strip.process(bl, br);
+                relatch |= run_inserts(&mut t.inserts, Some(InsertPosition::Post), bl, br, &fx);
+            }
+            finish(&mut t.strip, t.track.mixer.width, bl, br, duck, from, to);
             let pk = bl.iter().chain(br.iter()).fold(0f32, |a, x| a.max(x.abs()));
             t.level = pk.max(t.level * decay);
-            for i in 0..n {
-                let rs = from.send + (to.send - from.send) * (i + 1) as f32 / n as f32;
-                dry.0[i] += bl[i];
-                dry.1[i] += br[i];
-                send.0[i] += bl[i] * rs;
-                send.1[i] += br[i] * rs;
+            // its routes: its bus or the master, the master's reverb send, its aux sends
+            let (el, er) = (&mut edge.0[..n], &mut edge.1[..n]);
+            el.copy_from_slice(bl);
+            er.copy_from_slice(br);
+            t.out_delay.process(el, er);
+            let (dl, dr) = match routing.output[i] {
+                Some(b) => {
+                    let b = &mut bus_in[b];
+                    (&mut b.0[..n], &mut b.1[..n])
+                }
+                None => (&mut dry.0[..n], &mut dry.1[..n]),
+            };
+            for k in 0..n {
+                dl[k] += el[k];
+                dr[k] += er[k];
+            }
+            if from.send > 0.0 || to.send > 0.0 || t.rev_delay.len() > 0 {
+                for k in 0..n {
+                    let g = from.send + (to.send - from.send) * (k + 1) as f32 / n as f32;
+                    el[k] = bl[k] * g;
+                    er[k] = br[k] * g;
+                }
+                t.rev_delay.process(el, er);
+                for k in 0..n {
+                    send.0[k] += el[k];
+                    send.1[k] += er[k];
+                }
+            }
+            for (d, &(b, level)) in t.send_delays.iter_mut().zip(&routing.sends[i]) {
+                let g = level as f32;
+                for k in 0..n {
+                    el[k] = bl[k] * g;
+                    er[k] = br[k] * g;
+                }
+                d.process(el, er);
+                let (xl, xr) = &mut bus_in[b];
+                for k in 0..n {
+                    xl[k] += el[k];
+                    xr[k] += er[k];
+                }
             }
         }
         let target = p.master.target_lufs;
+        let fx = clock(behind(pdc));
         // the reverb return: the built-in reverb, or the return's inserts (the tracks' sum waits for them)
         if p.master.reverb_inserts.is_empty() {
             self.reverb.process(&mut send.0[..n], &mut send.1[..n]);
@@ -2033,6 +2064,16 @@ impl LiveEngine {
             g.process(&mut dry.0[..n], &mut dry.1[..n], None);
         }
         self.eq.process(&mut dry.0[..n], &mut dry.1[..n]);
+        if let Some(m) = &mut self.multiband {
+            m.process(&mut dry.0[..n], &mut dry.1[..n], None);
+        }
+        // the image: mono below, then width
+        if let Some(m) = &mut self.mono {
+            m.process(&mut dry.0[..n], &mut dry.1[..n]);
+        }
+        if p.master.width != 1.0 {
+            dsp::place_s(&mut dry.0[..n], &mut dry.1[..n], 0.0, p.master.width);
+        }
 
         // loudness drive: the last render's, or an estimate from what has played so far (of the song)
         let drive_db = match self.hints.drive_db {

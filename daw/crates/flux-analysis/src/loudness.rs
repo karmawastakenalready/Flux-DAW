@@ -161,7 +161,12 @@ pub struct SeamReport {
     pub jump: [f64; 2],
     /// 99.9th percentile of the sample-to-sample steps over the whole track, per channel.
     pub p999_step: [f64; 2],
-    /// The wrap-around step is no larger than the track's own 99.9th percentile step (no discontinuity).
+    /// The largest step within 2 ms either side of the seam (the wrap itself left out), per channel: how much the
+    /// music itself moves there.
+    pub local_step: [f64; 2],
+    /// The wrap-around step is no larger than the track's own 99.9th percentile step, or than half as much again
+    /// as the steps around it (a loop that wraps during a loud, bright hit moves as much as the hit does): no
+    /// discontinuity.
     pub jump_ok: bool,
     /// Peak of the >6 kHz content within 2 ms of the seam over its median in the surrounding 500 ms (or over a
     /// floor 60 dB under the broadband level, if higher), dB. A click shows as a spike; a written downbeat on
@@ -266,12 +271,17 @@ pub fn loop_seam(a: AudioRef, bar_starts: &[usize]) -> Result<SeamReport> {
     let ch = |c: usize| if c == 0 { a.left } else { a.right };
     let mut jump = [0.0; 2];
     let mut p999 = [0.0; 2];
+    let mut local = [0.0; 2];
+    let w = ((a.sr as f64 * 0.002) as usize).clamp(1, n / 2);
     for c in 0..2 {
         let x = ch(c);
         jump[c] = (x[0] as f64 - x[n - 1] as f64).abs();
         let d: Vec<f64> = x.windows(2).map(|w| (w[1] as f64 - w[0] as f64).abs()).collect();
         p999[c] = percentile(&d, 99.9);
+        // (d[k] is the step from sample k to k + 1)
+        local[c] = d[..w.min(d.len())].iter().chain(&d[d.len().saturating_sub(w)..]).copied().fold(0.0, f64::max);
     }
+    let jump_ok = (0..2).all(|c| jump[c] <= p999[c] || jump[c] <= 1.5 * local[c]);
     let (hf_click_db, level_step_db) = junction(a, 0, 0.002, false);
     let bars: Vec<usize> = bar_starts.iter().copied().filter(|&b| b > 0 && b < n).collect();
     let (reference, inner): (Option<&'static str>, Vec<(f64, f64)>) = if !bars.is_empty() {
@@ -289,7 +299,8 @@ pub fn loop_seam(a: AudioRef, bar_starts: &[usize]) -> Result<SeamReport> {
     Ok(SeamReport {
         jump,
         p999_step: p999,
-        jump_ok: jump[0] <= p999[0] && jump[1] <= p999[1],
+        local_step: local,
+        jump_ok,
         hf_click_db,
         level_step_db,
         reference,
@@ -546,8 +557,8 @@ fn track_flags(t: &GameTrack, o: &GameOptions) -> Vec<Flag> {
             f.push(Flag::error(
                 "seam_jump",
                 format!(
-                    "the loop wraps with a step of {:.4} / {:.4} (L/R), larger than 99.9 % of the track's own steps ({:.4} / {:.4}): an audible click",
-                    seam.jump[0], seam.jump[1], seam.p999_step[0], seam.p999_step[1]
+                    "the loop wraps with a step of {:.4} / {:.4} (L/R), larger than 99.9 % of the track's own steps ({:.4} / {:.4}) and than the music moves around the seam ({:.4} / {:.4}): an audible click",
+                    seam.jump[0], seam.jump[1], seam.p999_step[0], seam.p999_step[1], seam.local_step[0], seam.local_step[1]
                 ),
             ));
         }
@@ -952,6 +963,14 @@ mod tests {
         let s = loop_seam(AudioRef::new(sr, bad, bad).unwrap(), &[]).unwrap();
         assert!(!s.jump_ok, "{s:?}");
         assert!(s.hf_click_db > 20.0, "{s:?}");
+        // wrapping during a loud, bright hit: the step is among the track's largest, but no larger than the hit's own
+        let mut hit = good.clone();
+        for (k, x) in hit.iter_mut().enumerate() {
+            let t = k.min(n - k) as f64 / sr as f64;
+            *x += (0.4 * (-t * 300.0).exp() * (2.0 * std::f64::consts::PI * 5000.0 * (k as f64 + 0.3) / sr as f64).sin()) as f32;
+        }
+        let s = loop_seam(AudioRef::new(sr, &hit, &hit).unwrap(), &[]).unwrap();
+        assert!(s.jump[0] > s.p999_step[0] && s.jump_ok, "{s:?}");
     }
 
     /// A 4 s loop at 48 kHz: a 220 Hz tone (whole cycles, so the wrap is smooth) with one-sample clicks.

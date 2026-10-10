@@ -6,6 +6,7 @@ mod arrange;
 mod automation;
 mod clips;
 mod dialogs;
+mod effects;
 mod library;
 mod panels;
 mod roll;
@@ -51,6 +52,8 @@ enum Action {
     /// Show an insert effect's plugin in its own window.
     OpenInsert(u64),
     AddTrack,
+    /// Add a bus with this name, route these tracks into it, and select it.
+    AddBus(String, Vec<u64>),
     ShowOpen,
     /// Open a project file (unsaved changes were dealt with), or save first and then open it.
     Open(PathBuf),
@@ -277,6 +280,8 @@ pub struct Gui {
     /// The song position while an audition clip plays (the player then counts the clip's time).
     song_secs: f64,
     piano: Piano,
+    /// The mixer's form for a new bus.
+    bus_form: panels::BusForm,
     #[cfg(test)]
     feed: Option<Feed>,
 }
@@ -415,6 +420,7 @@ impl Gui {
             center_w: 560.0,
             song_secs: 0.0,
             piano: Piano::default(),
+            bus_form: Default::default(),
             #[cfg(test)]
             feed: None,
         }
@@ -572,6 +578,13 @@ impl Gui {
                     };
                     match self.sh.apply(&[Command::AddTrack { name, instrument: Instrument::None, color: None }], Source::Human) {
                         Ok(r) => self.selected = r.first().and_then(|v| v["track_id"].as_u64().or(v["id"].as_u64())).or(self.selected),
+                        Err(e) => self.say(format!("{e:#}")),
+                    }
+                }
+                Action::AddBus(name, tracks) => {
+                    let tracks = tracks.into_iter().map(TrackRef::Id).collect();
+                    match self.sh.apply(&[Command::AddBus { name, tracks, sends: vec![], mixer: None, color: None }], Source::Human) {
+                        Ok(r) => self.selected = r.first().and_then(|v| v["track_id"].as_u64()).or(self.selected),
                         Err(e) => self.say(format!("{e:#}")),
                     }
                 }

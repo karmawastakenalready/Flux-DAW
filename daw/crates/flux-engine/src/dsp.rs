@@ -35,6 +35,12 @@ pub enum FilterKind {
     Peak,
     LowShelf,
     HighShelf,
+    /// Removes a band (`q` sets its width).
+    Notch,
+    /// Passes a band, 0 dB at its centre.
+    Bandpass,
+    /// Flat magnitude, phase turning through 180 degrees at `hz`.
+    Allpass,
 }
 
 impl Biquad {
@@ -71,8 +77,23 @@ impl Biquad {
                     (a + 1.0) - (a - 1.0) * cw - s,
                 )
             }
+            FilterKind::Notch => (1.0, -2.0 * cw, 1.0, 1.0 + alpha, -2.0 * cw, 1.0 - alpha),
+            FilterKind::Bandpass => (alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cw, 1.0 - alpha),
+            FilterKind::Allpass => (1.0 - alpha, -2.0 * cw, 1.0 + alpha, 1.0 + alpha, -2.0 * cw, 1.0 - alpha),
         };
         Biquad { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+    }
+
+    /// The filter's gain at `hz` (dB).
+    pub fn magnitude_db(&self, hz: f64, sr: f64) -> f64 {
+        let w = 2.0 * PI * hz / sr;
+        let (s1, c1) = w.sin_cos();
+        let (s2, c2) = (2.0 * w).sin_cos();
+        let nr = self.b0 + self.b1 * c1 + self.b2 * c2;
+        let ni = -(self.b1 * s1 + self.b2 * s2);
+        let dr = 1.0 + self.a1 * c1 + self.a2 * c2;
+        let di = -(self.a1 * s1 + self.a2 * s2);
+        10.0 * ((nr * nr + ni * ni) / (dr * dr + di * di)).max(1e-30).log10()
     }
 
     #[inline]
@@ -178,12 +199,22 @@ pub fn eq_chain(sr: f64, bands: &[EqBand]) -> Chain {
             EqKind::Peak => FilterKind::Peak,
             EqKind::LowShelf => FilterKind::LowShelf,
             EqKind::HighShelf => FilterKind::HighShelf,
+            EqKind::Notch => FilterKind::Notch,
+            // two gentle shelves meeting at 0 dB at the pivot
+            EqKind::Tilt => {
+                c.push(Biquad::new(FilterKind::LowShelf, sr, b.hz, TILT_Q, -b.db));
+                c.push(Biquad::new(FilterKind::HighShelf, sr, b.hz, TILT_Q, b.db));
+                continue;
+            }
         };
-        let q = if matches!(b.kind, EqKind::Peak) { b.q } else { b.q.max(0.5) };
+        let q = if matches!(b.kind, EqKind::Peak | EqKind::Notch) { b.q } else { b.q.max(0.5) };
         c.push(Biquad::new(kind, sr, b.hz, q, b.db));
     }
     c
 }
+
+/// The slope of a tilt EQ's shelves: the gentlest the shelf law allows without a bump.
+const TILT_Q: f64 = 0.5;
 
 pub fn apply_eq(buf: &mut Stereo, sr: f64, bands: &[EqBand]) {
     eq_chain(sr, bands).process(&mut buf.0, &mut buf.1);
@@ -399,13 +430,18 @@ pub fn clip_s(l: &mut [f32], r: &mut [f32], db: f64) {
 
 /// 95th percentile of 400 ms short-term RMS over non-silent windows (dBFS): "how loud it gets".
 pub fn loud_level_db(buf: &Stereo, sr: f64) -> f64 {
+    loud_level_s(&buf.0, &buf.1, sr)
+}
+
+/// [`loud_level_db`] of two channels.
+pub fn loud_level_s(l: &[f32], r: &[f32], sr: f64) -> f64 {
     let w = (0.4 * sr) as usize;
-    let n = buf.0.len() / w.max(1);
+    let n = l.len().min(r.len()) / w.max(1);
     let mut v = vec![];
     for i in 0..n {
         let mut s = 0f64;
         for j in i * w..(i + 1) * w {
-            let m = (buf.0[j] as f64 + buf.1[j] as f64) * 0.5;
+            let m = (l[j] as f64 + r[j] as f64) * 0.5;
             s += m * m;
         }
         let db = 10.0 * (s / w as f64 + 1e-24).log10();
@@ -488,7 +524,7 @@ impl CompState {
 
 /// Noise gate: closes below the threshold (dBFS) with fast attack and a short release.
 pub fn gate(buf: &mut Stereo, sr: f64, gt: &Gate) {
-    GateState::new(sr, gt).process(&mut buf.0, &mut buf.1);
+    GateState::new(sr, gt).process(&mut buf.0, &mut buf.1, None);
 }
 
 pub struct GateState {
@@ -514,7 +550,8 @@ impl GateState {
         self.thr = db_to_lin(gt.threshold_db);
     }
 
-    pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
+    /// In place. `gains`: the gain applied at each sample is pushed.
+    pub fn process(&mut self, l: &mut [f32], r: &mut [f32], mut gains: Option<&mut Vec<f32>>) {
         for i in 0..l.len() {
             let x = l[i].abs().max(r[i].abs()) as f64;
             self.env = if x > self.env { x } else { self.det_rel * self.env + (1.0 - self.det_rel) * x };
@@ -526,6 +563,9 @@ impl GateState {
             };
             l[i] *= self.g as f32;
             r[i] *= self.g as f32;
+            if let Some(g) = gains.as_deref_mut() {
+                g.push(self.g as f32);
+            }
         }
     }
 }

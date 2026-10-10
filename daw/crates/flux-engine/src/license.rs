@@ -51,7 +51,9 @@ pub fn exposed_layers(tracks: &[TrackStat], layers: &[String]) -> Vec<(String, S
     // (restricted energy, total energy, restricted track names, vendor)
     let mut by_layer: BTreeMap<&str, (f64, f64, Vec<&str>, &str)> = BTreeMap::new();
     for t in tracks {
-        let e = if t.audible { 10f64.powf(t.rms_db / 10.0) } else { 0.0 };
+        // a bus's level is mostly what plays into it, counted with those tracks (its own instrument counts if restricted)
+        let counted = t.audible && !(t.bus && t.restricted.is_none());
+        let e = if counted { 10f64.powf(t.rms_db / 10.0) } else { 0.0 };
         let l = by_layer.entry(t.layer.as_str()).or_insert((0.0, 0.0, vec![], ""));
         l.1 += e;
         if let Some(v) = &t.restricted {
@@ -94,8 +96,7 @@ mod tests {
             warning: None,
             layer: layer.into(),
             restricted: restricted.then(|| "Spectrasonics".into()),
-            comp_loud_db: None,
-            timbre: None,
+            ..Default::default()
         }
     }
 
@@ -120,6 +121,13 @@ mod tests {
         let mut muted = stat("Muted keys", "pads", -10.0, false);
         muted.audible = false;
         let tracks = [stat("Pad", "pads", -20.0, true), muted, stat("Empty", "pads", -120.0, false)];
+        assert_eq!(exposed_layers(&tracks, &["pads".into()]).len(), 1);
+    }
+
+    #[test]
+    fn a_bus_doesnt_hide_a_restricted_part_playing_into_it() {
+        let bus = TrackStat { bus: true, ..stat("Pad bus", "pads", -12.0, false) };
+        let tracks = [stat("Pad", "pads", -20.0, true), bus];
         assert_eq!(exposed_layers(&tracks, &["pads".into()]).len(), 1);
     }
 

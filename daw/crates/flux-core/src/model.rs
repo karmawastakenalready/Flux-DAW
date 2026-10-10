@@ -112,6 +112,14 @@ fn is_zero(x: &f64) -> bool {
     *x == 0.0
 }
 
+fn is_one(x: &f64) -> bool {
+    *x == 1.0
+}
+
+fn d_one() -> f64 {
+    1.0
+}
+
 fn default_sr() -> u32 {
     44100
 }
@@ -263,6 +271,10 @@ pub enum EqKind {
     Peak,
     LowShelf,
     HighShelf,
+    /// Cuts a narrow band out at `hz` (`q` sets how narrow; `db` is ignored).
+    Notch,
+    /// Tilts the whole spectrum around `hz`: `db` above it and `-db` below, through gentle shelves (`q` is ignored).
+    Tilt,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -278,6 +290,8 @@ fn default_q() -> f64 {
     0.9
 }
 
+/// A compressor. Left out, the newer settings (knee, detector, sidechain filter, lookahead, auto release, mix) take
+/// the values that make it the plain feed-forward peak compressor older projects used.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Comp {
     /// dBFS, or dB relative to the signal's loud level (95th pct short-term RMS) when `relative`.
@@ -287,10 +301,153 @@ pub struct Comp {
     pub ratio: f64,
     #[serde(default = "d_attack")]
     pub attack_ms: f64,
+    /// With `auto_release`, the release after sustained compression; short peaks recover faster.
     #[serde(default = "d_release")]
     pub release_ms: f64,
     #[serde(default)]
     pub makeup_db: f64,
+    /// Soft knee (dB): the ratio eases in over this range around the threshold; 0 = a hard knee.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub knee_db: f64,
+    /// What it listens to: peaks (catches transients) or RMS (follows loudness, smoother on buses).
+    #[serde(default, skip_serializing_if = "Detector::is_peak")]
+    pub detector: Detector,
+    /// The detector hears the signal high-passed here (Hz), so the bass doesn't pump it; 0 = off.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub sidechain_hpf_hz: f64,
+    /// The audio runs this far behind the detector (ms), so even a fast transient is caught; 0 = none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lookahead_ms: f64,
+    /// Program-dependent release: fast after short peaks, `release_ms` after sustained compression.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub auto_release: bool,
+    /// Parallel compression: the compressed signal's share of the output (1 = all of it, 0.5 = an even blend
+    /// with the uncompressed signal).
+    #[serde(default = "d_one", skip_serializing_if = "is_one")]
+    pub mix: f64,
+}
+
+impl Default for Comp {
+    fn default() -> Self {
+        Comp {
+            threshold_db: -18.0,
+            relative: false,
+            ratio: 2.0,
+            attack_ms: d_attack(),
+            release_ms: d_release(),
+            makeup_db: 0.0,
+            knee_db: 0.0,
+            detector: Detector::Peak,
+            sidechain_hpf_hz: 0.0,
+            lookahead_ms: 0.0,
+            auto_release: false,
+            mix: 1.0,
+        }
+    }
+}
+
+/// What a compressor's level detector follows.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Detector {
+    /// The louder channel's instantaneous level.
+    #[default]
+    Peak,
+    /// The mean power over about 10 ms.
+    Rms,
+}
+
+impl Detector {
+    fn is_peak(&self) -> bool {
+        *self == Detector::Peak
+    }
+}
+
+/// A dynamic EQ band: turns its frequency range down only while that range is loud (a resonance that pops out,
+/// a boomy note), by up to `range_db`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DynBand {
+    /// Peak, low_shelf or high_shelf.
+    pub kind: EqKind,
+    pub hz: f64,
+    #[serde(default = "default_q")]
+    pub q: f64,
+    /// Where it starts acting: dB relative to the band's loud level (95th pct of its short-term RMS) when
+    /// `relative`, else dBFS.
+    pub threshold_db: f64,
+    #[serde(default = "d_true")]
+    pub relative: bool,
+    #[serde(default = "d_dyn_ratio")]
+    pub ratio: f64,
+    /// The most it turns the band down (dB, negative).
+    #[serde(default = "d_dyn_range")]
+    pub range_db: f64,
+    #[serde(default = "d_dyn_attack")]
+    pub attack_ms: f64,
+    #[serde(default = "d_dyn_release")]
+    pub release_ms: f64,
+}
+
+fn d_true() -> bool {
+    true
+}
+fn d_dyn_ratio() -> f64 {
+    3.0
+}
+fn d_dyn_range() -> f64 {
+    -6.0
+}
+fn d_dyn_attack() -> f64 {
+    5.0
+}
+fn d_dyn_release() -> f64 {
+    80.0
+}
+
+/// A de-esser: the band above `hz` is turned down while it's loud (sibilance, cymbal splash, pick noise).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DeEss {
+    #[serde(default = "d_deess_hz")]
+    pub hz: f64,
+    /// dB relative to the band's loud level: lower catches more.
+    #[serde(default = "d_deess_threshold")]
+    pub threshold_db: f64,
+    /// The most it turns the band down (dB, negative).
+    #[serde(default = "d_deess_range")]
+    pub range_db: f64,
+}
+
+impl Default for DeEss {
+    fn default() -> Self {
+        DeEss { hz: d_deess_hz(), threshold_db: d_deess_threshold(), range_db: d_deess_range() }
+    }
+}
+
+fn d_deess_hz() -> f64 {
+    6000.0
+}
+fn d_deess_threshold() -> f64 {
+    -6.0
+}
+fn d_deess_range() -> f64 {
+    -6.0
+}
+
+impl DeEss {
+    /// The dynamic band it runs as.
+    pub fn band(&self) -> DynBand {
+        DynBand {
+            kind: EqKind::HighShelf,
+            hz: self.hz,
+            q: 0.7,
+            threshold_db: self.threshold_db,
+            relative: true,
+            ratio: 4.0,
+            range_db: self.range_db,
+            attack_ms: 1.0,
+            release_ms: 60.0,
+        }
+    }
 }
 
 fn d_attack() -> f64 {
@@ -464,7 +621,10 @@ pub const FILTER_SLOPES: [u32; 4] = [12, 24, 36, 48];
 
 /// Per-track channel strip, applied in this order:
 /// pre inserts -> HPF/LPF -> EQ -> gain -> drive -> amp -> chorus -> bitcrush -> clip -> post gain -> gate -> compressor
-/// -> delay -> post inserts -> duck -> mono below -> width/pan -> sends.
+/// -> dynamic EQ -> de-esser -> delay -> reverb -> post inserts -> duck -> mono below -> width/pan -> sends and output.
+///
+/// A track whose output another track routes to (`output`), or that another sends to (`sends`), is a bus: its strip
+/// runs on its own sound (if it has an instrument) plus everything routed and sent to it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Mixer {
@@ -497,6 +657,46 @@ pub struct Mixer {
     /// VST3 effects, in processing order (each at its `position`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inserts: Vec<Insert>,
+    /// Dynamic EQ bands, after the compressor.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dyn_eq: Vec<DynBand>,
+    /// After the dynamic EQ.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deess: Option<DeEss>,
+    /// A built-in reverb after the delay. On an aux return, `mix` 1 makes the strip return only the reverb.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverb: Option<ReverbFx>,
+    /// The track (a group bus) this one's output goes to instead of the master.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<u64>,
+    /// Post-fader sends to other tracks (aux returns), besides `reverb_send` to the master's reverb.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sends: Vec<AuxSend>,
+}
+
+/// A post-fader send from a track to another track (an aux return).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AuxSend {
+    /// The receiving track's id.
+    pub to: u64,
+    /// 0..1, as `reverb_send`.
+    pub level: f64,
+}
+
+/// A reverb inside a channel strip.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ReverbFx {
+    #[serde(flatten)]
+    pub params: ReverbParams,
+    /// The reverb's share of the output: 1 = only the reverb (an aux return), 0.2 = mostly the dry signal.
+    #[serde(default = "d_one")]
+    pub mix: f64,
+}
+
+impl Default for ReverbFx {
+    fn default() -> Self {
+        ReverbFx { params: ReverbParams::default(), mix: 1.0 }
+    }
 }
 
 impl Default for Mixer {
@@ -525,24 +725,138 @@ impl Default for Mixer {
             duck: None,
             reverb_send: 0.0,
             inserts: vec![],
+            dyn_eq: vec![],
+            deess: None,
+            reverb: None,
+            output: None,
+            sends: vec![],
         }
     }
 }
 
+/// The built-in reverb's settings. Any left out take their defaults, except `algorithm`: left out, it's the classic
+/// reverb, as in older projects.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct ReverbParams {
+    /// 0..1: how big the space is (sets the decay time unless `decay_s` does).
     pub room_size: f64,
+    /// 0..1: how much faster the highs die away than the lows.
     pub damping: f64,
     pub predelay_ms: f64,
     pub hpf_hz: f64,
     pub lpf_hz: f64,
     pub return_db: f64,
+    /// Which reverb. Left out (older projects), the classic one.
+    #[serde(default, skip_serializing_if = "ReverbAlgorithm::is_classic")]
+    pub algorithm: ReverbAlgorithm,
+    /// Decay time (RT60, seconds) in place of the one `room_size` gives; 0 = from `room_size`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub decay_s: f64,
+    /// Stereo width of the reverb (0 = mono, 1 = full).
+    #[serde(default = "d_one", skip_serializing_if = "is_one")]
+    pub width: f64,
 }
 
 impl Default for ReverbParams {
     fn default() -> Self {
-        ReverbParams { room_size: 0.7, damping: 0.5, predelay_ms: 20.0, hpf_hz: 220.0, lpf_hz: 7500.0, return_db: 0.0 }
+        ReverbParams {
+            room_size: 0.7,
+            damping: 0.5,
+            predelay_ms: 20.0,
+            hpf_hz: 220.0,
+            lpf_hz: 7500.0,
+            return_db: 0.0,
+            algorithm: ReverbAlgorithm::Hall,
+            decay_s: 0.0,
+            width: 1.0,
+        }
     }
+}
+
+/// The built-in reverb's algorithms.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReverbAlgorithm {
+    /// The Freeverb-style reverb of older projects (mono in, metallic on long tails).
+    #[default]
+    Classic,
+    /// A small, dense room: early reflections and a short tail.
+    Room,
+    /// A large hall: slow build, smooth long tail.
+    Hall,
+    /// A bright, dense plate with no early reflections.
+    Plate,
+}
+
+impl ReverbAlgorithm {
+    fn is_classic(&self) -> bool {
+        *self == ReverbAlgorithm::Classic
+    }
+}
+
+/// The master's final limiter, after the loudness drive: a fast soft-clipping stage takes the sharpest peaks, then a
+/// lookahead stage holds the true peak under the ceiling. Older projects, which leave it out, get the settings the
+/// limiter had then (6 ms, no release, no clipping stage).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Limiter {
+    /// How far ahead it starts turning down for a peak (ms).
+    pub lookahead_ms: f64,
+    /// How slowly the gain recovers after limiting (ms); 0 = as fast as the lookahead.
+    pub release_ms: f64,
+    /// Program-dependent release: short peaks recover fast, sustained limiting at `release_ms`.
+    pub auto_release: bool,
+    /// The most the soft-clipping stage takes off the sharpest peaks before the lookahead stage (dB); 0 = off.
+    pub clip_db: f64,
+}
+
+impl Default for Limiter {
+    fn default() -> Self {
+        Limiter { lookahead_ms: 5.0, release_ms: 80.0, auto_release: true, clip_db: 1.0 }
+    }
+}
+
+impl Limiter {
+    /// The limiter of projects saved before it had settings.
+    pub fn classic() -> Limiter {
+        Limiter { lookahead_ms: 6.0, release_ms: 0.0, auto_release: false, clip_db: 0.0 }
+    }
+}
+
+/// A multiband compressor: the master split at `crossovers_hz` into bands (which sum back flat), each compressed
+/// on its own.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Multiband {
+    /// 1 to 3 crossover frequencies (Hz), ascending: 2 to 4 bands.
+    pub crossovers_hz: Vec<f64>,
+    /// One per band, low to high.
+    pub bands: Vec<MbBand>,
+}
+
+impl Default for Multiband {
+    fn default() -> Self {
+        let band = |threshold_db, ratio, attack_ms, release_ms| MbBand { threshold_db, ratio, attack_ms, release_ms, gain_db: 0.0 };
+        Multiband {
+            crossovers_hz: vec![150.0, 2500.0, 8000.0],
+            bands: vec![band(-4.0, 2.0, 30.0, 200.0), band(-3.0, 1.6, 20.0, 150.0), band(-3.0, 1.8, 10.0, 100.0), band(-4.0, 2.0, 5.0, 80.0)],
+        }
+    }
+}
+
+/// One band of the multiband compressor.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MbBand {
+    /// dB relative to the band's loud level (95th percentile of its short-term RMS).
+    pub threshold_db: f64,
+    pub ratio: f64,
+    #[serde(default = "d_attack")]
+    pub attack_ms: f64,
+    #[serde(default = "d_release")]
+    pub release_ms: f64,
+    /// The band's level after it (dB).
+    #[serde(default)]
+    pub gain_db: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -566,12 +880,24 @@ pub struct Master {
     /// Parameters of the master's and the reverb return's inserts over time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automation: Vec<crate::automation::Lane>,
+    /// The final limiter (see [`Limiter`]).
+    #[serde(default = "Limiter::classic")]
+    pub limiter: Limiter,
+    /// After the master EQ; None = off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiband: Option<Multiband>,
+    /// Below this the master is mono (Hz), after the multiband; 0 = off.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub mono_below_hz: f64,
+    /// The master's stereo width (0 = mono, 1 = as mixed, up to 2), with `mono_below_hz`.
+    #[serde(default = "d_one", skip_serializing_if = "is_one")]
+    pub width: f64,
 }
 
 impl Default for Master {
     fn default() -> Self {
         Master {
-            glue: Some(Comp { threshold_db: -3.0, relative: true, ratio: 1.8, attack_ms: 30.0, release_ms: 250.0, makeup_db: 0.0 }),
+            glue: Some(Comp { threshold_db: -3.0, relative: true, ratio: 1.8, attack_ms: 30.0, release_ms: 250.0, ..Comp::default() }),
             eq: vec![],
             target_lufs: -15.0,
             ceiling_dbtp: -1.0,
@@ -581,6 +907,10 @@ impl Default for Master {
             inserts: vec![],
             reverb_inserts: vec![],
             automation: vec![],
+            limiter: Limiter::default(),
+            multiband: None,
+            mono_below_hz: 0.0,
+            width: 1.0,
         }
     }
 }

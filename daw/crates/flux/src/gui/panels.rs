@@ -3,10 +3,10 @@
 use super::arrange::{engine_state, kind_label, section_color};
 use super::theme::*;
 use super::widgets::*;
-use super::{Action, Feed, Gui, Tab, master_cmd, menu_item, mixer_cmd, mmss};
+use super::{Action, Feed, Gui, Tab, effects, master_cmd, mixer_cmd, mmss};
 use crate::state::State;
 use flux_core::commands::{Bus, Command, MasterPatch, MixerPatch};
-use flux_core::{Chain, ChorusFx, Comp, Insert, InsertPosition, Instrument, Project, ReverbParams, Track, TrackRef};
+use flux_core::{Chain, ChorusFx, Comp, Insert, InsertPosition, Instrument, Project, ReverbFx, ReverbParams, Track, TrackRef};
 use flux_engine::render::TrackStat;
 use eframe::egui::{self, Align, Align2, Color32, CornerRadius, Id, Layout, Margin, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, UiBuilder, vec2};
 
@@ -56,8 +56,17 @@ fn insert_names(t: &Track) -> Vec<String> {
     if m.comp.is_some() {
         v.push("Comp".into());
     }
+    if !m.dyn_eq.is_empty() {
+        v.push(format!("Dyn EQ \u{d7}{}", m.dyn_eq.len()));
+    }
+    if m.deess.is_some() {
+        v.push("De-ess".into());
+    }
     if m.delay.is_some() {
         v.push("Delay".into());
+    }
+    if m.reverb.is_some() {
+        v.push("Reverb".into());
     }
     if m.duck.is_some() {
         v.push("Duck".into());
@@ -117,33 +126,49 @@ const STRIP_KNOB_W: f32 = 52.0;
 /// A cut's slope: a chip as wide as the cut's knob above it (a combo box is wider), opening a menu; greyed while the
 /// cut is off. Returns a new pick.
 fn slope_menu(ui: &mut egui::Ui, slope: u32, on: bool, which: &str) -> Option<u32> {
-    let (r, resp) = ui.allocate_exact_size(vec2(STRIP_KNOB_W, 20.0), if on { Sense::click() } else { Sense::hover() });
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, on, format!("{which} cut slope, {slope} dB per octave")));
-    let p = ui.painter();
-    p.rect(r, CornerRadius::same(R_CTRL), if on && resp.hovered() { HOVER } else { FIELD }, Stroke::new(1.0, LINE), StrokeKind::Inside);
-    let c = if on { TEXT2 } else { TEXT3 };
-    p.text(Pos2::new(r.left() + 7.0, r.center().y), Align2::LEFT_CENTER, format!("{slope} dB"), medium(10.5), c);
-    paint_icon(p, Rect::from_center_size(Pos2::new(r.right() - 10.0, r.center().y), vec2(10.0, 10.0)), Icon::Down, c);
+    let resp = chip(ui, STRIP_KNOB_W, &format!("{slope} dB"), on, &format!("{which} cut slope, {slope} dB per octave"));
     let resp = resp.on_hover_text(if on { format!("The {which} cut's slope: {slope} dB per octave") } else { format!("Turn the {which} cut on first") });
-    let mut pick = None;
-    egui::Popup::menu(&resp).show(|ui| {
-        for (v, note) in [(12, "gentle"), (24, ""), (36, ""), (48, "steep")] {
-            if menu_item(ui, 180.0, &format!("{v} dB per octave"), note, Some(v == slope), true) {
-                pick = Some(v);
-            }
-        }
-    });
-    pick.filter(|&v| v != slope)
+    let slopes = [(12, "12 dB per octave", "gentle"), (24, "24 dB per octave", ""), (36, "36 dB per octave", ""), (48, "48 dB per octave", "steep")];
+    menu_pick(&resp, slope, &slopes, 180.0)
 }
 
 /// Widths for the sections of an inspector tab, each given as (narrowest, full): every section gets its full width
 /// when the panel has room, and when it is narrower the flexible ones give up width, in proportion to what they can
-/// give, down to their narrowest (past that the tab scrolls).
+/// give, down to their narrowest. When even that doesn't fit, the tab scrolls and every section keeps its full width.
 fn fit_widths(avail: f32, sections: &[(f32, f32)]) -> Vec<f32> {
     let full: f32 = sections.iter().map(|s| s.1 + SECTION_PAD).sum();
     let slack: f32 = sections.iter().map(|s| s.1 - s.0).sum();
-    let short = (full - avail).clamp(0.0, slack);
-    sections.iter().map(|&(min, max)| if slack > 0.0 { (max - short * (max - min) / slack).floor() } else { max }).collect()
+    let short = full - avail;
+    if short <= 0.0 || short > slack {
+        return sections.iter().map(|s| s.1).collect();
+    }
+    sections.iter().map(|&(min, max)| (max - short * (max - min) / slack).floor()).collect()
+}
+
+/// Shows a panel's content in a scroll area whose bar stays faintly visible while the content runs past the edge (the
+/// theme's floating bars only appear on hover), so the sections or strips out of sight can be found.
+fn scroll_hinted<R>(ui: &mut egui::Ui, area: egui::ScrollArea, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let normal = ui.spacing().scroll;
+    ui.scope(|ui| {
+        ui.spacing_mut().scroll.dormant_handle_opacity = 0.5;
+        area.show(ui, |ui| {
+            // scroll areas inside keep the usual bars
+            ui.spacing_mut().scroll = normal;
+            add(ui)
+        })
+        .inner
+    })
+    .inner
+}
+
+/// A section that is as wide when the panel is narrow as when it is wide.
+fn fixed(w: f32) -> (f32, f32) {
+    (w, w)
+}
+
+/// An effect's section width: `w` while it's on, narrow while it's off.
+fn effect_w(on: bool, w: f32) -> (f32, f32) {
+    fixed(if on { w.max(effects::OFF_W) } else { effects::OFF_W })
 }
 
 /// The rows of an insert chain, in processing order (a track's pre inserts first).
@@ -287,6 +312,67 @@ fn value_box(ui: &egui::Ui, r: Rect, text: &str, color: Color32, fill: Color32) 
     p.text(r.center(), Align2::CENTER_CENTER, text, mono(10.0), color);
 }
 
+/// The mixer's form for a new bus: its name and the tracks to route into it.
+#[derive(Default)]
+pub(super) struct BusForm {
+    name: String,
+    tracks: Vec<u64>,
+}
+
+/// The first of "Bus 1", "Bus 2"... that no track is called.
+fn free_bus_name(p: &Project) -> String {
+    (1..).map(|n| format!("Bus {n}")).find(|n| p.tracks.iter().all(|t| t.name != *n)).unwrap_or_default()
+}
+
+/// A bus strip's name, tagged BUS and centred; it selects the bus like a track's name does.
+fn bus_name(ui: &mut egui::Ui, t: &Track, color: Color32) -> egui::Response {
+    let w = ui.available_width();
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 16.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &t.name));
+    let tag = ui.painter().layout_no_wrap("BUS".into(), semibold(8.0), TEXT2);
+    let tag_w = (tag.size().x + 6.0).round();
+    let g = one_line(ui, &t.name, medium(11.5), color, (w - tag_w - 4.0).max(8.0));
+    let x0 = (r.center().x - (tag_w + 4.0 + g.size().x) * 0.5).round();
+    let tr = Rect::from_min_size(Pos2::new(x0, (r.center().y - 6.0).round()), vec2(tag_w, 12.0));
+    let p = ui.painter();
+    p.rect_stroke(tr, 2.0, Stroke::new(1.0, TEXT3), StrokeKind::Inside);
+    p.galley(tr.center() - tag.size() * 0.5, tag, TEXT2);
+    p.galley(Pos2::new(tr.right() + 4.0, (r.center().y - g.size().y * 0.5).round()), g, color);
+    resp.on_hover_text(format!("{}: a bus. Other tracks play or send into it", t.name))
+}
+
+/// A strip's routing row: its output, as a field opening the output menu, and a small bar per send showing its level.
+/// Returns a change of output.
+fn strip_io(ui: &mut egui::Ui, p: &Project, t: &Track, row: Rect) -> Option<MixerPatch> {
+    let sends = &t.mixer.sends;
+    let shown = sends.len().min(4);
+    let bars_w = if shown == 0 { 0.0 } else { shown as f32 * 5.0 + 2.0 };
+    let fr = Rect::from_min_max(row.min, Pos2::new(row.right() - bars_w, row.bottom()));
+    let out = t.mixer.output.map(|o| effects::name_of(p, o));
+    let text = out.unwrap_or("Master");
+    let resp = ui.interact(fr, Id::new(("strip_out", t.id)), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("{} output, {text}", t.name)));
+    let pnt = ui.painter();
+    pnt.rect(fr, CornerRadius::same(R_CTRL), if resp.hovered() { HOVER } else { FIELD }, Stroke::new(1.0, LINE), StrokeKind::Inside);
+    let c = if out.is_some() { TEXT2 } else { TEXT3 };
+    let g = one_line(ui, text, medium(10.0), c, fr.width() - 10.0);
+    pnt.galley(Pos2::new(fr.left() + 5.0, (fr.center().y - g.size().y * 0.5).round()), g, c);
+    for (k, s) in sends.iter().take(shown).enumerate() {
+        let x = fr.right() + 4.0 + k as f32 * 5.0;
+        let br = Rect::from_min_max(Pos2::new(x, row.top() + 2.0), Pos2::new(x + 3.0, row.bottom() - 2.0));
+        pnt.rect_filled(br, 1.0, WELL);
+        let h = (br.height() * s.level.clamp(0.0, 1.0) as f32).round();
+        pnt.rect_filled(Rect::from_min_max(Pos2::new(br.left(), br.bottom() - h), br.max), 1.0, ACCENT);
+    }
+    if shown > 0 {
+        let list: Vec<String> = sends.iter().map(|s| format!("{} {}", effects::name_of(p, s.to), f_pct(s.level))).collect();
+        let bars = Rect::from_min_max(Pos2::new(fr.right() + 2.0, row.top()), row.max);
+        ui.interact(bars, Id::new(("strip_sends", t.id)), Sense::hover()).on_hover_text(format!("Sends: {}", list.join(", ")));
+    }
+    let resp = resp.on_hover_text(format!("Output: {text}. Click to change it"));
+    effects::output_menu(&resp, p, t)
+}
+
 /// A destructive button that asks twice: the first click arms it.
 fn danger_button(ui: &mut egui::Ui, text: &str, armed: bool) -> egui::Response {
     let g = ui.painter().layout_no_wrap(text.to_string(), medium(12.0), Color32::PLACEHOLDER);
@@ -314,6 +400,12 @@ impl Gui {
                 tab_strip(ui, &mut tab, &[(Tab::Mixer, "Mixer", None), (Tab::Track, "Track", None), (Tab::Master, "Master", None), (Tab::Analysis, "Analysis", None)]);
             },
             |ui| {
+                if self.tab == Tab::Mixer {
+                    self.bus_button(ui, &st.session.project, act);
+                    if sel.is_some() {
+                        vsep(ui, 16.0);
+                    }
+                }
                 if let Some(t) = sel {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     ui.label(RichText::new(&t.name).font(medium(12.0)).color(TEXT));
@@ -326,16 +418,65 @@ impl Gui {
         self.tab = tab;
         match self.tab {
             Tab::Mixer => self.mixer(ui, st, f, act),
-            Tab::Track => {
-                egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| self.track_tab(ui, st, f, act));
-            }
-            Tab::Master => {
-                egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| self.master_tab(ui, st, act));
-            }
+            Tab::Track => scroll_hinted(ui, egui::ScrollArea::both().auto_shrink([false, false]), |ui| self.track_tab(ui, st, f, act)),
+            Tab::Master => scroll_hinted(ui, egui::ScrollArea::both().auto_shrink([false, false]), |ui| self.master_tab(ui, st, act)),
             Tab::Analysis => {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.analysis_tab(ui, st));
             }
         }
+    }
+
+    /// The mixer's Bus button and its form: a name for the new bus and the tracks to route into it (the selected one
+    /// to begin with).
+    fn bus_button(&mut self, ui: &mut egui::Ui, p: &Project, act: &mut Vec<Action>) {
+        let resp = button_ex(ui, Some(Icon::Plus), "Bus", Kind::Quiet, true).on_hover_text("Add a bus: a track other tracks play into, to mix them as one");
+        if resp.clicked() {
+            let tracks = self.selected.filter(|id| p.tracks.iter().any(|t| t.id == *id)).into_iter().collect();
+            self.bus_form = BusForm { name: free_bus_name(p), tracks };
+        }
+        let form = &mut self.bus_form;
+        egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            const W: f32 = 240.0;
+            ui.set_width(W);
+            ui.spacing_mut().item_spacing.y = 6.0;
+            ui.label(RichText::new("New bus").font(semibold(12.0)).color(TEXT));
+            let edit = ui.add(text_field(&mut form.name, W, "Bus name"));
+            let name = form.name.trim().to_string();
+            let taken = p.tracks.iter().any(|t| t.name == name);
+            if taken {
+                ui.label(RichText::new("A track already has that name").font(body(11.0)).color(WARN));
+            }
+            ui.add_space(2.0);
+            caption(ui, if p.tracks.is_empty() { "No tracks to route into it yet" } else { "Tracks to route into it" });
+            egui::ScrollArea::vertical().max_height(176.0).auto_shrink([false, true]).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for t in &p.tracks {
+                    let on = form.tracks.contains(&t.id);
+                    if checkbox(ui, Check::from(on), true, &t.name).clicked() {
+                        if on {
+                            form.tracks.retain(|x| *x != t.id);
+                        } else {
+                            form.tracks.push(t.id);
+                        }
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let ok = !name.is_empty() && !taken;
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if (primary_button(ui, None, "Add bus", ok).clicked() || enter) && ok {
+                    // in track order, as the mixer shows them
+                    let tracks = p.tracks.iter().map(|t| t.id).filter(|id| form.tracks.contains(id)).collect();
+                    act.push(Action::AddBus(name.clone(), tracks));
+                    ui.close();
+                }
+                if quiet_button(ui, "Cancel").clicked() {
+                    ui.close();
+                }
+            });
+        });
     }
 
     // -----------------------------------------------------------------------------------------
@@ -351,11 +492,11 @@ impl Gui {
         ui.painter().rect_filled(master_r, 0.0, PANEL);
         ui.painter().vline(px(master_r.left()) - 1.0, area.y_range(), Stroke::new(1.0, LINE));
         let mut su = ui.new_child(UiBuilder::new().max_rect(strips_r).layout(Layout::left_to_right(Align::Min)));
-        egui::ScrollArea::horizontal().id_salt("mixer_strips").auto_shrink([false, false]).show(&mut su, |ui| {
+        scroll_hinted(&mut su, egui::ScrollArea::horizontal().id_salt("mixer_strips").auto_shrink([false, false]), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             for t in &p.tracks {
                 let stat = stats.and_then(|s| s.iter().find(|x| x.id == t.id));
-                self.strip(ui, f, t, stat, strips_r.height(), act);
+                self.strip(ui, f, p, t, stat, strips_r.height(), act);
             }
         });
         if p.tracks.is_empty() {
@@ -368,15 +509,21 @@ impl Gui {
         ui.allocate_rect(area, Sense::hover());
     }
 
-    fn strip(&mut self, ui: &mut egui::Ui, f: &Feed, t: &Track, stat: Option<&TrackStat>, h: f32, act: &mut Vec<Action>) {
+    /// A track's channel strip. While the project routes tracks into buses, every strip gets a row for its output and
+    /// sends; a bus's strip is lighter, and tagged.
+    #[allow(clippy::too_many_arguments)]
+    fn strip(&mut self, ui: &mut egui::Ui, f: &Feed, p: &Project, t: &Track, stat: Option<&TrackStat>, h: f32, act: &mut Vec<Action>) {
         let (r, resp) = ui.allocate_exact_size(vec2(STRIP_W, h), Sense::click());
         if !ui.is_rect_visible(r) {
             return;
         }
         let sel = self.selected == Some(t.id);
+        let bus = effects::is_bus(p, t);
+        let io = p.tracks.iter().any(|x| x.mixer.output.is_some() || !x.mixer.sends.is_empty());
         let c = col(t.color);
         let pnt = ui.painter().clone();
-        pnt.rect_filled(r, 0.0, if sel { PANEL.lerp_to_gamma(ACCENT, 0.12) } else { PANEL });
+        let fill = if bus { HEADER } else { PANEL };
+        pnt.rect_filled(r, 0.0, if sel { fill.lerp_to_gamma(ACCENT, 0.12) } else { fill });
         pnt.vline(px(r.right()) - 1.0, r.y_range(), Stroke::new(1.0, LINE));
         pnt.rect_filled(Rect::from_min_size(r.min, vec2(STRIP_W - 1.0, 3.0)), 0.0, if t.mixer.mute { dimmed(c) } else { c });
         if resp.clicked() {
@@ -387,7 +534,12 @@ impl Gui {
         let text_r = Rect::from_min_max(Pos2::new(r.left() + 5.0, r.top() + 9.0), Pos2::new(r.right() - 6.0, r.top() + 42.0));
         let mut tu = ui.new_child(UiBuilder::new().max_rect(text_r).layout(Layout::top_down(Align::Center)));
         tu.spacing_mut().item_spacing.y = 1.0;
-        let name = tu.add(egui::Label::new(RichText::new(&t.name).font(medium(11.5)).color(if t.mixer.mute { TEXT3 } else { TEXT })).truncate().sense(Sense::click()));
+        let name_c = if t.mixer.mute { TEXT3 } else { TEXT };
+        let name = if bus {
+            bus_name(&mut tu, t, name_c)
+        } else {
+            tu.add(egui::Label::new(RichText::new(&t.name).font(medium(11.5)).color(name_c)).truncate().sense(Sense::click()))
+        };
         if name.clicked() {
             self.selected = Some(t.id);
         }
@@ -403,8 +555,17 @@ impl Gui {
             }
         }
 
-        // pan and reverb send
-        let knobs = Rect::from_min_size(Pos2::new(r.left() + 2.0, r.top() + 48.0), vec2(80.0, 54.0));
+        // where it goes, then pan and reverb send
+        let top = if io {
+            let row = Rect::from_min_size(Pos2::new(r.left() + 6.0, r.top() + 46.0), vec2(STRIP_W - 13.0, 18.0));
+            if let Some(m) = strip_io(ui, p, t, row) {
+                act.push(mixer_cmd(t.id, m));
+            }
+            r.top() + 70.0
+        } else {
+            r.top() + 48.0
+        };
+        let knobs = Rect::from_min_size(Pos2::new(r.left() + 2.0, top), vec2(80.0, 54.0));
         let mut ku = ui.new_child(UiBuilder::new().max_rect(knobs).layout(Layout::left_to_right(Align::Min)));
         ku.spacing_mut().item_spacing.x = 0.0;
         if let Some(v) = Knob::new("Pan", -1.0, 1.0, 0.0, f_pan).bipolar().size(24.0).width(40.0).show(&mut ku, Id::new(("k_pan", t.id)), t.mixer.pan) {
@@ -415,7 +576,7 @@ impl Gui {
         }
 
         // meter and fader
-        let y0 = r.top() + 108.0;
+        let y0 = top + 60.0;
         let y1 = (r.bottom() - 58.0).max(y0 + 60.0);
         let m = self.meters.track(t.id);
         let mr = Rect::from_min_max(Pos2::new(r.left() + 10.0, y0 + 8.0), Pos2::new(r.left() + 16.0, y1 - 8.0));
@@ -483,6 +644,22 @@ impl Gui {
             meter_bar(&p, br, true, b.level, b.hold);
         }
         meter_scale(&p, mr, true, &[0.0, -6.0, -10.0, -20.0, -30.0, -40.0, -60.0], mr.right() + 2.0);
+
+        // how much the limiter took off at the last render, hanging from the top (0 to 12 dB)
+        let gr = Rect::from_min_max(Pos2::new(r.left() + 55.0, mr.top()), Pos2::new(r.left() + 61.0, mr.bottom()));
+        p.rect_filled(gr, 1.0, WELL);
+        p.text(Pos2::new(gr.center().x, mr.top() - 8.0), Align2::CENTER_CENTER, "GR", mono(8.5), TEXT3);
+        let gr_tip = match &st.render {
+            Some(rr) => {
+                let db = -rr.out.limiter_gr_db.min(0.0);
+                let h = (gr.height() * (db.min(12.0) / 12.0) as f32).round();
+                let stale = rr.revision != st.session.revision;
+                p.rect_filled(Rect::from_min_size(gr.min, vec2(gr.width(), h)), 1.0, if stale { TEXT3 } else { ACCENT });
+                format!("The limiter took up to {db:.1} dB off at the last render{}", if stale { " (out of date)" } else { "" })
+            }
+            None => "The limiter's gain reduction: render to measure it".to_string(),
+        };
+        ui.interact(gr.expand2(vec2(3.0, 0.0)), Id::new("master_gr"), Sense::hover()).on_hover_text(gr_tip);
         let hold = self.meters.out[0].hold.max(self.meters.out[1].hold);
         let pr = Rect::from_min_size(Pos2::new(r.left() + 8.0, r.bottom() - 26.0), vec2(44.0, 18.0));
         let clip = self.meters.clipped;
@@ -556,8 +733,27 @@ impl Gui {
             };
             ui.ctx().data_mut(|d| d.insert_temp(Id::new("rename_for"), id));
         }
-        // the default window (1560 px less the 330 px side panel) shows every section
-        let w = fit_widths(ui.available_width(), &[(204.0, 236.0), (232.0, 320.0), (CHANNEL_W, CHANNEL_W), (248.0, INSERTS_W)]);
+        // the sections follow the signal: the strip's own effects, its inserts, then where it goes
+        let mx = &t.mixer;
+        let w = fit_widths(
+            ui.available_width(),
+            &[
+                (204.0, 236.0),
+                (232.0, 320.0),
+                fixed(CHANNEL_W),
+                effect_w(!mx.eq.is_empty(), effects::EQ_W),
+                effect_w(mx.comp.is_some(), effects::knobs_w(5, STRIP_KNOB_W)),
+                effect_w(!mx.dyn_eq.is_empty(), effects::DYN_EQ_W),
+                effect_w(mx.deess.is_some(), effects::knobs_w(3, STRIP_KNOB_W)),
+                effect_w(mx.reverb.is_some(), effects::knobs_w(5, STRIP_KNOB_W)),
+                (248.0, INSERTS_W),
+                fixed(effects::ROUTING_W),
+            ],
+        );
+        // what the last render measured where the effects listen (their relative thresholds count from it)
+        let last = st.render.as_deref();
+        let stat = last.and_then(|r| r.out.tracks.iter().find(|s| s.id == id));
+        let was = last.and_then(|r| r.project.tracks.iter().find(|x| x.id == id)).map(|x| &x.mixer);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let counts = if t.is_audio() {
@@ -688,7 +884,6 @@ impl Gui {
             });
 
             section(ui, w[2], "Channel strip", "Drag a knob (Shift: fine), double-click to reset", |ui| {
-                let mx = &t.mixer;
                 let k = |ui: &mut egui::Ui, knob: Knob, key: &str, v: f64, make: &dyn Fn(f64) -> MixerPatch, act: &mut Vec<Action>| {
                     if let Some(x) = knob.show(ui, Id::new((key, id)), v) {
                         act.push(mixer_cmd(id, make(x)));
@@ -731,13 +926,7 @@ impl Gui {
                             let v = chorus.then_some(ChorusFx { rate_hz: 0.5, depth: 0.3, mix: 0.4, centre_delay_ms: 7.0 });
                             act.push(mixer_cmd(id, MixerPatch { chorus: Some(v), ..Default::default() }));
                         }
-                        let mut comp = mx.comp.is_some();
-                        if switch(ui, &mut comp, "Compressor") {
-                            let v = comp.then_some(Comp { threshold_db: -6.0, relative: true, ratio: 3.0, attack_ms: 10.0, release_ms: 120.0, makeup_db: 0.0 });
-                            act.push(mixer_cmd(id, MixerPatch { comp: Some(v), ..Default::default() }));
-                        }
                         let others: Vec<&str> = [
-                            (!mx.eq.is_empty()).then_some("EQ"),
                             mx.gate.is_some().then_some("gate"),
                             mx.delay.is_some().then_some("delay"),
                             mx.duck.is_some().then_some("sidechain duck"),
@@ -754,9 +943,57 @@ impl Gui {
                 });
             });
 
-            let n = t.mixer.inserts.len();
-            let sub = if n == 0 { "VST3 effects on this track".to_string() } else { format!("{n} VST3 effect{}, in order", if n == 1 { "" } else { "s" }) };
-            section(ui, w[3], "Inserts", &sub, |ui| inserts_ui(ui, p, Chain::Track(id), act));
+            let plural = |n: usize| if n == 1 { "" } else { "s" };
+            let n = mx.eq.len();
+            let sub = if n == 0 { "After the low and high cuts".to_string() } else { format!("{n} band{}, after the cuts", plural(n)) };
+            section(ui, w[3], "EQ", &sub, |ui| {
+                if let Some(v) = effects::eq(ui, &format!("t_eq_{id}"), "EQ", &mx.eq) {
+                    act.push(mixer_cmd(id, MixerPatch { eq: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[4], "Compressor", "Evens out the level", |ui| {
+                let fresh = Comp { threshold_db: -6.0, relative: true, ratio: 3.0, attack_ms: 10.0, release_ms: 120.0, ..Comp::default() };
+                if let Some(v) = effects::comp(ui, &format!("t_comp_{id}"), mx.comp, fresh, STRIP_KNOB_W, stat.and_then(|s| s.comp_loud_db)) {
+                    act.push(mixer_cmd(id, MixerPatch { comp: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[5], "Dynamic EQ", "Turns bands down when loud", |ui| {
+                // a band's level counts while it listens where it did at the render
+                let loud: Vec<Option<f64>> = mx
+                    .dyn_eq
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| {
+                        let same = was.and_then(|m| m.dyn_eq.get(i)).is_some_and(|r| r.kind == b.kind && r.hz == b.hz && r.q == b.q);
+                        stat.filter(|_| same).and_then(|s| s.dyn_eq_loud_db.get(i).copied())
+                    })
+                    .collect();
+                if let Some(v) = effects::dyn_eq(ui, &format!("t_dyn_{id}"), &mx.dyn_eq, &loud) {
+                    act.push(mixer_cmd(id, MixerPatch { dyn_eq: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[6], "De-esser", "Tames harsh highs", |ui| {
+                let same = was.and_then(|m| m.deess).map(|d| d.hz) == mx.deess.map(|d| d.hz);
+                let loud = stat.filter(|_| same).and_then(|s| s.deess_loud_db);
+                if let Some(v) = effects::deess(ui, &format!("t_deess_{id}"), mx.deess, STRIP_KNOB_W, loud) {
+                    act.push(mixer_cmd(id, MixerPatch { deess: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[7], "Reverb", "The track's own reverb", |ui| {
+                // an aux return is all reverb; on a track playing itself, some
+                let fresh = ReverbFx { mix: if effects::aux_return(p, t) { 1.0 } else { 0.25 }, ..ReverbFx::default() };
+                if let Some(v) = effects::strip_reverb(ui, &format!("t_verb_{id}"), mx.reverb, fresh, STRIP_KNOB_W) {
+                    act.push(mixer_cmd(id, MixerPatch { reverb: Some(v), ..Default::default() }));
+                }
+            });
+            let n = mx.inserts.len();
+            let sub = if n == 0 { "VST3 effects on this track".to_string() } else { format!("{n} VST3 effect{}, in order", plural(n)) };
+            section(ui, w[8], "Inserts", &sub, |ui| inserts_ui(ui, p, Chain::Track(id), act));
+            section(ui, w[9], "Routing", "Output and sends", |ui| {
+                if let Some(m) = effects::routing(ui, &format!("t_route_{id}"), p, t, w[9]) {
+                    act.push(mixer_cmd(id, m));
+                }
+            });
         });
     }
 
@@ -764,17 +1001,31 @@ impl Gui {
     // master
 
     fn master_tab(&mut self, ui: &mut egui::Ui, st: &State, act: &mut Vec<Action>) {
-        // every section is as wide as its row of knobs
+        // the knob sections are as wide as their rows of knobs
         const KNOB_W: f32 = 56.0;
-        let row_w = |n: usize| n as f32 * KNOB_W + (n - 1) as f32 * 4.0;
-        let m = &st.session.project.master;
+        let row_w = |n: usize| effects::knobs_w(n, KNOB_W);
+        let p = &st.session.project;
+        let m = &p.master;
+        let last = st.render.as_deref();
         let mk = |ui: &mut egui::Ui, knob: Knob, key: &str, v: f64, make: &dyn Fn(f64) -> MasterPatch, act: &mut Vec<Action>| {
             if let Some(x) = knob.width(KNOB_W).show(ui, Id::new(key), v) {
                 act.push(master_cmd(make(x)));
             }
         };
-        // the glue compressor shares the loudness column, so the default window shows every section
-        let w = fit_widths(ui.available_width(), &[(row_w(4), row_w(4)), (row_w(6), row_w(6)), (248.0, INSERTS_W), (248.0, INSERTS_W)]);
+        // the loudness and its limiter first, then the chain in the order it runs, the reverb and the inserts
+        let w = fit_widths(
+            ui.available_width(),
+            &[
+                fixed(row_w(4)),
+                effect_w(m.glue.is_some(), row_w(5)),
+                effect_w(!m.eq.is_empty(), effects::EQ_W),
+                effect_w(m.multiband.is_some(), effects::MULTIBAND_W),
+                fixed(effects::OFF_W),
+                fixed(row_w(4)),
+                (248.0, INSERTS_W),
+                (248.0, INSERTS_W),
+            ],
+        );
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             section(ui, w[0], "Loudness", "The mix is driven to the target automatically", |ui| {
@@ -786,49 +1037,76 @@ impl Gui {
                     mk(ui, Knob::new("Edge fade", 1.0, 2000.0, 6.0, f_ms).scale(Scale::Log), "m_fade", m.edge_fade_ms.max(1.0), &|v| MasterPatch { edge_fade_ms: Some(v), ..Default::default() }, act);
                 });
                 ui.add_space(14.0);
-                ui.label(RichText::new("Glue compressor").font(semibold(12.0)).color(TEXT));
-                ui.label(RichText::new("Threshold is relative to the mix's loud level").font(body(11.0)).color(TEXT3));
+                ui.label(RichText::new("Limiter").font(semibold(12.0)).color(TEXT));
+                ui.label(RichText::new("Holds the true peak under the ceiling").font(body(11.0)).color(TEXT3));
                 ui.add_space(8.0);
-                let mut on = m.glue.is_some();
-                let label = if on { "On" } else { "Off" };
-                if switch(ui, &mut on, label) {
-                    let g = on.then_some(Comp { threshold_db: -3.0, relative: true, ratio: 1.8, attack_ms: 30.0, release_ms: 250.0, makeup_db: 0.0 });
+                if let Some(l) = effects::limiter(ui, "m_limiter", m.limiter, KNOB_W) {
+                    act.push(master_cmd(MasterPatch { limiter: Some(l), ..Default::default() }));
+                }
+                ui.add_space(4.0);
+                let gr = match last {
+                    Some(r) => format!("It took up to {:.1} dB off at the last render", -r.out.limiter_gr_db.min(0.0)),
+                    None => "Render to see how much it takes off".to_string(),
+                };
+                caption(ui, &gr);
+            });
+            section(ui, w[1], "Glue compressor", "Holds the mix together", |ui| {
+                let fresh = Comp { threshold_db: -3.0, relative: true, ratio: 1.8, attack_ms: 30.0, release_ms: 250.0, ..Comp::default() };
+                if let Some(g) = effects::comp(ui, "m_glue", m.glue, fresh, KNOB_W, last.and_then(|r| r.out.glue_loud_db)) {
                     act.push(master_cmd(MasterPatch { glue: Some(g), ..Default::default() }));
                 }
-                ui.add_space(6.0);
-                if let Some(g) = m.glue {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        mk(ui, Knob::new("Threshold", -40.0, 0.0, -3.0, f_db), "g_thr", g.threshold_db, &move |v| MasterPatch { glue: Some(Some(Comp { threshold_db: v, ..g })), ..Default::default() }, act);
-                        mk(ui, Knob::new("Ratio", 1.0, 10.0, 1.8, f_ratio).scale(Scale::Log), "g_ratio", g.ratio, &move |v| MasterPatch { glue: Some(Some(Comp { ratio: v, ..g })), ..Default::default() }, act);
-                        mk(ui, Knob::new("Attack", 0.1, 200.0, 30.0, f_ms).scale(Scale::Log), "g_att", g.attack_ms, &move |v| MasterPatch { glue: Some(Some(Comp { attack_ms: v, ..g })), ..Default::default() }, act);
-                        mk(ui, Knob::new("Release", 5.0, 2000.0, 250.0, f_ms).scale(Scale::Log), "g_rel", g.release_ms, &move |v| MasterPatch { glue: Some(Some(Comp { release_ms: v, ..g })), ..Default::default() }, act);
-                    });
+            });
+            let n = m.eq.len();
+            let sub = if n == 0 { "After the glue".to_string() } else { format!("{n} band{}, after the glue", if n == 1 { "" } else { "s" }) };
+            section(ui, w[2], "EQ", &sub, |ui| {
+                if let Some(v) = effects::eq(ui, "m_eq", "Master EQ", &m.eq) {
+                    act.push(master_cmd(MasterPatch { eq: Some(v), ..Default::default() }));
                 }
             });
-            section(ui, w[1], "Shared reverb", "Every track's Verb knob sends here", |ui| {
-                let rv = m.reverb;
+            section(ui, w[3], "Multiband", "Compresses each band apart", |ui| {
+                // the bands' levels count while they split where they did at the render
+                let rendered = last.and_then(|r| r.project.master.multiband.as_ref()).map(|x| &x.crossovers_hz);
+                let same = rendered.is_some() && rendered == m.multiband.as_ref().map(|x| &x.crossovers_hz);
+                let loud: Vec<Option<f64>> = match (last, &m.multiband) {
+                    (Some(r), Some(mb)) if same => (0..mb.bands.len()).map(|i| r.out.multiband_loud_db.get(i).copied()).collect(),
+                    _ => vec![],
+                };
+                if let Some(v) = effects::multiband(ui, "m_multiband", m.multiband.as_ref(), &loud) {
+                    act.push(master_cmd(MasterPatch { multiband: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[4], "Image", "Stereo, before the limiter", |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    mk(ui, Knob::new("Room", 0.0, 1.0, 0.7, f_pct), "r_room", rv.room_size, &move |v| MasterPatch { reverb: Some(ReverbParams { room_size: v, ..rv }), ..Default::default() }, act);
-                    mk(ui, Knob::new("Damping", 0.0, 1.0, 0.5, f_pct), "r_damp", rv.damping, &move |v| MasterPatch { reverb: Some(ReverbParams { damping: v, ..rv }), ..Default::default() }, act);
-                    mk(ui, Knob::new("Pre-delay", 0.0, 200.0, 20.0, f_ms), "r_pre", rv.predelay_ms, &move |v| MasterPatch { reverb: Some(ReverbParams { predelay_ms: v, ..rv }), ..Default::default() }, act);
-                    mk(ui, Knob::new("Low cut", 20.0, 2000.0, 220.0, f_hz).scale(Scale::Log), "r_hpf", rv.hpf_hz, &move |v| MasterPatch { reverb: Some(ReverbParams { hpf_hz: v, ..rv }), ..Default::default() }, act);
-                    mk(ui, Knob::new("High cut", 1000.0, 20000.0, 7500.0, f_hz).scale(Scale::Log), "r_lpf", rv.lpf_hz, &move |v| MasterPatch { reverb: Some(ReverbParams { lpf_hz: v, ..rv }), ..Default::default() }, act);
-                    mk(ui, Knob::new("Return", -40.0, 12.0, 0.0, f_db), "r_ret", rv.return_db, &move |v| MasterPatch { reverb: Some(ReverbParams { return_db: v, ..rv }), ..Default::default() }, act);
+                    mk(ui, Knob::new("Mono below", 20.0, 500.0, 0.0, f_hz).scale(Scale::LogOff), "m_mono", m.mono_below_hz, &|v| MasterPatch { mono_below_hz: Some(v), ..Default::default() }, act);
+                    mk(ui, Knob::new("Width", 0.0, 2.0, 1.0, f_pct), "m_width", m.width, &|v| MasterPatch { width: Some(v), ..Default::default() }, act);
                 });
+            });
+            section(ui, w[5], "Shared reverb", "Every track's Verb knob sends here", |ui| {
+                let rv = m.reverb;
+                let mut out = effects::algorithm(ui, "m_reverb", rv);
+                for row in [
+                    [(effects::Rv::Size, "Room"), (effects::Rv::Decay, "Decay"), (effects::Rv::Predelay, "Pre-delay"), (effects::Rv::Damping, "Damping")],
+                    [(effects::Rv::Width, "Width"), (effects::Rv::LowCut, "Low cut"), (effects::Rv::HighCut, "High cut"), (effects::Rv::Level, "Return")],
+                ] {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        for (which, label) in row {
+                            out = effects::reverb_knob(ui, "m_reverb", rv, which, label, KNOB_W).or(out);
+                        }
+                    });
+                }
+                if let Some(r) = out {
+                    act.push(master_cmd(MasterPatch { reverb: Some(r), ..Default::default() }));
+                }
                 if !m.reverb_inserts.is_empty() {
                     ui.add_space(4.0);
                     caption(ui, "Replaced by the reverb return's inserts (Return still sets their level)");
                 }
-                if !m.eq.is_empty() {
-                    ui.add_space(4.0);
-                    caption(ui, &format!("Master EQ: {} bands (set by the agent)", m.eq.len()));
-                }
             });
-            let p = &st.session.project;
-            section(ui, w[2], "Reverb return", "Effects here replace the shared reverb", |ui| inserts_ui(ui, p, Chain::Reverb, act));
-            section(ui, w[3], "Master inserts", "After the reverb joins, before glue", |ui| inserts_ui(ui, p, Chain::Master, act));
+            section(ui, w[6], "Reverb return", "Effects here replace the shared reverb", |ui| inserts_ui(ui, p, Chain::Reverb, act));
+            section(ui, w[7], "Master inserts", "After the reverb joins, before glue", |ui| inserts_ui(ui, p, Chain::Master, act));
         });
     }
 
@@ -1005,5 +1283,33 @@ impl Gui {
                 });
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sections_give_up_width_or_keep_it_and_scroll() {
+        let sections = [(100.0, 200.0), fixed(300.0)];
+        // room for every section (each with its 32 px of padding)
+        assert_eq!(fit_widths(1000.0, &sections), vec![200.0, 300.0]);
+        // 44 px short: the flexible one gives them up
+        assert_eq!(fit_widths(520.0, &sections), vec![156.0, 300.0]);
+        // shorter than the narrowest: full widths, and the tab scrolls
+        assert_eq!(fit_widths(400.0, &sections), vec![200.0, 300.0]);
+        assert_eq!(effect_w(false, 400.0), fixed(effects::OFF_W));
+        assert_eq!(effect_w(true, 400.0), fixed(400.0));
+    }
+
+    #[test]
+    fn new_buses_get_free_names() {
+        let mut p = Project::new("t", 120.0, 4);
+        assert_eq!(free_bus_name(&p), "Bus 1");
+        for n in ["Bus 1", "Bus 2"] {
+            flux_core::commands::apply(&mut p, &Command::AddTrack { name: n.into(), instrument: Instrument::None, color: None }).unwrap();
+        }
+        assert_eq!(free_bus_name(&p), "Bus 3");
     }
 }

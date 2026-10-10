@@ -40,6 +40,7 @@ struct ExtendedLimits {
 
 const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+const JOB_OBJECT_LIMIT_BREAKAWAY_OK: u32 = 0x0800;
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -48,7 +49,8 @@ unsafe extern "system" {
     fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
 }
 
-/// A job that ends the processes in it when this program exits (its handle, never closed, closes then).
+/// A job that ends the processes in it when this program exits (its handle, never closed, closes then). A process
+/// started to outlive the command may leave it (Uninstall's clean-up, which deletes this program once it has exited).
 fn kill_on_exit_job() -> Option<*mut c_void> {
     // SAFETY: kernel32 calls with null optional arguments and a limits structure laid out as Windows defines it,
     // which outlives the call.
@@ -58,7 +60,7 @@ fn kill_on_exit_job() -> Option<*mut c_void> {
             return None;
         }
         let mut limits = ExtendedLimits::default();
-        limits.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        limits.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
         let ok = SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, (&raw const limits).cast(), size_of::<ExtendedLimits>() as u32);
         (ok != 0).then_some(job)
     }

@@ -451,7 +451,12 @@ fn run_uninstall(app_dir: &Path, args: &[String]) -> Result<u8> {
             println!("Kept {}", k.display());
         }
     }
-    println!("Flux is uninstalled; its folder goes once this command ends. Your songs are in {}.", flux_engine::paths::documents().display());
+    let songs = flux_engine::paths::documents();
+    if songs.is_dir() {
+        println!("Flux is uninstalled; its folder goes once this command ends. Your songs are in {}.", songs.display());
+    } else {
+        println!("Flux is uninstalled; its folder goes once this command ends.");
+    }
     Ok(u8::from(!report.agents.iter().all(agents::Outcome::ok)))
 }
 

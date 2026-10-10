@@ -137,7 +137,7 @@ fn mixer_from(cfg: &Value, notes: &mut Vec<String>, name: &str) -> Mixer {
             ratio: c.get(1).and_then(|x| x.as_f64()).unwrap_or(2.0),
             attack_ms: 15.0,
             release_ms: 150.0,
-            makeup_db: 0.0,
+            ..Comp::default()
         });
     }
     if let Some(fx) = cfg.get("fx").and_then(|x| x.as_array()) {
@@ -240,6 +240,10 @@ pub fn import_pipeline(meta_path: &Path) -> Result<Project> {
                 hpf_hz: g("return_hpf", 220.0),
                 lpf_hz: g("return_lpf", 7500.0),
                 return_db: g("return_gain_db", 0.0),
+                // the Python pipeline's reverb
+                algorithm: flux_core::ReverbAlgorithm::Classic,
+                decay_s: 0.0,
+                width: 1.0,
             };
         }
         if let Some(eq) = m.get("master_eq") {
@@ -253,7 +257,7 @@ pub fn import_pipeline(meta_path: &Path) -> Result<Project> {
                 ratio: x(1, 1.8),
                 attack_ms: x(2, 30.0),
                 release_ms: x(3, 250.0),
-                makeup_db: 0.0,
+                ..Comp::default()
             });
         }
         if let Some(v) = m.get("target_lufs").and_then(|v| v.as_f64()) {

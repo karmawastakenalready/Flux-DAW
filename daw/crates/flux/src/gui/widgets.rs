@@ -115,6 +115,40 @@ pub enum Scale {
     LogOff,
 }
 
+/// Where `v` sits along `min..max` on `scale`, 0..1.
+fn to_norm(min: f64, max: f64, scale: Scale, v: f64) -> f64 {
+    let span_log = max.ln() - min.ln();
+    let n = match scale {
+        Scale::Linear => (v - min) / (max - min),
+        Scale::Log => (v.max(min).ln() - min.ln()) / span_log,
+        Scale::LogOff => {
+            if v <= 0.0 {
+                0.0
+            } else {
+                0.03 + 0.97 * (v.max(min).ln() - min.ln()) / span_log
+            }
+        }
+    };
+    n.clamp(0.0, 1.0)
+}
+
+/// The value at `n` (0..1) along `min..max` on `scale`.
+fn from_norm(min: f64, max: f64, scale: Scale, n: f64) -> f64 {
+    let n = n.clamp(0.0, 1.0);
+    let (a, b) = (min.ln(), max.ln());
+    match scale {
+        Scale::Linear => min + n * (max - min),
+        Scale::Log => (a + n * (b - a)).exp(),
+        Scale::LogOff => {
+            if n < 0.03 {
+                0.0
+            } else {
+                (a + (n - 0.03) / 0.97 * (b - a)).exp()
+            }
+        }
+    }
+}
+
 pub struct Knob<'a> {
     label: &'a str,
     min: f64,
@@ -149,35 +183,11 @@ impl<'a> Knob<'a> {
     }
 
     fn norm(&self, v: f64) -> f64 {
-        let span_log = self.max.ln() - self.min.ln();
-        let n = match self.scale {
-            Scale::Linear => (v - self.min) / (self.max - self.min),
-            Scale::Log => (v.max(self.min).ln() - self.min.ln()) / span_log,
-            Scale::LogOff => {
-                if v <= 0.0 {
-                    0.0
-                } else {
-                    0.03 + 0.97 * (v.max(self.min).ln() - self.min.ln()) / span_log
-                }
-            }
-        };
-        n.clamp(0.0, 1.0)
+        to_norm(self.min, self.max, self.scale, v)
     }
 
     fn value(&self, n: f64) -> f64 {
-        let n = n.clamp(0.0, 1.0);
-        let (a, b) = (self.min.ln(), self.max.ln());
-        match self.scale {
-            Scale::Linear => self.min + n * (self.max - self.min),
-            Scale::Log => (a + n * (b - a)).exp(),
-            Scale::LogOff => {
-                if n < 0.03 {
-                    0.0
-                } else {
-                    (a + (n - 0.03) / 0.97 * (b - a)).exp()
-                }
-            }
-        }
+        from_norm(self.min, self.max, self.scale, n)
     }
 
     /// Drag up/down (Shift: fine), double-click to reset. Returns the new value when a gesture ends.
@@ -241,6 +251,189 @@ pub fn arc(c: Pos2, r: f32, a: f32, b: f32) -> Vec<Pos2> {
             c + vec2(t.cos(), t.sin()) * r
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------------------------
+// table cells and chips
+
+/// Height of a table cell and of a chip.
+pub const CELL_H: f32 = 20.0;
+
+/// A number in a table (EQ bands, multiband bands): drag up or right to raise it along the scale a knob would use
+/// (Shift: fine), or click and type a value (Enter keeps it, Escape drops it). Commits once, when the gesture ends.
+/// Disabled, it shows a dash: a setting its row doesn't use.
+pub struct Cell<'a> {
+    label: &'a str,
+    min: f64,
+    max: f64,
+    scale: Scale,
+    fmt: fn(f64) -> String,
+    parse: fn(&str) -> Option<f64>,
+    width: f32,
+    enabled: bool,
+}
+
+impl<'a> Cell<'a> {
+    /// `label` names it for screen readers and its tooltip.
+    pub fn new(label: &'a str, min: f64, max: f64, fmt: fn(f64) -> String) -> Self {
+        Cell { label, min, max, scale: Scale::Linear, fmt, parse: parse_number, width: 40.0, enabled: true }
+    }
+    pub fn scale(mut self, s: Scale) -> Self {
+        self.scale = s;
+        self
+    }
+    /// How typed text is read (the default takes units and a "k" for thousands).
+    pub fn parse(mut self, f: fn(&str) -> Option<f64>) -> Self {
+        self.parse = f;
+        self
+    }
+    pub fn width(mut self, w: f32) -> Self {
+        self.width = w;
+        self
+    }
+    pub fn enabled(mut self, on: bool) -> Self {
+        self.enabled = on;
+        self
+    }
+
+    /// A typed or dragged value brought into range (0 stays 0 on a scale where it means off).
+    fn clamp(&self, v: f64) -> f64 {
+        if self.scale == Scale::LogOff && v <= 0.0 { 0.0 } else { v.clamp(self.min, self.max) }
+    }
+
+    /// Returns the new value when a drag ends or a typed value is entered.
+    pub fn show(&self, ui: &mut Ui, id: Id, current: f64) -> Option<f64> {
+        let ctx = ui.ctx().clone();
+        let edit = id.with("edit");
+        if let Some(mut text) = ctx.data(|d| d.get_temp::<String>(edit)) {
+            let field = egui::TextEdit::singleline(&mut text).id(edit).font(mono(10.5)).margin(vec2(5.0, 2.0)).horizontal_align(Align::Max).clip_text(true);
+            let r = ui.add_sized(vec2(self.width, CELL_H), field);
+            if ctx.data_mut(|d| d.remove_temp::<bool>(edit.with("new"))).unwrap_or(false) {
+                // its first frame: focus it (only now that it exists) with all of the value selected, to type over
+                let mut state = egui::TextEdit::load_state(&ctx, edit).unwrap_or_default();
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::default(), egui::text::CCursor::new(text.chars().count()))));
+                state.store(&ctx, edit);
+                r.request_focus();
+                ctx.data_mut(|d| d.insert_temp(edit, text));
+                ctx.request_repaint();
+                return None;
+            }
+            if r.lost_focus() {
+                ctx.data_mut(|d| d.remove::<String>(edit));
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    return None;
+                }
+                let v = self.clamp((self.parse)(&text)?);
+                return ((v - current).abs() > 1e-9).then_some(v);
+            }
+            if r.has_focus() {
+                ctx.data_mut(|d| d.insert_temp(edit, text));
+            } else {
+                ctx.data_mut(|d| d.remove::<String>(edit));
+            }
+            return None;
+        }
+
+        let (rect, resp) = ui.allocate_exact_size(vec2(self.width, CELL_H), if self.enabled { Sense::click_and_drag() } else { Sense::hover() });
+        let nid = id.with("n");
+        let mut v = ctx.data(|d| d.get_temp::<f64>(id)).unwrap_or(current);
+        if self.enabled && resp.dragged() {
+            let fine = ui.input(|i| i.modifiers.shift);
+            let n0 = ctx.data(|d| d.get_temp::<f64>(nid)).unwrap_or_else(|| to_norm(self.min, self.max, self.scale, v));
+            let d = resp.drag_delta();
+            let n = (n0 + (d.x - d.y) as f64 * if fine { 0.0015 } else { 0.006 }).clamp(0.0, 1.0);
+            ctx.data_mut(|m| m.insert_temp(nid, n));
+            v = from_norm(self.min, self.max, self.scale, n);
+        }
+        let commit = resp.drag_stopped();
+        if resp.dragged() && !commit {
+            ctx.data_mut(|m| m.insert_temp(id, v));
+        } else {
+            ctx.data_mut(|m| {
+                m.remove::<f64>(id);
+                m.remove::<f64>(nid);
+            });
+        }
+        if self.enabled && resp.clicked() {
+            // from the next frame, a field holding the value shown
+            ctx.data_mut(|d| {
+                d.insert_temp(edit, (self.fmt)(current));
+                d.insert_temp(edit.with("new"), true);
+            });
+            ctx.request_repaint();
+        }
+        resp.widget_info(|| WidgetInfo::slider(self.enabled, v, self.label));
+
+        let p = ui.painter();
+        let hot = self.enabled && (resp.hovered() || resp.dragged());
+        let stroke = if resp.dragged() { ACCENT } else if hot { rgb_gray(0x5E) } else { LINE };
+        p.rect(rect, CornerRadius::same(R_CTRL), FIELD, Stroke::new(1.0, stroke), StrokeKind::Inside);
+        let (text, c) = if self.enabled { ((self.fmt)(v), TEXT) } else { ("\u{2013}".to_string(), TEXT3) };
+        p.text(Pos2::new(rect.right() - 5.0, rect.center().y), Align2::RIGHT_CENTER, text, mono(10.5), c);
+        if self.enabled {
+            resp.on_hover_cursor(CursorIcon::ResizeVertical).on_hover_text(format!("{}: drag (Shift: fine) or click to type", self.label));
+        }
+        (commit && (v - current).abs() > 1e-9).then_some(v)
+    }
+}
+
+/// A typed number: a unit after it is ignored ("250 Hz", "-3 dB", "120 ms"), "k" multiplies by 1000 ("2.5k"),
+/// a ratio's ":1" is dropped and "off" means 0. Anything else is refused.
+pub fn parse_number(s: &str) -> Option<f64> {
+    let t = s.trim().to_lowercase().replace('\u{2212}', "-").replace(',', ".");
+    if t == "off" {
+        return Some(0.0);
+    }
+    let t = t.strip_suffix(":1").unwrap_or(&t).trim();
+    // the longest start of the text that is a number, then its unit
+    let end = t.char_indices().map(|(i, c)| i + c.len_utf8()).rev().find(|&i| t[..i].parse::<f64>().is_ok())?;
+    let v: f64 = t[..end].parse().ok()?;
+    let mul = match t[end..].trim() {
+        "" | "hz" | "db" | "dbfs" | "ms" | "%" => 1.0,
+        "k" | "khz" => 1000.0,
+        _ => return None,
+    };
+    Some(v * mul).filter(|v| v.is_finite())
+}
+
+/// A typed percentage ("30" or "30%") as a fraction.
+pub fn parse_pct(s: &str) -> Option<f64> {
+    parse_number(s).map(|v| v / 100.0)
+}
+
+/// `text` on one line, cut short with an ellipsis past `max_w`.
+pub fn one_line(ui: &Ui, text: &str, font: egui::FontId, color: Color32, max_w: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
+    ui.painter().layout_job(job)
+}
+
+/// A compact menu button (20 px): `text` and a chevron in a field; greyed and inert when disabled. `label` names it
+/// for screen readers. Open its menu with [`menu_pick`] or `egui::Popup::menu` on the response.
+pub fn chip(ui: &mut Ui, width: f32, text: &str, enabled: bool, label: &str) -> Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(width, CELL_H), if enabled { Sense::click() } else { Sense::hover() });
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, enabled, label));
+    let p = ui.painter();
+    p.rect(r, CornerRadius::same(R_CTRL), if enabled && resp.hovered() { HOVER } else { FIELD }, Stroke::new(1.0, LINE), StrokeKind::Inside);
+    let c = if enabled { TEXT2 } else { TEXT3 };
+    let g = one_line(ui, text, medium(10.5), c, (width - 22.0).max(8.0));
+    let at = Align2::LEFT_CENTER.anchor_size(Pos2::new(r.left() + 7.0, r.center().y), g.size()).min;
+    p.galley(at, g, c);
+    paint_icon(p, Rect::from_center_size(Pos2::new(r.right() - 10.0, r.center().y), vec2(10.0, 10.0)), Icon::Down, c);
+    resp
+}
+
+/// A chip's menu of `items` (value, text, note), `w` wide, the current one checked. Returns a new pick.
+pub fn menu_pick<T: PartialEq + Copy>(chip: &Response, current: T, items: &[(T, &str, &str)], w: f32) -> Option<T> {
+    let mut pick = None;
+    egui::Popup::menu(chip).show(|ui| {
+        for &(v, text, note) in items {
+            if super::menu_item(ui, w, text, note, Some(v == current), true) {
+                pick = Some(v);
+            }
+        }
+    });
+    pick.filter(|v| *v != current)
 }
 
 // ---------------------------------------------------------------------------------------------

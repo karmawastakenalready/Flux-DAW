@@ -158,9 +158,7 @@ pub(super) fn fake_render(p: &Project, revision: u64, seq: u64) -> LastRender {
             section_rms_db: rms.to_vec(),
             warning: (t.name == "Taiko").then(|| "sharp attack 14.2 dB: soften with a slower compressor attack".to_string()),
             layer: "base".into(),
-            restricted: None,
-            comp_loud_db: None,
-            timbre: None,
+            ..Default::default()
         })
         .collect();
     let out = RenderOutput {
@@ -539,7 +537,7 @@ fn transport_menu() {
 #[test]
 fn bottom_tabs() {
     let mut results = egui_kittest::SnapshotResults::new();
-    // 1230 px is the default window's bottom panel (1560 px less the side panel): every section shows
+    // 1230 px is the default window's bottom panel (1560 px less the side panel)
     for (name, tab, w) in [
         ("bottom_track", Tab::Track, 1280.0),
         ("bottom_track_default", Tab::Track, 1230.0),
@@ -574,6 +572,300 @@ fn slope_chip_sets_the_cut_slope() {
     let t = st.session.project.tracks.iter().find(|t| t.id == harp).unwrap();
     assert_eq!((t.mixer.hpf_slope, t.mixer.lpf_slope), (12, 24));
     assert_eq!(st.session.log.last().unwrap().source, Source::Human);
+}
+
+/// The demo mixed through buses with every built-in effect in use: a strings group the pad and the low strings play
+/// into, a hall reverb return the harp, the flute and the pad send to, the flute's strip full of effects and the
+/// master's chain on, rendered with the loud levels the effects measured.
+fn mixing_gui(feed: impl FnOnce(&Project) -> Feed) -> Gui {
+    let g = demo_gui(feed);
+    let edits = cmds(json!([
+        {"op": "add_bus", "name": "Strings", "tracks": ["Warm Pad", "Low Strings"],
+            "mixer": {"gain_db": -2.0, "comp": {"threshold_db": -4, "relative": true, "ratio": 2, "attack_ms": 20, "release_ms": 200, "detector": "rms"}}},
+        {"op": "add_bus", "name": "Hall", "sends": [{"track": "Harp", "level": 0.35}, {"track": "Flute", "level": 0.2}],
+            "mixer": {"reverb": {"room_size": 0.8, "damping": 0.4, "predelay_ms": 28, "hpf_hz": 180, "lpf_hz": 9000, "return_db": 0,
+                "algorithm": "hall", "decay_s": 3.4, "width": 1.0, "mix": 1.0}}},
+        {"op": "set_mixer", "track": "Warm Pad", "mixer": {"sends": [{"to": "Hall", "level": 0.15}]}},
+        {"op": "set_mixer", "track": "Flute", "mixer": {
+            "eq": [{"kind": "low_shelf", "hz": 180, "db": -3, "q": 0.7}, {"kind": "peak", "hz": 2500, "db": 1.5, "q": 1.2},
+                {"kind": "notch", "hz": 3150, "db": 0, "q": 8}, {"kind": "tilt", "hz": 1000, "db": -1}],
+            "comp": {"threshold_db": -6, "relative": true, "ratio": 3, "attack_ms": 4, "release_ms": 90, "makeup_db": 1.5, "knee_db": 6,
+                "detector": "rms", "sidechain_hpf_hz": 120, "lookahead_ms": 2, "auto_release": true, "mix": 0.8},
+            "dyn_eq": [{"kind": "peak", "hz": 2800, "q": 2, "threshold_db": -3, "ratio": 3, "range_db": -6},
+                {"kind": "high_shelf", "hz": 7000, "q": 0.7, "threshold_db": -30, "relative": false, "ratio": 2, "range_db": -4,
+                    "attack_ms": 2, "release_ms": 60}],
+            "deess": {"hz": 6500, "threshold_db": -4, "range_db": -5},
+            "reverb": {"room_size": 0.4, "damping": 0.6, "predelay_ms": 12, "hpf_hz": 300, "lpf_hz": 7000, "return_db": -3,
+                "algorithm": "plate", "decay_s": 1.6, "width": 0.8, "mix": 0.2}}},
+        {"op": "set_master", "master": {
+            "glue": {"threshold_db": -3, "relative": true, "ratio": 1.8, "attack_ms": 30, "release_ms": 250, "auto_release": true},
+            "eq": [{"kind": "low_shelf", "hz": 90, "db": -1.5}, {"kind": "peak", "hz": 3200, "db": -1, "q": 1.4}, {"kind": "tilt", "hz": 1000, "db": 0.5}],
+            "limiter": {"lookahead_ms": 5, "release_ms": 120, "auto_release": true, "clip_db": 1.5},
+            "multiband": {"crossovers_hz": [150, 2500, 8000], "bands": [
+                {"threshold_db": -3, "ratio": 2, "attack_ms": 30, "release_ms": 200, "gain_db": 0},
+                {"threshold_db": -2, "ratio": 1.5, "attack_ms": 20, "release_ms": 150, "gain_db": 0.5},
+                {"threshold_db": -4, "ratio": 2.5, "attack_ms": 5, "release_ms": 80, "gain_db": -1},
+                {"threshold_db": -6, "ratio": 3, "attack_ms": 2, "release_ms": 60, "gain_db": -1.5}]},
+            "mono_below_hz": 120, "width": 1.1,
+            "reverb": {"room_size": 0.75, "damping": 0.5, "predelay_ms": 24, "hpf_hz": 220, "lpf_hz": 7500, "return_db": -2,
+                "algorithm": "plate", "decay_s": 2.8, "width": 0.9}}},
+    ]));
+    g.sh.apply(&edits, Source::Agent).unwrap();
+    let (project, rev) = {
+        let st = g.sh.lock();
+        (st.session.project.clone(), st.session.revision)
+    };
+    let mut r = fake_render(&project, rev, 2);
+    let flute = r.out.tracks.iter_mut().find(|s| s.name == "Flute").expect("flute stats");
+    flute.comp_loud_db = Some(-17.4);
+    flute.dyn_eq_loud_db = vec![-21.3, -27.9];
+    flute.deess_loud_db = Some(-29.6);
+    r.out.glue_loud_db = Some(-16.8);
+    r.out.multiband_loud_db = vec![-19.5, -17.2, -24.8, -33.1];
+    {
+        let mut st = g.sh.lock();
+        st.render_seq = 2;
+        st.render = Some(Arc::new(r));
+    }
+    g
+}
+
+/// The mixing demo in a bottom panel `w` wide, on `tab`, `selected` picked.
+fn mixing_stage(w: f32, h: f32, tab: Tab, selected: &str) -> Stage {
+    let mut g = mixing_gui(|p| stopped_feed(p, 13, Mode::Live));
+    g.tab = tab;
+    g.selected = Some(track_id(&project_of(&g), selected));
+    stage(w, h, g, Part::Bottom)
+}
+
+/// The log's length, and its entries since `from` as (source, summary).
+fn log_since(h: &Stage, from: usize) -> (usize, Vec<(Source, String)>) {
+    let st = h.state().sh.lock();
+    let log = &st.session.log;
+    (log.len(), log[from.min(log.len())..].iter().map(|e| (e.source, e.summary.clone())).collect())
+}
+
+fn mixer_of(h: &Stage, track: &str) -> flux_core::Mixer {
+    let st = h.state().sh.lock();
+    st.session.project.tracks.iter().find(|t| t.name == track).map(|t| t.mixer.clone()).expect("track")
+}
+
+/// An entry of the menu that opened under `opener`: a button below it, lined up with it (a tab or a segment elsewhere
+/// can have the same label).
+fn entry<'h>(h: &'h Stage, opener: egui::Rect, label: &'static str) -> Option<egui_kittest::Node<'h>> {
+    h.query_all(By::new().role(egui::accesskit::Role::Button).label(label)).find(|n| n.rect().top() >= opener.bottom() - 1.0 && (n.rect().left() - opener.left()).abs() < 24.0)
+}
+
+/// Buses in the mixer: a group and a reverb return are lighter and tagged, and while anything is routed every strip
+/// shows where it goes and a bar per send.
+#[test]
+fn mixer_with_buses() {
+    let mut h = mixing_stage(1230.0, 340.0, Tab::Mixer, "Strings");
+    settle(&mut h);
+    h.snapshot("bottom_mixer_buses");
+}
+
+/// Every effect of a channel strip, each in its section in the order the signal meets them, with the loud levels the
+/// last render measured where relative thresholds count from, then the track's routing.
+#[test]
+fn track_tab_effects() {
+    let mut h = mixing_stage(3270.0, 340.0, Tab::Track, "Flute");
+    settle(&mut h);
+    h.snapshot("bottom_track_effects");
+}
+
+/// The master's chain: the limiter under the loudness, the glue, EQ, multiband with each band's loud level, the image
+/// and the shared reverb's algorithm.
+#[test]
+fn master_tab_chain() {
+    let mut h = mixing_stage(2450.0, 340.0, Tab::Master, "Flute");
+    settle(&mut h);
+    h.snapshot("bottom_master_chain");
+    // fewer bands keep the low ones and their crossovers
+    let before = log_since(&h, 0).0;
+    h.get_by_label("3").click();
+    h.run();
+    let st = h.state().sh.lock();
+    let mb = st.session.project.master.multiband.clone().expect("multiband");
+    assert_eq!(mb.crossovers_hz, vec![150.0, 2500.0]);
+    assert_eq!(mb.bands.len(), 3);
+    assert_eq!(st.session.log.len(), before + 1);
+    assert_eq!(st.session.log.last().unwrap().source, Source::Human);
+}
+
+/// The Bus button's form routes the selected track and any other picked into a new bus, as one undoable edit, and
+/// selects the bus.
+#[test]
+fn add_bus_routes_the_picked_tracks() {
+    let mut g = demo_gui(|p| stopped_feed(p, 13, Mode::Live));
+    let p = project_of(&g);
+    let (harp, flute) = (track_id(&p, "Harp"), track_id(&p, "Flute"));
+    g.selected = Some(harp);
+    let mut h = stage(1230.0, 420.0, g, Part::Bottom);
+    h.get_by_label("Bus").click();
+    h.run();
+    h.event(egui::Event::PointerGone);
+    h.run();
+    h.snapshot("mixer_add_bus");
+    assert_eq!(h.get_by_role(egui::accesskit::Role::TextInput).value().as_deref(), Some("Bus 1"));
+    let check = |label: &'static str| By::new().role(egui::accesskit::Role::CheckBox).label(label);
+    h.get(check("Flute")).click();
+    h.run();
+    let before = log_since(&h, 0).0;
+    h.get_by_label("Add bus").click();
+    h.run();
+    assert!(h.query_by_label("Add bus").is_none(), "the form closes");
+    let (len, new) = log_since(&h, before);
+    assert_eq!(len, before + 1, "one edit: {new:?}");
+    assert_eq!(new[0].0, Source::Human);
+    assert!(new[0].1.contains("add bus 'Bus 1' (2 routed)"), "{}", new[0].1);
+    let p = project_of(h.state());
+    let bus = p.tracks.iter().find(|t| t.name == "Bus 1").expect("the new bus");
+    assert!(matches!(bus.instrument, Instrument::None));
+    let out = |id: u64| p.tracks.iter().find(|t| t.id == id).unwrap().mixer.output;
+    assert_eq!((out(harp), out(flute)), (Some(bus.id), Some(bus.id)));
+    assert_eq!(h.state().selected, Some(bus.id));
+}
+
+/// A track's output menu offers the master and the buses it can go to, never one whose signal comes back to it; a
+/// pick routes the track, as the human.
+#[test]
+fn output_menu_offers_buses_without_loops() {
+    let g = mixing_gui(|p| stopped_feed(p, 13, Mode::Live));
+    // the hall return plays into the strings group, so the group can't go to the hall
+    g.sh.apply(&cmds(json!([{"op": "set_mixer", "track": "Hall", "mixer": {"output": "Strings"}}])), Source::Agent).unwrap();
+    let p = project_of(&g);
+    let mut h = stage(1230.0, 340.0, g, Part::Bottom);
+    let field = h.get_by_label("Strings output, Master").rect();
+    h.get_by_label("Strings output, Master").click();
+    h.run();
+    assert!(entry(&h, field, "Hall").is_none(), "the hall feeds the strings group");
+    assert!(h.query_by_label("The other buses feed this one").is_some());
+    entry(&h, field, "Master").expect("Master").click();
+    h.run();
+    assert!(entry(&h, field, "Master").is_none(), "picking closes the menu");
+
+    let field = h.get_by_label("Flute output, Master").rect();
+    h.get_by_label("Flute output, Master").click();
+    h.run();
+    assert!(entry(&h, field, "Hall").is_some() && entry(&h, field, "Warm Pad").is_none(), "buses only");
+    h.event(egui::Event::PointerGone);
+    h.run();
+    h.snapshot("mixer_output_menu");
+    let before = log_since(&h, 0).0;
+    entry(&h, field, "Strings").expect("Strings").click();
+    h.run();
+    assert_eq!(mixer_of(&h, "Flute").output, Some(track_id(&p, "Strings")));
+    let (_, new) = log_since(&h, before);
+    assert_eq!(new.len(), 1);
+    assert_eq!(new[0].0, Source::Human);
+}
+
+/// A send's level is typed in percent, and Add a send offers the buses not sent to yet.
+#[test]
+fn sends_from_the_routing_section() {
+    let mut h = mixing_stage(3270.0, 340.0, Tab::Track, "Flute");
+    let p = project_of(h.state());
+    let (strings, hall) = (track_id(&p, "Strings"), track_id(&p, "Hall"));
+    let before = log_since(&h, 0).0;
+    h.get_by_label("Send to Hall level").click();
+    h.run();
+    h.event(egui::Event::Text("50".into()));
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let sends = |h: &Stage| mixer_of(h, "Flute").sends.iter().map(|s| (s.to, s.level)).collect::<Vec<_>>();
+    assert_eq!(sends(&h), vec![(hall, 0.5)]);
+    let chip = h.get_by_label("Add a send").rect();
+    h.get_by_label("Add a send").click();
+    h.run();
+    assert!(entry(&h, chip, "Hall").is_none(), "already sent to");
+    entry(&h, chip, "Strings").expect("Strings").click();
+    h.run();
+    assert_eq!(sends(&h), vec![(hall, 0.5), (strings, 0.25)]);
+    let (_, new) = log_since(&h, before);
+    assert_eq!(new.len(), 2);
+    assert!(new.iter().all(|e| e.0 == Source::Human));
+}
+
+/// A dynamic EQ band's frequency typed into its cell is one edit of that band alone, made by the human.
+#[test]
+fn dynamic_eq_frequency_typed_in() {
+    let mut h = mixing_stage(3270.0, 340.0, Tab::Track, "Flute");
+    let was = mixer_of(&h, "Flute").dyn_eq;
+    let before = log_since(&h, 0).0;
+    h.get_by_label("Dynamic EQ band 1 frequency").click();
+    h.run();
+    h.event(egui::Event::Text("3.15k".into()));
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let now = mixer_of(&h, "Flute").dyn_eq;
+    assert_eq!(now[0], flux_core::DynBand { hz: 3150.0, ..was[0] });
+    assert_eq!(now[1], was[1]);
+    let (_, new) = log_since(&h, before);
+    assert_eq!(new.len(), 1, "{new:?}");
+    assert_eq!(new[0].0, Source::Human);
+    assert!(new[0].1.contains("dyn_eq"), "{}", new[0].1);
+}
+
+/// Dragging a cell is one edit, when the drag ends, however many frames it takes; Escape drops a typed value.
+#[test]
+fn a_cell_drag_is_one_edit() {
+    let mut h = mixing_stage(3270.0, 340.0, Tab::Track, "Flute");
+    let was = mixer_of(&h, "Flute").eq;
+    let before = log_since(&h, 0).0;
+    let at = h.get_by_label("EQ band 2 gain").rect().center();
+    drag(&mut h, at, at - egui::vec2(0.0, 40.0), egui::Modifiers::NONE);
+    let now = mixer_of(&h, "Flute").eq;
+    assert!(now[1].db > was[1].db + 5.0, "dragged up: {} dB", now[1].db);
+    assert_eq!((now[1].kind, now[1].hz, now[1].q), (was[1].kind, was[1].hz, was[1].q));
+    assert_eq!(log_since(&h, before).1.len(), 1);
+
+    h.get_by_label("EQ band 1 frequency").click();
+    h.run();
+    h.event(egui::Event::Text("400".into()));
+    h.run();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert_eq!(mixer_of(&h, "Flute").eq[0], was[0]);
+    assert_eq!(log_since(&h, before).1.len(), 1);
+}
+
+/// An EQ band's type menu offers notch and tilt; a notch has no gain to set.
+#[test]
+fn eq_bands_can_be_notches_and_tilts() {
+    let mut h = mixing_stage(3270.0, 340.0, Tab::Track, "Flute");
+    let chip = h.get_by_label("EQ band 2 type, Peak").rect();
+    h.get_by_label("EQ band 2 type, Peak").click();
+    h.run();
+    assert!(entry(&h, chip, "Tilt").is_some());
+    entry(&h, chip, "Notch").expect("Notch").click();
+    h.run();
+    assert_eq!(mixer_of(&h, "Flute").eq[1].kind, flux_core::EqKind::Notch);
+    assert!(h.query_by_label("EQ band 2 type, Notch").is_some());
+    // a notch's gain cell is inert
+    let gain = h.get_by_label("EQ band 2 gain").rect().center();
+    let before = log_since(&h, 0).0;
+    drag(&mut h, gain, gain - egui::vec2(0.0, 40.0), egui::Modifiers::NONE);
+    assert_eq!(log_since(&h, before).1.len(), 0);
+}
+
+#[test]
+fn typed_numbers() {
+    use widgets::{parse_number, parse_pct};
+    assert_eq!(parse_number("250"), Some(250.0));
+    assert_eq!(parse_number(" 2.5k "), Some(2500.0));
+    assert_eq!(parse_number("3.15 kHz"), Some(3150.0));
+    assert_eq!(parse_number("-3 dB"), Some(-3.0));
+    assert_eq!(parse_number("\u{2212}4,5"), Some(-4.5));
+    assert_eq!(parse_number("4:1"), Some(4.0));
+    assert_eq!(parse_number("Off"), Some(0.0));
+    assert_eq!(parse_number("120ms"), Some(120.0));
+    assert_eq!(parse_pct("35%"), Some(0.35));
+    for bad in ["", "loud", "12 parsecs", "inf", "NaN", "-", "k"] {
+        assert_eq!(parse_number(bad), None, "{bad:?}");
+    }
 }
 
 #[test]

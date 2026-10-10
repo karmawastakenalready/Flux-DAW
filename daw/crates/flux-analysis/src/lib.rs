@@ -9,7 +9,9 @@
 //! |---|---|---|
 //! | [`loudness`] | Does every track of the game sit at the target (-15 LUFS, -1 dBTP, under 20 MB), loop seamlessly, and do its layers sum to the master? Which tracks will jump out next to the others? | `verify.py` loudness and seam checks |
 //! | [`reference`](mod@reference) | How does a mix differ from a reference track at equal loudness (balance, dynamics, transients, width, low end, mono), as ranked suggestions, whole and per section? | — |
-//! | [`mix`] | Which stems mask each other where, which are buried, which sections are muddy or harsh and which stems cause it, does reverb smear the attacks, does the mix survive mono? | — |
+//! | [`master`] | Is a master ready to ship, and what should change? Loudness (LUFS, LRA, true peak, PLR, PSR), tonal balance against a target curve or a reference, stereo image and phase, dynamics, layers and the loop seam, as ranked issues with moves for Flux's master and a 0-100 score. | — |
+//! | [`matcheq`] | The EQ that moves a mix's tonal balance toward a reference's: a few parametric bands fitted with the engine's own biquad responses. | — |
+//! | [`mix`] | Which stems mask each other where, which are buried, which sections are muddy or harsh and which stems cause it, does reverb smear the attacks, does the mix survive mono? And which mixer change on which track fixes each. | — |
 //! | [`profile`] | The measurements behind both: loudness, LRA, PLR, onset rate and transient clarity, 1/3-octave balance, per-octave width, tone and mono compatibility. | — |
 //! | [`spectro`] | Log-frequency spectrogram PNGs, one band per signal (pixel-identical to the Python tool). | `tools/spectro.py` |
 //! | [`stems`] | Per-section RMS of each stem: the balance table. | `tools/stem_balance.py` |
@@ -51,6 +53,8 @@ pub mod audio;
 pub mod card;
 pub mod json;
 pub mod loudness;
+pub mod master;
+pub mod matcheq;
 pub mod meta;
 pub mod mix;
 pub mod num;

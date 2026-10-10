@@ -335,23 +335,40 @@ mod os {
     /// `dir\flux.exe`) has exited.
     pub fn remove_after_exit(dir: &Path, names: &[String]) -> Result<()> {
         use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        let sys = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+        let start = |flags: u32| {
+            std::process::Command::new(sys.join("System32").join("cmd.exe"))
+                .raw_arg(removal_script(dir, names))
+                .current_dir(&sys)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(flags)
+                .spawn()
+        };
+        // out of the job flux.com runs this in, which ends everything in it as it exits: just when the clean-up
+        // has to start deleting. A job that doesn't let it leave keeps it
+        start(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| start(CREATE_NO_WINDOW)).context("starting the removal of the app folder")?;
+        Ok(())
+    }
+
+    /// The arguments of the cmd.exe that deletes the app folder: it waits (up to a minute) until neither `flux.exe`
+    /// nor `flux.com` is running, so both can go, then deletes the other files Setup put there and the old copies an
+    /// update left, and the folder if that empties it.
+    pub fn removal_script(dir: &Path, names: &[String]) -> String {
         let q = |p: &Path| format!("\"{}\"", p.display());
-        let exe = q(&dir.join("flux.exe"));
-        let mut s = format!("/d /c for /l %i in (1,1,30) do @if exist {exe} (del /f /q {exe} >nul 2>&1 & if exist {exe} ping -n 2 127.0.0.1 >nul)");
+        let (exe, com) = (q(&dir.join("flux.exe")), q(&dir.join("flux.com")));
+        let wait = "ping -n 2 127.0.0.1 >nul";
+        let mut s = format!(
+            "/d /c (for /l %i in (1,1,60) do @(del /f /q {exe} {com} >nul 2>&1 & if exist {exe} ({wait}) else if exist {com} ({wait})))"
+        );
         for n in names {
             s.push_str(&format!(" & del /f /q {} >nul 2>&1", q(&dir.join(n))));
         }
         s.push_str(&format!(" & del /f /q {} >nul 2>&1 & rd {} >nul 2>&1", q(&dir.join("*.old-*")), q(dir)));
-        let sys = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-        flux_assets::fsutil::quiet_command(sys.join("System32").join("cmd.exe"))
-            .raw_arg(s)
-            .current_dir(&sys)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .context("starting the removal of the app folder")?;
-        Ok(())
+        s
     }
 
     /// Every process whose program file name starts with "flux" (case-insensitive), with its full path.
@@ -437,6 +454,35 @@ mod os {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Uninstall's clean-up on a folder like the app's: it waits for a running `flux.exe` (held open here, as
+    /// Windows holds a running program's file) and then removes everything Setup put there, and the folder.
+    #[cfg(windows)]
+    #[test]
+    fn the_clean_up_waits_for_flux_and_removes_the_app_folder() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::process::CommandExt;
+        let d = tempfile::tempdir().unwrap();
+        let app = d.path().join("Flux");
+        fs::create_dir(&app).unwrap();
+        let names: Vec<String> = ["flux.exe", "flux.com", FILES_RECORD, "LICENSE-MIT.txt"].iter().map(|s| s.to_string()).collect();
+        for n in names.iter().map(String::as_str).chain(["flux.exe.old-1"]) {
+            fs::write(app.join(n), n).unwrap();
+        }
+        let running = fs::OpenOptions::new().read(true).share_mode(0).open(app.join("flux.exe")).unwrap();
+        let sys = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+        let mut cmd = std::process::Command::new(sys.join("System32").join("cmd.exe"))
+            .raw_arg(os::removal_script(&app, &names))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(app.join("flux.exe").exists(), "a running flux.exe stays until it exits");
+        drop(running);
+        assert!(cmd.wait().unwrap().success());
+        assert!(!app.exists(), "left: {:?}", fs::read_dir(&app).map(|r| r.flatten().map(|e| e.file_name()).collect::<Vec<_>>()));
+    }
 
     #[test]
     fn edits_path_values() {

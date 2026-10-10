@@ -6,6 +6,7 @@ pub mod automation;
 pub mod clips;
 pub mod denormals;
 pub mod dsp;
+pub mod fx;
 pub mod import;
 pub mod license;
 pub mod live;
@@ -13,8 +14,10 @@ pub mod paths;
 pub mod render;
 pub mod resample;
 pub mod rig;
+pub mod routing;
 pub mod settings;
 pub mod sfizz;
+pub mod strip;
 pub mod vst;
 pub mod worker;
 

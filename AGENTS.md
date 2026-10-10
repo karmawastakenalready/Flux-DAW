@@ -58,11 +58,11 @@ Windows only for now, because the VST3 host is Win32.
 |---|---|
 | `daw/crates/flux` | the app: GUI (egui), MCP server (`mcp.rs`, `tools.rs`, `measure.rs`, `plugins.rs`), CLI (`main.rs`), Setup and updates (`dist.rs`, `gui/setup.rs`, `gui/library.rs`) |
 | `daw/crates/flux-core` | the project model and the commands that change it; undo; the session |
-| `daw/crates/flux-engine` | instruments (sfizz, VST3, rigs), the channel strip and master, offline and live rendering, `paths.rs`, settings |
+| `daw/crates/flux-engine` | instruments (sfizz, VST3, rigs), the channel strip (`strip.rs`) and its effects (`fx/`), routing (`routing.rs`), offline (`render.rs`) and live (`live.rs`) rendering, `paths.rs`, settings |
 | `daw/crates/flux-vst3` | VST3 hosting out of process; plugin scanning; vendor preset formats (`vendor.rs`) |
 | `daw/crates/flux-nam` | Neural Amp Modeler inference and cabinets for guitar rigs |
 | `daw/crates/flux-score` | music theory, `compose` and `lint` |
-| `daw/crates/flux-analysis` | loudness, spectra, seam checks, mix checks, instrument cards |
+| `daw/crates/flux-analysis` | loudness, spectra, seam checks, mix checks (`mix.rs`), the mastering report (`master.rs`), match EQ, instrument cards |
 | `daw/crates/flux-sfz` | SFZ parsing; `flux sfz` (wrapper sets, checks, tightened/retuned/evened copies) |
 | `daw/crates/flux-assets` | `assets.toml`: manifest, safe fetching, verification, licenses, FLAC ([README](daw/crates/flux-assets/README.md)) |
 | `daw/crates/flux-setup` | the instrument library's packs, install/uninstall, agent clients (`agents.rs`), update checks |
@@ -94,6 +94,9 @@ cargo clippy -p flux --features dist --all-targets
 - `daw/tests/mcp_client.py` drives a running `flux mcp` from a JSON script, for end-to-end checks of tools.
 - Don't launch GUI windows or play audio on someone's machine unless they asked for it. Use the headless
   commands (`flux render`, `flux live`, the MCP server without `--gui`) and the snapshot tests.
+- Live playback must sound like the render. Both run the same processors (`strip.rs`, `fx/`, `routing.rs`); a new
+  effect or mixer setting goes into those, never into `render.rs` or `live.rs` alone. `tests/mixing.rs` and
+  `tests/automation.rs` in flux-engine compare the two; extend them when you add to the strip, a bus or the master.
 
 ### Code style
 

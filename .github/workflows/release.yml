@@ -73,9 +73,10 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           $setup = "out/FluxSetup-${{ steps.version.outputs.version }}.exe"
           Copy-Item daw/target/release/flux.exe $setup
-          # a smoke test: the Setup knows its version and answers on the console
-          & daw/target/release/flux.exe --version
-          if ($LASTEXITCODE -ne 0) { throw "flux --version failed" }
+          # a smoke test: the Setup knows its version and answers on the console. Piped, because PowerShell doesn't
+          # wait for a windowed program (or set $LASTEXITCODE) otherwise
+          $v = (& daw/target/release/flux.exe --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $v -ne "flux ${{ steps.version.outputs.version }}") { throw "flux --version failed: '$v'" }
 
       - name: Sign
         if: env.HAS_CERT == 'true'

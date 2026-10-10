@@ -95,15 +95,51 @@ fn clip_props(extra: Value) -> Map<String, Value> {
 
 fn eq_s() -> Value {
     json!({"type": "array", "description": "EQ bands, applied in order (replaces the whole list)", "items": obj(json!({
-        "kind": {"enum": ["peak", "low_shelf", "high_shelf"]}, "hz": {"type": "number"}, "db": {"type": "number"},
-        "q": {"type": "number", "description": "default 0.9"}}), &["kind", "hz", "db"])})
+        "kind": {"enum": ["peak", "low_shelf", "high_shelf", "notch", "tilt"], "description": "peak: a bell at hz; low_shelf / \
+high_shelf: everything below / above hz; notch: cuts a narrow band out at hz (a ringing resonance; q sets how narrow, db is ignored); \
+tilt: db above hz and -db below through gentle shelves (q ignored), to make the whole sound brighter or darker"},
+        "hz": {"type": "number", "minimum": 20, "maximum": 20000},
+        "db": {"type": "number", "description": "gain (notch: ignored, give 0); cuts are safer than boosts, and a few dB is usually enough"},
+        "q": {"type": "number", "description": "width: 0.5-0.9 broad (default 0.9), 2-4 narrow (a resonance), 6-12 for a notch; shelves 0.5-1"}}),
+        &["kind", "hz", "db"])})
 }
 
 fn comp_s() -> Value {
     json!({"description": "compressor; null removes it", "anyOf": [{"type": "null"}, obj(json!({
-        "threshold_db": {"type": "number", "description": "dBFS, or dB relative to the track's loud level when relative=true"},
-        "relative": {"type": "boolean"}, "ratio": {"type": "number"}, "attack_ms": {"type": "number"},
-        "release_ms": {"type": "number"}, "makeup_db": {"type": "number"}}), &["threshold_db", "ratio"])]})
+        "threshold_db": {"type": "number", "description": "dBFS, or with relative=true dB under the signal's loud level (95th \
+percentile of its short-term RMS; render shows it as a track's comp.loud_db and master_chain.glue.loud_db): -3 to -8 acts on the \
+louder moments whatever the level, so it needs no retuning when the mix changes"},
+        "relative": {"type": "boolean", "description": "count threshold_db from the loud level (default false)"},
+        "ratio": {"type": "number", "minimum": 1, "description": "1.5-2 glue, 3-4 control, 8+ limiting"},
+        "attack_ms": {"type": "number", "minimum": 0.05, "maximum": 1000, "description": "default 15; 20-40 lets the hits through (punch), 1-5 catches them"},
+        "release_ms": {"type": "number", "minimum": 1, "maximum": 5000, "description": "default 150; with auto_release, the release after sustained compression"},
+        "makeup_db": {"type": "number", "description": "gain after it (default 0; the master's loudness drive makes up the master's level anyway)"},
+        "knee_db": {"type": "number", "minimum": 0, "maximum": 24, "description": "soft knee: the ratio eases in over this many dB around the threshold (default 0, hard); 6-10 for transparent glue"},
+        "detector": {"enum": ["peak", "rms"], "description": "peak (default) catches transients; rms follows loudness, smoother on buses and the master"},
+        "sidechain_hpf_hz": {"type": "number", "minimum": 0, "maximum": 1000, "description": "the detector hears the signal high-passed here, so the bass and kick don't pump it: 80-150 on buses and the master's glue (default 0, off)"},
+        "lookahead_ms": {"type": "number", "minimum": 0, "maximum": 20, "description": "the audio runs this far behind the detector, so even a fast transient is caught: 1-5 on drums and plucks (default 0)"},
+        "auto_release": {"type": "boolean", "description": "program-dependent release: fast after short peaks, release_ms after sustained compression (no pumping; default false)"},
+        "mix": {"type": "number", "minimum": 0, "maximum": 1, "description": "parallel compression: the compressed signal's share (default 1); 0.3-0.6 adds density and keeps the attacks"}}),
+        &["threshold_db", "ratio"])]})
+}
+
+/// The built-in reverb's settings: the master's shared reverb, and a strip's (`extra` adds the strip's mix).
+fn reverb_props(extra: Value) -> Map<String, Value> {
+    let mut m = props(json!({
+        "algorithm": {"enum": ["hall", "room", "plate", "classic"], "description": "hall: large, slow build, smooth long tail; room: small and \
+dense, short; plate: bright and dense, no early reflections (vocals, leads, snares); classic: the Freeverb-style reverb of older \
+projects (metallic on long tails). Left out: classic"},
+        "room_size": {"type": "number", "minimum": 0, "maximum": 1, "description": "how big the space is (sets the decay unless decay_s does; default 0.7)"},
+        "damping": {"type": "number", "minimum": 0, "maximum": 1, "description": "how much faster the highs die away than the lows (default 0.5)"},
+        "predelay_ms": {"type": "number", "minimum": 0, "maximum": 500, "description": "gap before the reverb starts (keeps the attacks clear); 10-40 (default 20)"},
+        "hpf_hz": {"type": "number", "description": "high-pass of the reverb (keeps the low end clean); 150-300 (default 220)"},
+        "lpf_hz": {"type": "number", "description": "low-pass of the reverb (darker, further away); 5000-9000 (default 7500)"},
+        "return_db": {"type": "number", "description": "level of the reverb's output (default 0 = as is)"},
+        "decay_s": {"type": "number", "minimum": 0, "maximum": 12, "description": "decay time (RT60, seconds) in place of the one room_size gives; 0 = from room_size (default)"},
+        "width": {"type": "number", "minimum": 0, "maximum": 1, "description": "stereo width of the reverb (default 1)"},
+    }));
+    m.extend(props(extra));
+    m
 }
 
 fn mixer_s() -> Value {
@@ -135,7 +171,33 @@ fn mixer_s() -> Value {
                 "seconds": {"type": "number"}, "feedback": {"type": "number"}, "mix": {"type": "number"}}), &["seconds", "feedback", "mix"])]},
             "duck": {"description": "sidechain ducking keyed by another track's note-ons; null removes it", "anyOf": [{"type": "null"}, obj(json!({
                 "source_track": track_ref(), "depth_db": {"type": "number"}, "release_ms": {"type": "number"}}), &["source_track", "depth_db", "release_ms"])]},
-            "reverb_send": {"type": "number", "minimum": 0, "maximum": 1, "description": "send to the shared reverb"},
+            "reverb_send": {"type": "number", "minimum": 0, "maximum": 1, "description": "send to the master's shared reverb"},
+            "dyn_eq": {"type": "array", "description": "dynamic EQ bands, after the compressor (replaces the list): each turns its range down \
+only while that range is loud, by at most range_db. For a resonance or boomy note that pops out, or harshness that comes and goes, where a \
+static cut would thin out the rest of the time", "items": obj(json!({
+                "kind": {"enum": ["peak", "low_shelf", "high_shelf"]},
+                "hz": {"type": "number", "minimum": 20, "maximum": 20000}, "q": {"type": "number", "description": "default 0.9; 2-4 for a resonance"},
+                "threshold_db": {"type": "number", "description": "where it starts acting: dB under the band's loud level when relative (render \
+shows it under the track's dyn_eq), else dBFS; -3 to -6 catches the loud moments"},
+                "relative": {"type": "boolean", "description": "default true"},
+                "ratio": {"type": "number", "minimum": 1, "description": "default 3"},
+                "range_db": {"type": "number", "minimum": -24, "maximum": 0, "description": "the most it turns the band down (default -6)"},
+                "attack_ms": {"type": "number", "description": "default 5"}, "release_ms": {"type": "number", "description": "default 80"}}),
+                &["kind", "hz", "threshold_db"])},
+            "deess": {"description": "de-esser after the dynamic EQ: turns the band above hz down while it's loud (sibilance, hats and \
+cymbals, pick and bow noise, bright leads); null removes it", "anyOf": [{"type": "null"}, obj(json!({
+                "hz": {"type": "number", "minimum": 1000, "maximum": 16000, "description": "where the band starts: 5000-8000 (default 6000); lower for harsh leads"},
+                "threshold_db": {"type": "number", "description": "dB under the band's loud level (render shows it under the track's deess); lower catches more (default -6)"},
+                "range_db": {"type": "number", "minimum": -24, "maximum": 0, "description": "the most it turns the band down (default -6)"}}), &[])]},
+            "reverb": {"description": "a reverb in the strip, after the delay; null removes it. On an aux return (a bus that tracks send to) set \
+mix 1 so the bus returns only the reverb; on a track, mix 0.1-0.3. Settings left out take their defaults", "anyOf": [{"type": "null"}, obj(Value::Object(reverb_props(json!({
+                "mix": {"type": "number", "minimum": 0, "maximum": 1, "description": "the reverb's share of the output: 1 = only the reverb (default), 0.2 = mostly dry"}}))),
+                &[])]},
+            "output": {"description": "the bus this track plays into instead of the master (a group: drums, strings...); null = the master. \
+add_bus makes a bus and routes tracks to it in one go", "anyOf": [{"type": "null"}, track_ref()]},
+            "sends": {"type": "array", "description": "post-fader sends to aux returns (buses with a reverb or delay at mix 1), besides \
+reverb_send; replaces the list ([] removes them)", "items": obj(json!({"to": track_ref(),
+                "level": {"type": "number", "minimum": 0, "maximum": 1, "description": "0.1-0.3 usual"}}), &["to", "level"])},
         }),
         &[],
     )
@@ -146,13 +208,31 @@ fn master_s() -> Value {
         json!({
             "glue": comp_s(),
             "eq": eq_s(),
-            "target_lufs": {"type": "number", "description": "integrated loudness target (default -15)"},
-            "ceiling_dbtp": {"type": "number", "description": "true-peak ceiling (default -1)"},
-            "reverb": obj(json!({"room_size": {"type": "number"}, "damping": {"type": "number"}, "predelay_ms": {"type": "number"},
-                "hpf_hz": {"type": "number"}, "lpf_hz": {"type": "number"}, "return_db": {"type": "number"}}),
-                &["room_size", "damping", "predelay_ms", "hpf_hz", "lpf_hz", "return_db"]),
+            "target_lufs": {"type": "number", "description": "integrated loudness target (default -15, Roblox's); the master drives the mix there"},
+            "ceiling_dbtp": {"type": "number", "maximum": 0, "description": "true-peak ceiling (default -1)"},
+            "reverb": {"description": "the shared reverb the tracks' reverb_send feeds. Replaces the whole reverb: settings left \
+out take their defaults, not the current values", "type": "object", "properties": reverb_props(json!({}))},
             "edge_fade_ms": {"type": "number", "description": "fade in/out for one-shot (non-loop) exports"},
             "tail_s": {"type": "number", "description": "seconds rendered past the last bar (reverb / release tails)"},
+            "limiter": {"type": "object", "description": "the final limiter after the loudness drive, which holds the true peak under the \
+ceiling. Replaces the whole limiter: fields left out take their defaults, not the current values", "properties": {
+                "lookahead_ms": {"type": "number", "minimum": 0.5, "maximum": 20, "description": "how far ahead it starts turning down for a peak (default 5)"},
+                "release_ms": {"type": "number", "minimum": 0, "maximum": 2000, "description": "how slowly the gain recovers (default 80; 150-300 smoother on sustained music, 30-60 punchier)"},
+                "auto_release": {"type": "boolean", "description": "short peaks recover fast, sustained limiting at release_ms (default true)"},
+                "clip_db": {"type": "number", "minimum": 0, "maximum": 6, "description": "the most a soft-clipping stage takes off the sharpest peaks before the lookahead stage (default 1; 1.5-2.5 louder and denser drums, 0 off)"}}},
+            "multiband": {"description": "multiband compressor after the master EQ: the master split at the crossovers, each band compressed on \
+its own, so a region that flares up (boomy bass notes, harsh peaks) is held back only then. null removes it. A good start: crossovers \
+[150, 2500, 8000], thresholds -3 to -4, ratios 1.6-2", "anyOf": [{"type": "null"}, obj(json!({
+                "crossovers_hz": {"type": "array", "items": {"type": "number", "minimum": 30, "maximum": 16000}, "minItems": 1, "maxItems": 3,
+                    "description": "ascending, each at least half an octave (x1.5) above the last: 1-3 crossovers make 2-4 bands"},
+                "bands": {"type": "array", "description": "one per band, low to high", "items": obj(json!({
+                    "threshold_db": {"type": "number", "description": "dB under the band's loud level (render shows it in master_chain): -3 to -6"},
+                    "ratio": {"type": "number", "minimum": 1}, "attack_ms": {"type": "number", "description": "default 15; slower in the lows (30), faster in the highs (5)"},
+                    "release_ms": {"type": "number", "description": "default 150"},
+                    "gain_db": {"type": "number", "minimum": -12, "maximum": 12, "description": "the band's level after it (default 0)"}}),
+                    &["threshold_db", "ratio"])}}), &["crossovers_hz", "bands"])]},
+            "mono_below_hz": {"type": "number", "minimum": 0, "maximum": 500, "description": "the master is mono below this (after the multiband), 0 = off: 100-150 keeps a wide low end from wandering and wasting headroom"},
+            "width": {"type": "number", "minimum": 0, "maximum": 2, "description": "the master's stereo width (0 mono, 1 as mixed, default)"},
         }),
         &[],
     )
@@ -228,7 +308,19 @@ fn command_s() -> Value {
         op("update_track", "rename, recolour, change the instrument or the stem layer", props(json!({"track": t(), "name": {"type": "string"},
             "instrument": instrument_s(), "color": {"type": "array", "items": {"type": "integer"}},
             "layer": {"type": "string", "description": "game stem layer this track belongs to (export layers=true): e.g. base, melody, percussion; default base"}})), &["track"]),
-        op("set_mixer", "change channel-strip settings; only the given fields change", props(json!({"track": t(), "mixer": mixer_s()})), &["track", "mixer"]),
+        op("set_mixer", "change channel-strip settings; only the given fields change. The strip runs: pre inserts, HPF/LPF, EQ, gain, \
+drive, amp, chorus, bitcrush, clip, post gain, gate, compressor, dynamic EQ, de-esser, delay, reverb, post inserts, duck, mono below, \
+width/pan, then the sends and its output (the master, or a bus)", props(json!({"track": t(), "mixer": mixer_s()})), &["track", "mixer"]),
+        op("add_bus", "make a bus (returns track_id): a track without an instrument that other tracks play into. A group bus (tracks) \
+gets the tracks' output, so one fader, EQ or compressor treats them together; an aux return (sends) gets a send from each track and \
+usually carries mixer.reverb with mix 1 (or a delay, or a reverb insert): one shared space instead of a reverb per track. Change it \
+later with set_mixer like any track", props(json!({
+            "name": {"type": "string"},
+            "tracks": {"type": "array", "items": track_ref(), "description": "tracks whose output goes to the bus (instead of the master)"},
+            "sends": {"type": "array", "description": "tracks that send to the bus (they still play into their own output)", "items": obj(json!({
+                "track": track_ref(), "level": {"type": "number", "minimum": 0, "maximum": 1, "description": "0.1-0.3 usual"}}), &["track", "level"])},
+            "mixer": mixer_s(),
+            "color": {"type": "array", "items": {"type": "integer"}, "minItems": 3, "maxItems": 3}})), &["name"]),
         op("set_master", "change the master bus; only the given fields change", props(json!({"master": master_s()})), &["master"]),
         op("add_insert", "put a VST3 effect in an insert slot (returns insert_id): on a track (pre = before its filters/EQ, post = after its delay, before pan and sends), on the master (after the reverb return joins, before glue) or on the reverb return (replaces the built-in reverb: the sends go through the chain; return_db still applies). Set it up with params, or load presets with the plugins tool", props(json!({
             "track": t(), "bus": {"enum": ["master", "reverb"], "description": "instead of track"},
@@ -638,11 +730,40 @@ fn lanes_json(tm: &TimeMap, lanes: &[Lane]) -> Value {
         .collect::<Vec<_>>())
 }
 
-fn track_summary(tm: &TimeMap, t: &Track) -> Value {
+/// A track's name for routing displays (its id if it's gone).
+fn track_name(p: &Project, id: u64) -> Value {
+    p.tracks.iter().find(|t| t.id == id).map_or_else(|| json!(id), |t| json!(t.name))
+}
+
+/// What feeds a bus: the tracks whose output goes to it and the sends to it, with their levels. None if nothing does.
+fn bus_json(p: &Project, id: u64) -> Option<Value> {
+    let routed: Vec<&str> = p.tracks.iter().filter(|t| t.mixer.output == Some(id)).map(|t| t.name.as_str()).collect();
+    let sends: Vec<Value> = p
+        .tracks
+        .iter()
+        .flat_map(|t| t.mixer.sends.iter().filter(|s| s.to == id).map(|s| json!({"from": t.name, "level": s.level})))
+        .collect();
+    if routed.is_empty() && sends.is_empty() {
+        return None;
+    }
+    let mut o = Map::new();
+    if !routed.is_empty() {
+        o.insert("routed".into(), json!(routed));
+    }
+    if !sends.is_empty() {
+        o.insert("sends".into(), json!(sends));
+    }
+    Some(Value::Object(o))
+}
+
+fn track_summary(p: &Project, tm: &TimeMap, t: &Track) -> Value {
     let mut o = Map::new();
     o.insert("id".into(), json!(t.id));
     o.insert("name".into(), json!(t.name));
     o.insert("instrument".into(), instrument_json(&t.instrument));
+    if let Some(b) = bus_json(p, t.id) {
+        o.insert("bus".into(), b);
+    }
     if !t.layer.is_empty() {
         o.insert("layer".into(), json!(t.layer));
     }
@@ -670,6 +791,12 @@ fn track_summary(tm: &TimeMap, t: &Track) -> Value {
     let mut m = mixer_diff(&t.mixer);
     if let Some(m) = m.as_object_mut() {
         m.remove("inserts");
+        if let Some(id) = t.mixer.output {
+            m.insert("output".into(), track_name(p, id));
+        }
+        if !t.mixer.sends.is_empty() {
+            m.insert("sends".into(), json!(t.mixer.sends.iter().map(|s| json!({"to": track_name(p, s.to), "level": s.level})).collect::<Vec<_>>()));
+        }
     }
     if m.as_object().is_some_and(|m| !m.is_empty()) {
         o.insert("mixer".into(), m);
@@ -717,7 +844,7 @@ fn get_project(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
     if !p.harmony.is_empty() {
         o.insert("harmony".into(), json!(p.harmony.iter().map(|c| if c.beat == 0.0 { format!("{}:{}", c.bar, c.chord) } else { format!("{}@{}:{}", c.bar, c.beat, c.chord) }).collect::<Vec<_>>()));
     }
-    o.insert("tracks".into(), json!(p.tracks.iter().map(|t| track_summary(&tm, t)).collect::<Vec<_>>()));
+    o.insert("tracks".into(), json!(p.tracks.iter().map(|t| track_summary(p, &tm, t)).collect::<Vec<_>>()));
     let mut master = json!(p.master);
     if let Some(m) = master.as_object_mut() {
         for (k, chain) in [("inserts", &p.master.inserts), ("reverb_inserts", &p.master.reverb_inserts)] {
@@ -1419,8 +1546,14 @@ fn render_summary(st: &State) -> Result<Value> {
         .iter()
         .map(|t| {
             let mut o = json!({"name": t.name, "engine": t.engine, "peak_dbfs": r1(t.peak_dbfs)});
+            if t.bus {
+                o["bus"] = json!(true);
+            }
             if t.layer != "base" {
                 o["layer"] = json!(t.layer);
+            }
+            if let Some(m) = r.project.tracks.iter().find(|x| x.id == t.id).map(|x| &x.mixer) {
+                dynamics_json(m, t, &mut o);
             }
             if let Some(v) = &t.restricted {
                 o["license"] = json!(format!("{v}: may only leave Flux mixed with other instruments (never as its own stem)"));
@@ -1434,6 +1567,7 @@ fn render_summary(st: &State) -> Result<Value> {
     let mut o = json!({
         "revision": r.revision, "stale": r.revision != st.session.revision, "render_seconds": r1(r.out.render_seconds),
         "loudness": analysis::loudness(&r.out), "sections": analysis::sections(&r.out), "tracks": tracks,
+        "master_chain": master_chain_json(&r.project, &r.out),
     });
     if !r.out.layers.is_empty() {
         o["layers"] = json!(r.out.layers.iter().map(|l| &l.0).collect::<Vec<_>>());
@@ -1447,6 +1581,64 @@ fn render_summary(st: &State) -> Result<Value> {
         o["warnings"] = json!(r.out.warnings);
     }
     Ok(o)
+}
+
+/// A track's level-dependent units in a render: the loud level each relative threshold counts from (dBFS) and the
+/// threshold that makes, so an agent can see whether a compressor, dynamic EQ band or de-esser acts at all.
+fn dynamics_json(m: &Mixer, t: &flux_engine::render::TrackStat, o: &mut Value) {
+    if let (Some(c), Some(loud)) = (&m.comp, t.comp_loud_db)
+        && c.relative
+    {
+        o["comp"] = json!({"loud_db": r1(loud), "threshold_dbfs": r1(loud + c.threshold_db)});
+    }
+    if !t.dyn_eq_loud_db.is_empty() {
+        o["dyn_eq"] = json!(m
+            .dyn_eq
+            .iter()
+            .zip(&t.dyn_eq_loud_db)
+            .map(|(b, &loud)| json!({"hz": b.hz, "loud_db": r1(loud), "threshold_dbfs": r1(if b.relative { loud + b.threshold_db } else { b.threshold_db })}))
+            .collect::<Vec<_>>());
+    }
+    if let (Some(d), Some(loud)) = (&m.deess, t.deess_loud_db) {
+        o["deess"] = json!({"hz": d.hz, "loud_db": r1(loud), "threshold_dbfs": r1(loud + d.threshold_db)});
+    }
+}
+
+/// The edges of the multiband compressor's bands, low to high (Hz).
+pub(crate) fn multiband_edges(mb: &flux_core::Multiband) -> Vec<(f64, f64)> {
+    let mut e = vec![20.0];
+    e.extend(&mb.crossovers_hz);
+    e.push(20000.0);
+    e.windows(2).map(|w| (w[0], w[1])).collect()
+}
+
+/// What the master's dynamics did in a render: the loudness drive, the limiter's largest gain reduction and the
+/// ceiling it settled on, and the glue's and each multiband band's loud level with the threshold it makes (dBFS).
+pub(crate) fn master_chain_json(p: &Project, out: &flux_engine::RenderOutput) -> Value {
+    let m = &p.master;
+    let mut o = json!({"drive_db": r1(out.drive_db), "limiter_max_gr_db": r1(out.limiter_gr_db), "limiter_ceiling_dbtp": r1(out.limiter_ceiling_db)});
+    if let Some(g) = &m.glue {
+        o["glue"] = match (g.relative, out.glue_loud_db) {
+            (true, Some(loud)) => json!({"loud_db": r1(loud), "threshold_dbfs": r1(loud + g.threshold_db), "ratio": g.ratio}),
+            _ => json!({"threshold_dbfs": r1(g.threshold_db), "ratio": g.ratio}),
+        };
+    }
+    if let Some(mb) = &m.multiband {
+        o["multiband"] = json!(multiband_edges(mb)
+            .iter()
+            .zip(&mb.bands)
+            .enumerate()
+            .map(|(i, ((lo, hi), b))| {
+                let mut x = json!({"band": format!("{lo:.0}-{hi:.0} Hz"), "ratio": b.ratio});
+                if let Some(&loud) = out.multiband_loud_db.get(i) {
+                    x["loud_db"] = r1(loud);
+                    x["threshold_dbfs"] = r1(loud + b.threshold_db);
+                }
+                x
+            })
+            .collect::<Vec<_>>());
+    }
+    o
 }
 
 pub(crate) fn ensure_render(sh: &Arc<Shared>, timeout: f64) -> Result<()> {
@@ -1687,7 +1879,7 @@ bring it in or out (e.g. percussion only in combat). Section times are for jumpi
     Ok(json!({"manifest": rel(&mf), "files": files, "sum_error_db": manifest["sum_error_db"]}))
 }
 
-fn ensure_render_with(sh: &Arc<Shared>, timeout: f64, layers: bool) -> Result<()> {
+pub(crate) fn ensure_render_with(sh: &Arc<Shared>, timeout: f64, layers: bool) -> Result<()> {
     if !layers {
         return ensure_render(sh, timeout);
     }
