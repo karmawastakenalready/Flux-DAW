@@ -55,11 +55,16 @@ Exit codes: 0 ok, 1 problems found (drift, failed or refused fetches, license bl
 
 /// Help text for `flux flac`.
 pub const FLAC_HELP: &str = "\
-flux flac IN.wav OUT.flac [--bits 16|24] [--no-dither] [--seed N] [--title T] [--artist A]
+flux flac IN.wav OUT.flac [--bits 16|24] [--dither tpdf|shaped|none] [--seed N] [--title T] [--artist A]
                            [--tag NAME=VALUE]... [--loop START LENGTH] [--threads N] [--no-verify] [--json]
 
-Integer WAVs are copied losslessly at their own depth; float WAVs are quantised (TPDF dither, seed 1, like
-wav16 export). The result is decoded again and checked against the input's MD5 unless --no-verify.
+Integer WAVs are copied losslessly at their own depth. Float WAVs are quantised with --dither (seed 1 unless
+--seed is given):
+  tpdf     triangular dither, the same samples as wav16 export (the default)
+  shaped   triangular dither with noise shaping: moves the 16-bit hiss out of 1-6 kHz, where the ear is most
+           sensitive, into the top octave. Worth it for quiet passages and fade-outs. 24-bit output gets tpdf
+  none     round to the nearest value (--no-dither is the same)
+The result is decoded again and checked against the input's MD5 unless --no-verify.
 ";
 
 /// Entry point for `flux assets ...`: prints, and maps errors to exit code 2.
@@ -692,7 +697,7 @@ pub fn run_flac(args: &[String], ui: &mut dyn Ui) -> Result<u8> {
     let a = Args::parse(
         args,
         &["no-dither", "no-verify", "json"],
-        &["bits", "seed", "title", "artist", "tag", "threads"],
+        &["bits", "dither", "seed", "title", "artist", "tag", "threads"],
         &["loop"],
     )?;
     let [src, dst] = a.pos.as_slice() else { bail!("expected IN.wav OUT.flac") };
@@ -701,8 +706,16 @@ pub fn run_flac(args: &[String], ui: &mut dyn Ui) -> Result<u8> {
         "24" => BitDepth::B24,
         b => bail!("--bits must be 16 or 24, not {b}"),
     };
-    let seed = a.one("seed").map(|s| s.parse::<u64>().with_context(|| format!("--seed {s}"))).transpose()?;
-    let dither = if a.flag("no-dither") { Dither::None } else { Dither::Tpdf { seed: seed.unwrap_or(1) } };
+    let seed = a.one("seed").map(|s| s.parse::<u64>().with_context(|| format!("--seed {s}"))).transpose()?.unwrap_or(1);
+    let dither = match a.one("dither").unwrap_or(if a.flag("no-dither") { "none" } else { "tpdf" }) {
+        "tpdf" => Dither::Tpdf { seed },
+        "shaped" => Dither::Shaped { seed },
+        "none" => Dither::None,
+        d => bail!("--dither must be tpdf, shaped or none, not {d}"),
+    };
+    if a.flag("no-dither") && dither != Dither::None {
+        bail!("--no-dither contradicts --dither {}: give one of them", a.one("dither").unwrap_or_default());
+    }
     let mut opts = FlacOptions { bits, dither, verify: !a.flag("no-verify"), ..FlacOptions::default() };
     if let Some(t) = a.one("title") {
         opts.tags.push(("TITLE".into(), t.into()));

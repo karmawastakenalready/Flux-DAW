@@ -9,17 +9,20 @@
 //! Each band has its own compressor and gain (see [`MultibandComp`]). The gain each band got can be recorded and
 //! applied to a part of the signal ([`apply_band_gains`]); the split is linear, so the parts' results sum to the
 //! compressor's output.
+//!
+//! A band on the mid or the side (`channel`) compresses only that signal, `(L + R) / 2` or `(L - R) / 2`, of its
+//! frequency range: its compressor listens to it, and its gain applies to it while the other passes untouched.
 
 use super::dynamics::{tidy, Compressor, Pass, Section};
 use crate::dsp::{db_to_lin, Stereo};
-use flux_core::{Comp, Detector, MbBand, Multiband};
+use flux_core::{Channel, Comp, Detector, MbBand, Multiband};
 use std::f64::consts::FRAC_1_SQRT_2;
 
 /// At most this many crossovers (four bands).
 const MAX_SPLITS: usize = 3;
 /// Samples per internal block, which bounds the band buffers whatever the caller passes.
-const CHUNK: usize = 1024;
-/// The band compressors' soft knee (dB): a gentle onset suits a mastering compressor working a few dB.
+pub(crate) const CHUNK: usize = 1024;
+/// The band compressors' usual soft knee (dB): a gentle onset suits a mastering compressor working a few dB.
 pub const BAND_KNEE_DB: f64 = 6.0;
 /// What the band compressors listen to. Their thresholds count from each band's loud level, a short-term RMS, so
 /// they hear RMS too: a peak detector would sit a crest factor (often 10 dB) above that level and compress all the
@@ -142,11 +145,48 @@ impl Crossover {
     }
 }
 
+/// The band `k` of `mb` (a neutral one past the end).
+fn band_of(mb: &Multiband, k: usize) -> MbBand {
+    mb.bands.get(k).copied().unwrap_or_else(|| MbBand::new(0.0, 1.0, 10.0, 100.0))
+}
+
+/// The part of a stereo sample a band works on: both channels, or the mid or the side given as both.
+#[inline]
+fn heard(ch: Channel, l: f32, r: f32) -> (f32, f32) {
+    match ch {
+        Channel::Stereo => (l, r),
+        Channel::Mid => {
+            let m = (l + r) * 0.5;
+            (m, m)
+        }
+        Channel::Side => {
+            let s = (l - r) * 0.5;
+            (s, s)
+        }
+    }
+}
+
+/// A band's output for one stereo sample at gain `g`: the gain on both channels, or on the mid or side only.
+#[inline]
+fn band_out(ch: Channel, l: f32, r: f32, g: f32) -> (f32, f32) {
+    match ch {
+        Channel::Stereo => (l * g, r * g),
+        Channel::Mid => {
+            let (m, s) = ((l + r) * 0.5 * g, (l - r) * 0.5);
+            (m + s, m - s)
+        }
+        Channel::Side => {
+            let (m, s) = ((l + r) * 0.5, (l - r) * 0.5 * g);
+            (m + s, m - s)
+        }
+    }
+}
+
 /// A band's compressor settings, its resolved threshold and its gain after compression (linear). A band without a
 /// usable loud level (missing, not finite, or silent when measured) isn't compressed: only its gain applies.
 fn band_setup(mb: &Multiband, loud_db: &[f64], k: usize) -> (Comp, f64, f64) {
-    let neutral = MbBand { threshold_db: 0.0, ratio: 1.0, attack_ms: 10.0, release_ms: 100.0, gain_db: 0.0 };
-    let b = mb.bands.get(k).copied().unwrap_or(neutral);
+    let b = band_of(mb, k);
+    let finite = |x: f64, or: f64| if x.is_finite() { x } else { or };
     let c = Comp {
         threshold_db: b.threshold_db,
         relative: true,
@@ -154,8 +194,9 @@ fn band_setup(mb: &Multiband, loud_db: &[f64], k: usize) -> (Comp, f64, f64) {
         attack_ms: b.attack_ms,
         release_ms: b.release_ms,
         makeup_db: 0.0,
-        knee_db: BAND_KNEE_DB,
+        knee_db: finite(b.knee_db, BAND_KNEE_DB).clamp(0.0, 24.0),
         detector: BAND_DETECTOR,
+        mix: finite(b.mix, 1.0).clamp(0.0, 1.0),
         ..Comp::default()
     };
     let thr = match loud_db.get(k) {
@@ -169,15 +210,17 @@ fn band_setup(mb: &Multiband, loud_db: &[f64], k: usize) -> (Comp, f64, f64) {
 /// Streaming multiband compressor: a [`Crossover`], one compressor per band (thresholds relative to each band's loud
 /// level), the bands summed back.
 ///
-/// Each band's compressor is a [`Compressor`] at the band's ratio, attack and release, with a threshold of the band's
-/// loud level plus its `threshold_db`, an RMS detector ([`BAND_DETECTOR`]) and a 6 dB soft knee ([`BAND_KNEE_DB`]);
-/// the band's `gain_db` applies after it. No lookahead, so no latency.
+/// Each band's compressor is a [`Compressor`] at the band's ratio, attack, release, knee and mix (parallel
+/// compression), with a threshold of the band's loud level plus its `threshold_db` and an RMS detector
+/// ([`BAND_DETECTOR`]); the band's `gain_db` applies after it, on the band's channel. No lookahead, so no latency.
 pub struct MultibandComp {
     sr: f64,
     xo: Crossover,
     comps: Vec<Compressor>,
     /// Each band's gain after its compressor (linear).
     gain: Vec<f64>,
+    /// What each band works on.
+    chan: Vec<Channel>,
     bands: Vec<Stereo>,
 }
 
@@ -186,11 +229,13 @@ impl MultibandComp {
     pub fn new(sr: f64, mb: &Multiband, loud_db: &[f64]) -> MultibandComp {
         let xo = Crossover::new(sr, &mb.crossovers_hz);
         let nb = xo.bands();
-        let mut m = MultibandComp { sr, xo, comps: Vec::with_capacity(nb), gain: vec![1.0; nb], bands: vec![] };
+        let mut m =
+            MultibandComp { sr, xo, comps: Vec::with_capacity(nb), gain: vec![1.0; nb], chan: vec![Channel::Stereo; nb], bands: vec![] };
         for k in 0..nb {
             let (c, thr, gain) = band_setup(mb, loud_db, k);
             m.comps.push(Compressor::new(sr, &c, thr));
             m.gain[k] = gain;
+            m.chan[k] = band_of(mb, k).channel;
         }
         m.bands = band_buffers(nb);
         m
@@ -208,6 +253,7 @@ impl MultibandComp {
             let (c, thr, gain) = band_setup(mb, loud_db, k);
             self.comps[k].retune(self.sr, &c, thr);
             self.gain[k] = gain;
+            self.chan[k] = band_of(mb, k).channel;
         }
     }
 
@@ -226,17 +272,19 @@ impl MultibandComp {
         for (lc, rc) in l[..n].chunks_mut(CHUNK).zip(r[..n].chunks_mut(CHUNK)) {
             self.xo.split(lc, rc, &mut self.bands);
             for (k, ((bl, br), comp)) in self.bands.iter().zip(self.comps.iter_mut()).enumerate() {
-                let lin = self.gain[k];
+                let (lin, ch) = (self.gain[k], self.chan[k]);
                 let mut rec = gains.as_deref_mut().and_then(|gs| gs.get_mut(k));
                 for i in 0..lc.len() {
-                    let g = (comp.next_gain(bl[i], br[i]) * lin) as f32;
+                    let (a, b) = heard(ch, bl[i], br[i]);
+                    let g = (comp.next_gain(a, b) * lin) as f32;
                     // the same sums, in the same order, as apply_band_gains
+                    let (ol, or) = band_out(ch, bl[i], br[i], g);
                     if k == 0 {
-                        lc[i] = bl[i] * g;
-                        rc[i] = br[i] * g;
+                        lc[i] = ol;
+                        rc[i] = or;
                     } else {
-                        lc[i] += bl[i] * g;
-                        rc[i] += br[i] * g;
+                        lc[i] += ol;
+                        rc[i] += or;
                     }
                     if let Some(v) = rec.as_deref_mut() {
                         v.push(g);
@@ -289,21 +337,29 @@ impl LoudMeter {
 }
 
 /// Band buffers for blocks of up to [`CHUNK`] samples.
-fn band_buffers(nb: usize) -> Vec<Stereo> {
+pub(crate) fn band_buffers(nb: usize) -> Vec<Stereo> {
     (0..nb).map(|_| (Vec::with_capacity(CHUNK), Vec::with_capacity(CHUNK))).collect()
 }
 
 /// Each band's loud level in `buf` (dBFS, as [`crate::dsp::loud_level_db`]), split as the compressor splits it.
 pub fn band_loud_levels(buf: &Stereo, sr: f64, mb: &Multiband) -> Vec<f64> {
-    let mut xo = Crossover::new(sr, &mb.crossovers_hz);
+    split_loud_levels(buf, sr, &mb.crossovers_hz, |k| band_of(mb, k).channel)
+}
+
+/// Each band's loud level in `buf` (dBFS, as [`crate::dsp::loud_level_db`]) when it is split at `crossovers_hz` (none
+/// to three of them), band `k` heard on `channel(k)`.
+pub fn split_loud_levels(buf: &Stereo, sr: f64, crossovers_hz: &[f64], channel: impl Fn(usize) -> Channel) -> Vec<f64> {
+    let mut xo = Crossover::new(sr, crossovers_hz);
     let mut meters: Vec<LoudMeter> = (0..xo.bands()).map(|_| LoudMeter::new(sr)).collect();
     let mut bands = band_buffers(xo.bands());
     let n = buf.0.len().min(buf.1.len());
     for (lc, rc) in buf.0[..n].chunks(CHUNK).zip(buf.1[..n].chunks(CHUNK)) {
         xo.split(lc, rc, &mut bands);
-        for (m, (bl, br)) in meters.iter_mut().zip(&bands) {
+        for (k, (m, (bl, br))) in meters.iter_mut().zip(&bands).enumerate() {
+            let ch = channel(k);
             for i in 0..bl.len() {
-                m.push(bl[i], br[i]);
+                let (a, b) = heard(ch, bl[i], br[i]);
+                m.push(a, b);
             }
         }
     }
@@ -322,15 +378,17 @@ pub fn apply_band_gains(buf: &mut Stereo, sr: f64, mb: &Multiband, gains: &[Vec<
         for (k, (bl, br)) in bands.iter().enumerate() {
             // gains missing for a band or past the end of the recording count as 1
             let g = gains.get(k).map_or(&[][..], |v| &v[at.min(v.len())..]);
+            let ch = band_of(mb, k).channel;
             for i in 0..l.len() {
                 let g = g.get(i).copied().unwrap_or(1.0);
                 // the same sums, in the same order, as MultibandComp::process
+                let (ol, or) = band_out(ch, bl[i], br[i], g);
                 if k == 0 {
-                    l[i] = bl[i] * g;
-                    r[i] = br[i] * g;
+                    l[i] = ol;
+                    r[i] = or;
                 } else {
-                    l[i] += bl[i] * g;
-                    r[i] += br[i] * g;
+                    l[i] += ol;
+                    r[i] += or;
                 }
             }
         }

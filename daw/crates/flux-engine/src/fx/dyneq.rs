@@ -18,13 +18,16 @@
 //!     flat in magnitude, and since the two halves are in phase at every frequency the shelf falls smoothly from 1
 //!     to G with no bump or overshoot. `q` is not used for shelves.
 //!
+//! A band on the mid or the side (`channel`) listens to that signal alone, `(L + R) / 2` or `(L - R) / 2`, and filters
+//! only it, the other passing untouched.
+//!
 //! The bands apply in series. Because the audio path is linear for a given gain trajectory, the gains recorded on
 //! the whole signal ([`DynEq::process`]) replay exactly on any part of it ([`DynEq::replay`]): the parts sum to the
 //! whole.
 
 use crate::denormals::FlushDenormals;
 use crate::dsp::{BqState, Biquad, FilterKind, Stereo};
-use flux_core::{DynBand, EqKind};
+use flux_core::{Channel, DynBand, EqKind};
 
 /// The soft knee's width (dB).
 const KNEE_DB: f64 = 3.0;
@@ -42,8 +45,9 @@ enum Kind {
 impl Kind {
     fn of(k: EqKind) -> Kind {
         match k {
-            EqKind::LowShelf => Kind::LowShelf,
-            EqKind::HighShelf | EqKind::Tilt => Kind::HighShelf,
+            // a high-pass takes the lows away, as a low shelf turned down does
+            EqKind::LowShelf | EqKind::HighPass => Kind::LowShelf,
+            EqKind::HighShelf | EqKind::Tilt | EqKind::LowPass => Kind::HighShelf,
             EqKind::Peak | EqKind::Notch => Kind::Peak,
         }
     }
@@ -183,11 +187,24 @@ impl Band {
         gr.max(self.range)
     }
 
+    /// What the band's detector hears of one input sample (before squaring): the louder channel, or the mid or side.
+    #[inline]
+    fn hear(&mut self, l: f32, r: f32) -> f64 {
+        match self.spec.channel {
+            Channel::Stereo => {
+                let (a, b) = (self.detector.tick(0, l) as f64, self.detector.tick(1, r) as f64);
+                if a.abs() >= b.abs() { a } else { b }
+            }
+            Channel::Mid => self.detector.tick(0, (l + r) * 0.5) as f64,
+            Channel::Side => self.detector.tick(0, (l - r) * 0.5) as f64,
+        }
+    }
+
     /// Listens to one input sample: the band's gain (linear) for it.
     #[inline]
     fn detect(&mut self, l: f32, r: f32) -> f32 {
-        let (a, b) = (self.detector.tick(0, l) as f64, self.detector.tick(1, r) as f64);
-        let p = (a * a).max(b * b);
+        let a = self.hear(l, r);
+        let p = a * a;
         self.power = self.avg * self.power + (1.0 - self.avg) * p;
         let level = 10.0 * (self.power + 1e-24).log10();
         let k = if level > self.env_db { self.att } else { self.rel };
@@ -199,15 +216,29 @@ impl Band {
     /// The band's filter at gain `g` on one stereo sample.
     #[inline]
     fn apply(&mut self, x: [f32; 2], g: f32) -> [f32; 2] {
-        let mut y = [0f32; 2];
-        for ch in 0..2 {
-            let part = self.part.tick(ch, x[ch]);
-            y[ch] = match self.kind {
-                Kind::Peak => x[ch] + (g - 1.0) * part,
-                Kind::LowShelf | Kind::HighShelf => g * self.allpass.tick(ch, x[ch]) + (1.0 - g) * part,
-            };
+        match self.spec.channel {
+            Channel::Stereo => [self.apply_ch(0, x[0], g), self.apply_ch(1, x[1], g)],
+            Channel::Mid => {
+                let (m, s) = ((x[0] + x[1]) * 0.5, (x[0] - x[1]) * 0.5);
+                let m = self.apply_ch(0, m, g);
+                [m + s, m - s]
+            }
+            Channel::Side => {
+                let (m, s) = ((x[0] + x[1]) * 0.5, (x[0] - x[1]) * 0.5);
+                let s = self.apply_ch(0, s, g);
+                [m + s, m - s]
+            }
         }
-        y
+    }
+
+    /// The band's filter at gain `g` on one sample of one channel's memory.
+    #[inline]
+    fn apply_ch(&mut self, ch: usize, x: f32, g: f32) -> f32 {
+        let part = self.part.tick(ch, x);
+        match self.kind {
+            Kind::Peak => x + (g - 1.0) * part,
+            Kind::LowShelf | Kind::HighShelf => g * self.allpass.tick(ch, x) + (1.0 - g) * part,
+        }
     }
 
     /// The same band from silence.
@@ -238,7 +269,7 @@ impl DynEq {
         for (i, spec) in bands.iter().enumerate() {
             let loud = loud_db.get(i).copied().unwrap_or(0.0);
             match self.bands.get_mut(i) {
-                Some(b) if b.kind == Kind::of(spec.kind) => {
+                Some(b) if b.kind == Kind::of(spec.kind) && b.spec.channel == spec.channel => {
                     if b.spec.hz != spec.hz || b.spec.q != spec.q {
                         let (d, p, a) = Band::filters(sr, spec, b.kind);
                         b.detector.retune(d);
@@ -318,10 +349,7 @@ pub fn band_loud_levels(buf: &Stereo, sr: f64, bands: &[DynBand]) -> Vec<f64> {
                 .0
                 .iter()
                 .zip(&buf.1)
-                .map(|(l, r)| {
-                    let (a, c) = (b.detector.tick(0, *l), b.detector.tick(1, *r));
-                    a.abs().max(c.abs())
-                })
+                .map(|(l, r)| b.hear(*l, *r).abs() as f32)
                 .collect();
             crate::dsp::loud_level_db(&(heard.clone(), heard), sr)
         })
@@ -398,6 +426,7 @@ mod tests {
             range_db,
             attack_ms: 5.0,
             release_ms: 80.0,
+            channel: flux_core::Channel::Stereo,
         }
     }
 
@@ -592,6 +621,7 @@ mod tests {
             range_db: 5.0,
             attack_ms: -1.0,
             release_ms: f64::INFINITY,
+            channel: flux_core::Channel::Side,
         };
         for bands in [vec![bad], vec![DynBand { kind: EqKind::Tilt, hz: 1e9, ..bad }], vec![]] {
             let mut eq = DynEq::new(SR, &bands, &[f64::NAN]);

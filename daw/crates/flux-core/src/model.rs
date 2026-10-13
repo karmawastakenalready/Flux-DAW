@@ -275,19 +275,72 @@ pub enum EqKind {
     Notch,
     /// Tilts the whole spectrum around `hz`: `db` above it and `-db` below, through gentle shelves (`q` is ignored).
     Tilt,
+    /// Cuts below `hz`: a Butterworth high-pass falling `slope` dB per octave (`db` and `q` are ignored).
+    HighPass,
+    /// Cuts above `hz`: a Butterworth low-pass falling `slope` dB per octave (`db` and `q` are ignored).
+    LowPass,
+}
+
+impl EqKind {
+    /// A high- or low-pass, whose `slope` counts and whose `db` doesn't.
+    pub fn is_pass(&self) -> bool {
+        matches!(self, EqKind::HighPass | EqKind::LowPass)
+    }
+}
+
+/// Which part of a stereo signal an EQ band, a dynamic EQ band or a multiband band works on.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Channel {
+    /// Both channels alike.
+    #[default]
+    Stereo,
+    /// The mid signal `(L + R) / 2`: what the two channels share, the centre of the image.
+    Mid,
+    /// The side signal `(L - R) / 2`: what differs between them, the edges of the image.
+    Side,
+}
+
+impl Channel {
+    pub fn is_stereo(&self) -> bool {
+        *self == Channel::Stereo
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EqBand {
     pub kind: EqKind,
     pub hz: f64,
+    /// Gain; a notch, a high- or a low-pass has none, so it can be left out.
+    #[serde(default)]
     pub db: f64,
     #[serde(default = "default_q")]
     pub q: f64,
+    /// High- and low-pass bands: dB per octave, one of [`FILTER_SLOPES`].
+    #[serde(default = "d_eq_slope", skip_serializing_if = "is_eq_slope")]
+    pub slope: u32,
+    /// Which part of the stereo signal it works on.
+    #[serde(default, skip_serializing_if = "Channel::is_stereo")]
+    pub channel: Channel,
+}
+
+impl EqBand {
+    /// A band on both channels (and a high- or low-pass of 12 dB per octave).
+    pub fn new(kind: EqKind, hz: f64, db: f64, q: f64) -> EqBand {
+        EqBand { kind, hz, db, q, slope: d_eq_slope(), channel: Channel::Stereo }
+    }
 }
 
 fn default_q() -> f64 {
     0.9
+}
+
+fn d_eq_slope() -> u32 {
+    12
+}
+
+fn is_eq_slope(s: &u32) -> bool {
+    *s == d_eq_slope()
 }
 
 /// A compressor. Left out, the newer settings (knee, detector, sidechain filter, lookahead, auto release, mix) take
@@ -386,6 +439,9 @@ pub struct DynBand {
     pub attack_ms: f64,
     #[serde(default = "d_dyn_release")]
     pub release_ms: f64,
+    /// Which part of the stereo signal it listens to and turns down.
+    #[serde(default, skip_serializing_if = "Channel::is_stereo")]
+    pub channel: Channel,
 }
 
 fn d_true() -> bool {
@@ -446,6 +502,7 @@ impl DeEss {
             range_db: self.range_db,
             attack_ms: 1.0,
             release_ms: 60.0,
+            channel: Channel::Stereo,
         }
     }
 }
@@ -834,11 +891,15 @@ pub struct Multiband {
     pub bands: Vec<MbBand>,
 }
 
+/// The crossovers the multiband compressor, the exciter and the imager start from (Hz): low, low mids, high mids and
+/// highs.
+pub const MASTER_CROSSOVERS_HZ: [f64; 3] = [150.0, 2500.0, 8000.0];
+
 impl Default for Multiband {
     fn default() -> Self {
-        let band = |threshold_db, ratio, attack_ms, release_ms| MbBand { threshold_db, ratio, attack_ms, release_ms, gain_db: 0.0 };
+        let band = |threshold_db, ratio, attack_ms, release_ms| MbBand::new(threshold_db, ratio, attack_ms, release_ms);
         Multiband {
-            crossovers_hz: vec![150.0, 2500.0, 8000.0],
+            crossovers_hz: MASTER_CROSSOVERS_HZ.to_vec(),
             bands: vec![band(-4.0, 2.0, 30.0, 200.0), band(-3.0, 1.6, 20.0, 150.0), band(-3.0, 1.8, 10.0, 100.0), band(-4.0, 2.0, 5.0, 80.0)],
         }
     }
@@ -857,6 +918,112 @@ pub struct MbBand {
     /// The band's level after it (dB).
     #[serde(default)]
     pub gain_db: f64,
+    /// Soft knee (dB): the ratio eases in over this range around the threshold.
+    #[serde(default = "d_mb_knee", skip_serializing_if = "is_mb_knee")]
+    pub knee_db: f64,
+    /// Parallel compression: the compressed band's share of its output (1 = all of it).
+    #[serde(default = "d_one", skip_serializing_if = "is_one")]
+    pub mix: f64,
+    /// Which part of the stereo signal the band compresses (the rest of the band passes untouched).
+    #[serde(default, skip_serializing_if = "Channel::is_stereo")]
+    pub channel: Channel,
+}
+
+impl MbBand {
+    /// A band on both channels, fully compressed, with the usual knee and no gain.
+    pub fn new(threshold_db: f64, ratio: f64, attack_ms: f64, release_ms: f64) -> MbBand {
+        MbBand { threshold_db, ratio, attack_ms, release_ms, gain_db: 0.0, knee_db: d_mb_knee(), mix: 1.0, channel: Channel::Stereo }
+    }
+}
+
+fn d_mb_knee() -> f64 {
+    6.0
+}
+
+fn is_mb_knee(k: &f64) -> bool {
+    *k == d_mb_knee()
+}
+
+/// The filters of the master EQ.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EqPhase {
+    /// Minimum phase: no latency, the phase shifts a little around each band, as an analog EQ's does.
+    #[default]
+    Minimum,
+    /// Linear phase: the same response with no phase shift (attacks keep their shape), at the cost of about 0.1 s
+    /// of latency in live playback and a little pre-ringing before sharp attacks where a band is narrow or steep.
+    /// High-passes stay minimum phase: they sit lower than the linear-phase filter can follow.
+    Linear,
+}
+
+impl EqPhase {
+    fn is_minimum(&self) -> bool {
+        *self == EqPhase::Minimum
+    }
+}
+
+/// The saturation curve of an exciter band.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SatMode {
+    /// Symmetric soft saturation, odd harmonics: clear and bright, like tape.
+    #[default]
+    Tape,
+    /// Asymmetric saturation, even and odd harmonics: warmer and fuller, like a valve.
+    Tube,
+}
+
+/// A multiband exciter: the master split into bands (as the multiband compressor splits it), each saturated on its
+/// own at 4x the sample rate and blended with itself. The harmonics it adds bring out a dull or thin range without
+/// the noise and harshness an EQ boost would raise with it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Exciter {
+    /// 0 to 3 crossover frequencies (Hz), ascending: 1 to 4 bands.
+    pub crossovers_hz: Vec<f64>,
+    /// One per band, low to high.
+    pub bands: Vec<ExciterBand>,
+}
+
+impl Default for Exciter {
+    fn default() -> Self {
+        let band = |drive_db, mix| ExciterBand { drive_db, mix, mode: SatMode::Tape };
+        Exciter { crossovers_hz: MASTER_CROSSOVERS_HZ.to_vec(), bands: vec![band(3.0, 0.0), band(3.0, 0.0), band(6.0, 0.15), band(6.0, 0.25)] }
+    }
+}
+
+/// One band of the exciter.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ExciterBand {
+    /// How hard the band's loud passages drive the curve (dB): at 0 only their peaks round off, at 12 they saturate
+    /// clearly. It counts from the band's loud level, so it does the same whatever the mix's level.
+    #[serde(default = "d_exciter_drive")]
+    pub drive_db: f64,
+    /// The saturated band's share of its output: 0 leaves the band untouched, 1 is only the saturated band.
+    pub mix: f64,
+    #[serde(default)]
+    pub mode: SatMode,
+}
+
+fn d_exciter_drive() -> f64 {
+    6.0
+}
+
+/// A multiband stereo imager: the master split into bands (as the multiband compressor splits it), each band's side
+/// signal scaled by its width.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Imager {
+    /// 1 to 3 crossover frequencies (Hz), ascending: 2 to 4 bands.
+    pub crossovers_hz: Vec<f64>,
+    /// One per band, low to high: 0 = mono, 1 = as mixed, up to 2.
+    pub widths: Vec<f64>,
+}
+
+impl Default for Imager {
+    fn default() -> Self {
+        Imager { crossovers_hz: MASTER_CROSSOVERS_HZ.to_vec(), widths: vec![1.0; 4] }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -883,9 +1050,24 @@ pub struct Master {
     /// The final limiter (see [`Limiter`]).
     #[serde(default = "Limiter::classic")]
     pub limiter: Limiter,
-    /// After the master EQ; None = off.
+    /// Minimum or linear phase for the master EQ.
+    #[serde(default, skip_serializing_if = "EqPhase::is_minimum")]
+    pub eq_phase: EqPhase,
+    /// Dynamic EQ bands after the master EQ.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dyn_eq: Vec<DynBand>,
+    /// After the dynamic EQ.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deess: Option<DeEss>,
+    /// After the de-esser; None = off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multiband: Option<Multiband>,
+    /// After the multiband compressor; None = off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exciter: Option<Exciter>,
+    /// After the exciter, before `mono_below_hz` and `width`; None = off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imager: Option<Imager>,
     /// Below this the master is mono (Hz), after the multiband; 0 = off.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub mono_below_hz: f64,
@@ -908,7 +1090,12 @@ impl Default for Master {
             reverb_inserts: vec![],
             automation: vec![],
             limiter: Limiter::default(),
+            eq_phase: EqPhase::Minimum,
+            dyn_eq: vec![],
+            deess: None,
             multiband: None,
+            exciter: None,
+            imager: None,
             mono_below_hz: 0.0,
             width: 1.0,
         }

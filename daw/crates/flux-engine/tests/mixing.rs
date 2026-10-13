@@ -1,5 +1,6 @@
-//! Group buses, aux sends and the master chain (glue, multiband, image, the true-peak limiter) in live playback,
-//! against the offline render. Audio tracks only, so no instruments are needed.
+//! Group buses, aux sends and the master chain (glue, EQ in minimum and linear phase, dynamic EQ, de-esser, multiband,
+//! exciter, imager, image, the true-peak limiter) in live playback, against the offline render. Audio tracks only, so
+//! no instruments are needed.
 
 use flux_core::{Command, Project, commands};
 use flux_engine::dsp::Stereo;
@@ -123,6 +124,55 @@ fn live_playback_through_buses_and_the_master_chain_matches_the_render() {
                 println!("looped={looped} {a}-{b} s ch{c}: live {lv:.2} dB, rendered {of:.2} dB, residual {res:.1} dB");
                 assert!((lv - of).abs() < 0.2, "looped={looped} {a}-{b} s ch{c}: live {lv:.2} dB, rendered {of:.2} dB");
                 assert!(res < -30.0, "looped={looped} {a}-{b} s ch{c}: live is off the render by {res:.1} dB");
+            }
+        }
+    }
+}
+
+/// The `project` with every stage of the master on: a 24 dB/octave high-pass, a side-only high shelf and a mid-only
+/// cut in its EQ (minimum or linear phase), a dynamic EQ band on the mid, the de-esser, a multiband compressor with a
+/// mid band, a parallel band and a soft-kneed one, the exciter (tape and tube bands) and the imager.
+fn mastered(looped: bool, phase: &str) -> Project {
+    let mut p = project(looped);
+    let cmd = json!({"op": "set_master", "master": {
+        "eq": [{"kind": "high_pass", "hz": 35.0, "db": 0.0, "slope": 24},
+            {"kind": "high_shelf", "hz": 7000.0, "db": 2.5, "q": 0.7, "channel": "side"},
+            {"kind": "peak", "hz": 400.0, "db": -2.0, "q": 1.2, "channel": "mid"}],
+        "eq_phase": phase,
+        "dyn_eq": [{"kind": "peak", "hz": 3000.0, "q": 1.4, "threshold_db": -4.0, "range_db": -4.0, "channel": "mid"}],
+        "deess": {"hz": 6500.0, "threshold_db": -6.0, "range_db": -5.0},
+        "multiband": {"crossovers_hz": [200.0, 2500.0], "bands": [
+            {"threshold_db": -3.0, "ratio": 2.0, "channel": "mid"}, {"threshold_db": -4.0, "ratio": 3.0, "mix": 0.5},
+            {"threshold_db": -6.0, "ratio": 2.5, "knee_db": 12.0}]},
+        "exciter": {"crossovers_hz": [300.0, 4000.0], "bands": [
+            {"drive_db": 6.0, "mix": 0.3, "mode": "tube"}, {"drive_db": 0.0, "mix": 0.0}, {"drive_db": 9.0, "mix": 0.4, "mode": "tape"}]},
+        "imager": {"crossovers_hz": [250.0, 5000.0], "widths": [0.3, 1.0, 1.4]}}});
+    commands::apply(&mut p, &serde_json::from_value::<Command>(cmd).unwrap()).unwrap();
+    p
+}
+
+#[test]
+fn the_whole_mastering_chain_plays_live_as_it_renders_and_its_stems_sum_to_it() {
+    for (looped, phase) in [(true, "minimum"), (false, "linear"), (true, "linear")] {
+        let p = mastered(looped, phase);
+        let opts = RenderOptions { layers: true, ..RenderOptions::default() };
+        let out = render(&p, &opts).unwrap();
+        let tag = format!("looped={looped} {phase}");
+        assert!((out.lufs - p.master.target_lufs).abs() < 0.2, "{tag}: rendered at {:.2} LUFS", out.lufs);
+        assert!(out.true_peak_dbtp <= p.master.ceiling_dbtp + 0.01, "{tag}: true peak {:.2} dBTP", out.true_peak_dbtp);
+        let lv = &out.master_loud;
+        assert!(lv.dyn_eq.len() == 1 && lv.deess.is_some() && lv.multiband.len() == 3 && lv.exciter.len() == 3, "{tag}: {lv:?}");
+        let sum = out.layer_sum_error_db.expect("layers");
+        assert!(sum < -60.0, "{tag}: the layers are off the master by {sum:.1} dBFS");
+        let live = play_live(&p, RenderHints::from_render(&out), 7.5);
+        for (a, b) in [(2.0, 3.0), (4.0, 5.5), (6.0, 7.5)] {
+            let (w, ch) = (s(a)..s(b), [(&live.0, &out.left), (&live.1, &out.right)]);
+            for (c, (x, y)) in ch.into_iter().enumerate() {
+                let (lv, of) = (rms_db(&x[w.clone()]), rms_db(&y[w.clone()]));
+                let res = residual_db(&x[w.clone()], &y[w.clone()]);
+                println!("{tag} {a}-{b} s ch{c}: live {lv:.2} dB, rendered {of:.2} dB, residual {res:.1} dB");
+                assert!((lv - of).abs() < 0.2, "{tag} {a}-{b} s ch{c}: live {lv:.2} dB, rendered {of:.2} dB");
+                assert!(res < -30.0, "{tag} {a}-{b} s ch{c}: live is off the render by {res:.1} dB");
             }
         }
     }

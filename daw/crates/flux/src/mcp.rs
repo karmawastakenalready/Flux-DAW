@@ -43,8 +43,9 @@ Mixing: set_mixer per track (gain, pan, width, HPF/LPF, EQ, drive, gate, compres
 that only bites when loud, de-esser at 5-8 kHz, delay, reverb, sidechain duck, reverb send) and its routing: \
 `output` into a group bus, `sends` to aux returns. edit add_bus makes a bus: route tracks to it for shared EQ and \
 glue, or give it a reverb at mix 1 and send tracks to it for an aux reverb (one space shared by many parts). \
-set_master holds the shared reverb, glue compression, EQ, a multiband compressor, mono below, width, the limiter, \
-the loudness target (default -15 LUFS) and the true-peak ceiling (default -1 dBTP). VST3 effects go in insert slots (edit add_insert): on a track (pre or post its \
+set_master holds the shared reverb, glue compression, EQ (bands on both channels, the mid or the side; eq_phase linear \
+for an EQ that leaves the phase alone), dynamic EQ, de-esser, a multiband compressor, exciter, imager (a width per \
+band), mono below, width, the limiter, the loudness target (default -15 LUFS) and the true-peak ceiling (default -1 dBTP). VST3 effects go in insert slots (edit add_insert): on a track (pre or post its \
 strip), on the master, or on the reverb return (which then replaces the built-in reverb); plugins sets them up (params, \
 factory programs, presets in the plugin's own format such as Valhalla's or Vital's, or its window for the human), \
 latency is compensated, and a failing insert passes audio through with a warning. Automation (edit add_automation) \
@@ -58,11 +59,13 @@ track, and mix_check apply=true (or apply=[indices]) carries out its fixes as on
 until what is left is taste. Then master checks the master as a mastering engineer would and scores it 0-100 (100: \
 nothing to fix; every lost point is an issue saying why, most with an indexed move): action=preset sets a chain \
 (game_loop is the usual start), apply carries out the moves, auto repeats check and apply until the score stops \
-rising, match EQs toward a reference. Export, then game_audio_check judges the files beside the game's other music. \
+rising, match EQs toward a reference. Pick the `style` the song is (balanced, cinematic, electronic, acoustic) or \
+give a reference; the human sees your last check in the GUI's Analysis tab. Export, then game_audio_check judges the files beside the game's other music. \
 A relative threshold (glue, relative compressors, dynamic EQ, de-esser, multiband) counts from the signal's loud \
 level (95th percentile of its short-term level): -4 means 4 dB under its loud moments, whatever the level; render's \
 summary shows each loud level and threshold. The master runs: reverb return joins -> inserts -> glue -> EQ -> \
-multiband -> mono below and width -> loudness drive and limiter (to the target and ceiling). A master EQ move stops \
+dynamic EQ -> de-esser -> multiband -> exciter -> imager -> mono below and width -> loudness drive and limiter (to \
+the target and ceiling). A master EQ move stops \
 at 6 dB: a region further off belongs in the mix (mix_check's regions name the tracks there). limiter_max_gr_db \
 beyond about -4 dB means the mix is too peaky.
 

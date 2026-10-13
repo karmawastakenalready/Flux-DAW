@@ -9,7 +9,10 @@
 
 pub mod dynamics;
 pub mod dyneq;
+pub mod exciter;
+pub mod imager;
 pub mod limiter;
+pub mod linphase;
 pub mod multiband;
 pub mod reverb;
 pub mod saturate;

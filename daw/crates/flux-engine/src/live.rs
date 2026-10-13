@@ -13,7 +13,8 @@
 //! change; a VST3 or rig track's cached render stands in while its plugin or rig loads. The channel strips
 //! run as streaming processors (the same ones the offline render uses), in routing order: a group bus or an aux
 //! return runs once everything feeding it has played into it this block. Then the master: the shared reverb, the
-//! master's inserts, glue, EQ, multiband, image, the loudness drive and the true-peak limiter, as the render has them.
+//! master's inserts, glue, the tone stages (`mastering::Tone`: EQ, dynamic EQ, de-esser, multiband, exciter, imager and
+//! image), the loudness drive and the true-peak limiter, as the render has them.
 //! Latency (plugins, rigs, inserts, compressor lookahead) is compensated along every route, so whatever meets at a bus
 //! or the master lines up as in the render. Edits arrive as new project snapshots while playing.
 //! Instruments are loaded, and big ones freed, on background threads. Automation plays as it renders: the
@@ -27,13 +28,13 @@
 //! The offline render stays the reference for measurement and export. Live playback borrows what the last
 //! render measured (`RenderHints`: the loudness drive, the limiter's ceiling and the loud levels behind relative
 //! thresholds), so it sounds like the render; without one it estimates the drive as it plays, the strips guess their
-//! loud levels and the multiband passes the audio through.
+//! loud levels, the multiband passes the audio through and the exciter guesses its bands' levels.
 
-use crate::dsp::{self, Chain, MonoBelow, Stereo};
+use crate::dsp::{self, Stereo};
 use crate::fx::dynamics::Compressor;
 use crate::fx::limiter::MasterLimiter;
-use crate::fx::multiband::MultibandComp;
 use crate::fx::reverb::AnyReverb;
+use crate::mastering::{self, Tone};
 use crate::render::{self, fold_loop, note_events};
 use crate::routing::Routing;
 use crate::strip::{self, Loud, Strip};
@@ -66,8 +67,8 @@ pub struct RenderHints {
     pub glue_loud_db: Option<f64>,
     /// Each track's loud levels, which its relative thresholds count from (by track id).
     pub loud: HashMap<u64, Loud>,
-    /// Each band's loud level at the master's multiband compressor, which its thresholds count from.
-    pub multiband_loud_db: Vec<f64>,
+    /// The loud levels the master's dynamic EQ, de-esser, multiband compressor and exciter count from.
+    pub master_loud: mastering::Levels,
 }
 
 impl RenderHints {
@@ -81,7 +82,7 @@ impl RenderHints {
                 .iter()
                 .map(|t| (t.id, Loud { comp: t.comp_loud_db, dyn_eq: t.dyn_eq_loud_db.clone(), deess: t.deess_loud_db }))
                 .collect(),
-            multiband_loud_db: out.multiband_loud_db.clone(),
+            master_loud: out.master_loud.clone(),
         }
     }
 
@@ -1101,9 +1102,7 @@ pub struct LiveEngine {
     edge: Stereo,
     reverb: AnyReverb,
     glue: Option<Compressor>,
-    eq: Chain,
-    multiband: Option<MultibandComp>,
-    mono: Option<MonoBelow>,
+    tone: Tone,
     limiter: MasterLimiter,
     hints: RenderHints,
     drive: f32,
@@ -1150,30 +1149,6 @@ fn glue_state(p: &Project, hints: &RenderHints, old: Option<Compressor>) -> Opti
     })
 }
 
-/// The master's multiband compressor, its thresholds counting from the band levels the last render measured (a band
-/// without one passes its audio through).
-fn multiband_state(p: &Project, hints: &RenderHints, old: Option<MultibandComp>) -> Option<MultibandComp> {
-    let sr = p.sample_rate as f64;
-    p.master.multiband.as_ref().map(|mb| match old {
-        Some(mut m) => {
-            m.retune(mb, &hints.multiband_loud_db);
-            m
-        }
-        None => MultibandComp::new(sr, mb, &hints.multiband_loud_db),
-    })
-}
-
-fn mono_state(p: &Project, old: Option<MonoBelow>) -> Option<MonoBelow> {
-    let (sr, hz) = (p.sample_rate as f64, p.master.mono_below_hz);
-    (hz > 0.0).then(|| match old {
-        Some(mut m) => {
-            m.retune(sr, hz);
-            m
-        }
-        None => MonoBelow::new(sr, hz),
-    })
-}
-
 /// The limiter's ceiling (dBTP): the render's, which it lowers until the true peak is under the master's.
 fn ceiling(p: &Project, hints: &RenderHints) -> f64 {
     let c = p.master.ceiling_dbtp - render::CEILING_MARGIN_DB;
@@ -1194,9 +1169,7 @@ impl LiveEngine {
             edge: (vec![0.0; BLOCK], vec![0.0; BLOCK]),
             reverb: AnyReverb::new(sr, &p.master.reverb),
             glue: glue_state(&p, &hints, None),
-            eq: dsp::eq_chain(sr, &p.master.eq),
-            multiband: multiband_state(&p, &hints, None),
-            mono: mono_state(&p, None),
+            tone: Tone::new(sr, &p.master, &hints.master_loud),
             limiter: MasterLimiter::new(sr, &p.master.limiter, ceiling(&p, &hints)),
             drive: dsp::db_to_lin(hints.drive_db.unwrap_or(10.0)) as f32,
             auto_drive_db: 10.0,
@@ -1257,9 +1230,9 @@ impl LiveEngine {
     }
 
     /// How far the output runs behind the song position: the mix's latency at the master, the reverb return's and
-    /// the master's inserts, the glue's lookahead and the limiter's (samples).
+    /// the master's inserts, the glue's lookahead, the linear-phase EQ's and the limiter's (samples).
     fn latency(&self) -> usize {
-        self.pdc + self.bus_latency + self.glue.as_ref().map_or(0, Compressor::latency) + self.limiter.latency()
+        self.pdc + self.bus_latency + self.glue.as_ref().map_or(0, Compressor::latency) + self.tone.latency() + self.limiter.latency()
     }
 
     /// Song position of output frame `i` from now.
@@ -1325,7 +1298,7 @@ impl LiveEngine {
             t.strip.update(&m, &self.hints.loud(t.track.id), loop_s, phase);
         }
         self.glue = glue_state(&self.p, &self.hints, self.glue.take());
-        self.multiband = multiband_state(&self.p, &self.hints, self.multiband.take());
+        self.tone.retune(&self.p.master, &self.hints.master_loud);
         self.limiter.set_ceiling(ceiling(&self.p, &self.hints));
     }
 
@@ -1526,9 +1499,7 @@ impl LiveEngine {
             let sr = self.tg.sr;
             self.reverb.retune(&p.master.reverb);
             self.glue = glue_state(&p, &self.hints, self.glue.take());
-            self.eq.retune(dsp::eq_chain(sr, &p.master.eq));
-            self.multiband = multiband_state(&p, &self.hints, self.multiband.take());
-            self.mono = mono_state(&p, self.mono.take());
+            self.tone.retune(&p.master, &self.hints.master_loud);
             if old.master.limiter != p.master.limiter {
                 self.limiter = MasterLimiter::new(sr, &p.master.limiter, ceiling(&p, &self.hints));
             } else {
@@ -2063,17 +2034,7 @@ impl LiveEngine {
         if let Some(g) = &mut self.glue {
             g.process(&mut dry.0[..n], &mut dry.1[..n], None);
         }
-        self.eq.process(&mut dry.0[..n], &mut dry.1[..n]);
-        if let Some(m) = &mut self.multiband {
-            m.process(&mut dry.0[..n], &mut dry.1[..n], None);
-        }
-        // the image: mono below, then width
-        if let Some(m) = &mut self.mono {
-            m.process(&mut dry.0[..n], &mut dry.1[..n]);
-        }
-        if p.master.width != 1.0 {
-            dsp::place_s(&mut dry.0[..n], &mut dry.1[..n], 0.0, p.master.width);
-        }
+        self.tone.process(&mut dry.0[..n], &mut dry.1[..n]);
 
         // loudness drive: the last render's, or an estimate from what has played so far (of the song)
         let drive_db = match self.hints.drive_db {

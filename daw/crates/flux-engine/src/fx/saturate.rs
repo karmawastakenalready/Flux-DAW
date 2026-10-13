@@ -1,4 +1,4 @@
-//! Oversampled drive and clipping for the channel strip.
+//! Oversampled drive and clipping for the channel strip, and the curves of the master's exciter.
 //!
 //! The waveshaper runs at 4x the sample rate between two elliptic (minimum-phase IIR) filters, and is itself
 //! anti-aliased with its first antiderivative (ADAA): the output at each oversampled step is the mean of the curve
@@ -32,7 +32,18 @@ pub enum Shape {
     Drive(f64),
     /// Hard clipping at this level (dBFS), as `dsp::clip`.
     Clip(f64),
+    /// Symmetric soft saturation (odd harmonics), tape-like: `tanh(g x) / g` with `g` this gain (dB), so a small
+    /// signal passes at unity whatever the drive and the curve bends from about `1 / g`.
+    Tape(f64),
+    /// Asymmetric soft saturation (even and odd harmonics), valve-like: a tanh biased off centre by
+    /// [`TUBE_BIAS`], with the bias's offset and slope taken back out, so it too passes a small signal at unity
+    /// and bends from about `1 / g`. It makes a little DC, which the caller filters out.
+    Tube(f64),
 }
+
+/// How far off centre the tube curve works (in units of its input after the gain): positive peaks flatten sooner
+/// than negative ones.
+pub const TUBE_BIAS: f64 = 0.35;
 
 impl Shape {
     /// The slope of the curve at zero: what a small signal is multiplied by (the drive's gain; 1 for clipping and
@@ -111,6 +122,15 @@ enum Curve {
     Clip(f64),
     /// g x (the linear reference).
     Linear(f64),
+    /// tanh(g x) / g.
+    Tape(f64),
+    /// (tanh(g x + b) - tanh b) / (g (1 - tanh^2 b)), b = TUBE_BIAS.
+    Tube(f64),
+}
+
+/// The gain of an exciter curve: finite, within +-60 dB.
+fn exciter_gain(db: f64) -> f64 {
+    if db.is_finite() { db_to_lin(db.clamp(-60.0, 60.0)) } else { 1.0 }
 }
 
 impl Curve {
@@ -124,6 +144,8 @@ impl Curve {
                 let t = db_to_lin(db);
                 Curve::Clip(if t.is_nan() { 1.0 } else { t.min(1e6) })
             }
+            Shape::Tape(db) => Curve::Tape(exciter_gain(db)),
+            Shape::Tube(db) => Curve::Tube(exciter_gain(db)),
         }
     }
 
@@ -133,6 +155,11 @@ impl Curve {
             Curve::Tanh(g) => (g * x).tanh(),
             Curve::Clip(t) => x.max(-t).min(t),
             Curve::Linear(g) => g * x,
+            Curve::Tape(g) => (g * x).tanh() / g,
+            Curve::Tube(g) => {
+                let tb = TUBE_BIAS.tanh();
+                ((g * x + TUBE_BIAS).tanh() - tb) / (g * (1.0 - tb * tb))
+            }
         }
     }
 
@@ -149,6 +176,12 @@ impl Curve {
                 }
             }
             Curve::Linear(g) => 0.5 * g * x * x,
+            Curve::Tape(g) => ln_cosh(g * x) / (g * g),
+            Curve::Tube(g) => {
+                let tb = TUBE_BIAS.tanh();
+                let c = 1.0 - tb * tb;
+                (ln_cosh(g * x + TUBE_BIAS) - ln_cosh(TUBE_BIAS)) / (g * g * c) - tb * x / (g * c)
+            }
         }
     }
 
@@ -466,6 +499,45 @@ mod tests {
                 worst = worst.max((replay - y[i] as f64).abs());
             }
             assert!(worst <= 1e-4, "{shape:?}: off by {worst:e} (largest ratio {biggest_ratio:.1})");
+        }
+    }
+
+    #[test]
+    fn exciter_curves_pass_small_signals_at_unity_and_only_the_tube_makes_even_harmonics() {
+        // the antiderivatives the anti-aliasing uses belong to the curves
+        for shape in [Shape::Tape(12.0), Shape::Tube(12.0), Shape::Tube(-6.0), Shape::Tape(-20.0)] {
+            let c = Curve::of(shape, false);
+            assert!(c.integral(0.0).abs() < 1e-12, "{shape:?}");
+            for x in [-1.5, -0.3, 0.0, 0.01, 0.4, 2.0] {
+                let h = 1e-5;
+                let d = (c.integral(x + h) - c.integral(x - h)) / (2.0 * h);
+                assert!((d - c.f(x)).abs() < 1e-5, "{shape:?} at {x}: slope {d} against {}", c.f(x));
+            }
+            assert!((c.f(1e-7) / 1e-7 - 1.0).abs() < 1e-4, "{shape:?} isn't unity at zero");
+        }
+        let sr = 48000.0;
+        let n = 9600;
+        // amplitude at `hz` over the last 100 cycles of 1 kHz
+        let amp = |y: &[f32], hz: f64| {
+            let (mut re, mut im) = (0.0, 0.0);
+            for (i, v) in y[n / 2..].iter().enumerate() {
+                let w = 2.0 * PI * hz * i as f64 / sr;
+                re += *v as f64 * w.cos();
+                im += *v as f64 * w.sin();
+            }
+            2.0 * (re * re + im * im).sqrt() / (n / 2) as f64
+        };
+        for shape in [Shape::Tape(18.0), Shape::Tube(18.0)] {
+            let quiet = run(&mut Saturator::new(sr, shape), &sine(1000.0, 1e-4, sr, n));
+            let gain = amp(&quiet, 1000.0) / 1e-4;
+            assert!((gain - 1.0).abs() < 0.01, "{shape:?}: small signals at {gain:.4}");
+            let loud = run(&mut Saturator::new(sr, shape), &sine(1000.0, 0.5, sr, n));
+            let (h1, h2, h3) = (amp(&loud, 1000.0), amp(&loud, 2000.0), amp(&loud, 3000.0));
+            assert!(h3 / h1 > 0.05, "{shape:?}: third harmonic {:.4}", h3 / h1);
+            match shape {
+                Shape::Tape(_) => assert!(h2 / h1 < 1e-3, "tape: second harmonic {:.5}", h2 / h1),
+                _ => assert!(h2 / h1 > 0.02, "tube: second harmonic {:.4}", h2 / h1),
+            }
         }
     }
 }

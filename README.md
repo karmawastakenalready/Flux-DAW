@@ -55,7 +55,7 @@
     </td>
     <td width="25%" valign="top">
       <h3>🎚️ Mixed and mastered</h3>
-      A channel strip on every track, group buses and aux sends, VST3 inserts, and a master with glue, multiband compression and a true-peak limiter that drives the mix to its loudness target.
+      A channel strip on every track, group buses and aux sends, VST3 inserts, and a full mastering chain (linear-phase and mid/side EQ, dynamic EQ, multiband compression, an exciter, an imager) ending in a true-peak limiter that drives the mix to its loudness target.
     </td>
     <td width="25%" valign="top">
       <h3>🔁 Loops without a seam</h3>
@@ -99,9 +99,9 @@ Every screenshot here is the real app, captured through Flux's own `gui` tool.
       <br>
       <sub>The master: a loudness target, a glue compressor, and Supermassive in place of the shared reverb.</sub>
       <h3>Mastered to a number</h3>
-      Set a loudness target and a true-peak ceiling, and every render drives the mix to them (−15 LUFS and −1 dBTP for the game's songs) through a two-stage limiter: a soft clip for the sharpest peaks, then a lookahead stage that holds the true peak. Before it come a glue compressor with a threshold relative to the mix, master EQ, a multiband compressor, mono below a frequency and stereo width, a shared reverb whose return can be swapped for plugins, and master inserts. Live playback runs the same chain and, once a render has measured the song, matches it sample for sample.
+      Set a loudness target and a true-peak ceiling, and every render drives the mix to them (−15 LUFS and −1 dBTP for the game's songs) through a two-stage limiter: a soft clip for the sharpest peaks, then a lookahead stage that holds the true peak. Before it come a glue compressor with a threshold relative to the mix; an EQ with high- and low-pass filters and bands on both channels, the mid or the side, in minimum or linear phase; a dynamic EQ and a de-esser; a multiband compressor; a multiband exciter with tape or tube curves; a multiband imager; mono below a frequency and stereo width; a shared reverb whose return can be swapped for plugins; and master inserts. Live playback runs the same chain and, once a render has measured the song, matches it sample for sample.
       <br><br>
-      Exports are 16-bit dithered FLAC from a pure-Rust encoder, with per-track stems and layers that sum back to the master.
+      Exports are 16-bit FLAC from a pure-Rust encoder, with flat or noise-shaped dither, per-track stems and layers that sum back to the master. The Analysis tab shows the master's tonal balance against the target style, each band's stereo image and what to fix.
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/flux-analysis.jpg" alt="The Analysis tab after a render: -15.0 LUFS integrated, -1.15 dBTP true peak, -0.4 dB limiter, -91 dB loop seam, 2:40 long, with loudness per bar coloured by section and an octave-band spectrum balance" width="100%">

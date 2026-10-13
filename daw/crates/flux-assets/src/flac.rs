@@ -1,8 +1,8 @@
 //! Pure-Rust FLAC export (replaces `daw/bridge/to_flac.py`).
 //!
 //! * 16- or 24-bit output from `f32` audio, quantised exactly like the engine's `wav16` export
-//!   ([`Dither::Tpdf`] with seed 1 gives the same samples as `flux_engine::dsp::to_i16_tpdf(buf, 1)`), or
-//!   lossless from integer PCM / WAV files.
+//!   ([`Dither::Tpdf`] with seed 1 gives the same samples as `flux_engine::dsp::to_i16_tpdf(buf, 1)`, and
+//!   [`Dither::Shaped`] the same as `flux_engine::dither::to_i16_shaped`), or lossless from integer PCM / WAV files.
 //! * STREAMINFO carries the MD5 of the samples; a SEEKTABLE (one point every 10 s by default) and a
 //!   VORBIS_COMMENT block (vendor string, optional `TITLE`/`ARTIST`/any tag, `LOOPSTART`/`LOOPLENGTH`) follow.
 //! * By default every encode is decoded again (claxon) and its MD5 compared with the input's, so a file that
@@ -53,6 +53,12 @@ pub enum Dither {
     None,
     /// Triangular dither of ±1 LSB from a xorshift64 generator seeded with `seed`, the same as the engine.
     Tpdf { seed: u64 },
+    /// The same dither with F-weighted noise shaping, sample for sample `flux_engine::dither::to_i16_shaped`: it
+    /// moves the 16-bit hiss out of 1-6 kHz, where the ear is most sensitive, into the top octave. Worth it for
+    /// quiet passages and fade-outs; see that module for the filter and its curve. It makes the FLAC of a mastered
+    /// song about 5-7% bigger. At 24 bits this is plain [`Dither::Tpdf`]: that floor (about -141 dBFS) is already
+    /// far below hearing, and shaping it would only add 18 dB of noise.
+    Shaped { seed: u64 },
 }
 
 impl Default for Dither {
@@ -153,25 +159,39 @@ impl FlacReport {
     }
 }
 
-/// Turns floats into integers; keeps clip counts. Identical arithmetic to `flux_engine::dsp::to_i16_tpdf`.
+/// The shaped dither's error filter, newest error first: Wannamaker's F-weighted filter, as
+/// `flux_engine::dither::F_WEIGHTED`.
+const SHAPING: [f64; 9] = [2.412, -3.370, 3.937, -4.174, 3.353, -2.205, 1.281, -0.569, 0.0847];
+/// The largest error (LSB) one sample feeds back, as `flux_engine::dither::ERROR_LIMIT`.
+const SHAPING_LIMIT: f64 = 2.0;
+
+/// Turns floats into integers; keeps clip counts. Identical arithmetic to `flux_engine::dsp::to_i16_tpdf` and
+/// (for [`Dither::Shaped`]) `flux_engine::dither::to_i16_shaped`.
 #[derive(Clone, Debug)]
 pub struct Quantizer {
     scale: f64,
     lo: f64,
     hi: f64,
     rng: Option<u64>,
+    /// Shaped dither at 16 bits: each channel's last nine errors (LSB), newest first. Empty otherwise.
+    errors: Vec<[f64; 9]>,
+    /// The channel the next sample belongs to.
+    ch: usize,
     pub clipped: u64,
     pub non_finite: u64,
 }
 
 impl Quantizer {
-    pub fn new(bits: BitDepth, dither: Dither) -> Self {
+    /// A quantiser for `channels` interleaved channels.
+    pub fn new(bits: BitDepth, dither: Dither, channels: usize) -> Self {
         let (scale, lo, hi) = bits.range();
         let rng = match dither {
             Dither::None => None,
-            Dither::Tpdf { seed } => Some(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1),
+            Dither::Tpdf { seed } | Dither::Shaped { seed } => Some(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1),
         };
-        Self { scale, lo, hi, rng, clipped: 0, non_finite: 0 }
+        let shaped = matches!(dither, Dither::Shaped { .. }) && bits == BitDepth::B16;
+        let errors = if shaped { vec![[0.0; 9]; channels.max(1)] } else { Vec::new() };
+        Self { scale, lo, hi, rng, errors, ch: 0, clipped: 0, non_finite: 0 }
     }
 
     fn uniform(s: &mut u64) -> f64 {
@@ -192,21 +212,36 @@ impl Quantizer {
             }
             None => 0.0,
         };
-        let v = (x as f64 * self.scale + d).round();
+        // what the channel's last errors feed back; without shaping x * scale - 0.0 is x * scale exactly
+        let mut fb = 0.0;
+        if let Some(errors) = self.errors.get(self.ch) {
+            for (h, e) in SHAPING.iter().zip(errors) {
+                fb += h * e;
+            }
+        }
+        let v = x as f64 * self.scale - fb;
+        let r = (v + d).round();
         if !x.is_finite() {
             self.non_finite += 1;
-        } else if v < self.lo || v > self.hi {
+        } else if r < self.lo || r > self.hi {
             self.clipped += 1;
         }
         // NaN stays NaN through clamp and casts to 0, as in the engine.
-        v.clamp(self.lo, self.hi) as i32
+        let q = r.clamp(self.lo, self.hi);
+        if let Some(errors) = self.errors.get_mut(self.ch) {
+            errors.copy_within(..8, 1);
+            // a non-finite sample has no error to carry
+            errors[0] = if x.is_finite() { (q - v).clamp(-SHAPING_LIMIT, SHAPING_LIMIT) } else { 0.0 };
+            self.ch = (self.ch + 1) % self.errors.len();
+        }
+        q as i32
     }
 }
 
 /// Quantise planar float channels into interleaved integers (the samples the FLAC will contain).
 pub fn quantize_interleaved(channels: &[&[f32]], bits: BitDepth, dither: Dither) -> Result<(Vec<i32>, Quantizer)> {
     let frames = check_planar(channels)?;
-    let mut q = Quantizer::new(bits, dither);
+    let mut q = Quantizer::new(bits, dither, channels.len());
     let mut out = Vec::with_capacity(frames * channels.len());
     for i in 0..frames {
         for c in channels {
@@ -312,7 +347,7 @@ pub fn encode_f32(sample_rate: u32, channels: &[&[f32]], opts: &FlacOptions) -> 
         pos: 0,
         bits,
         rate: sample_rate as usize,
-        q: Quantizer::new(opts.bits, opts.dither),
+        q: Quantizer::new(opts.bits, opts.dither, channels.len()),
         buf: Vec::new(),
     };
     let (bytes, mut report) = encode_source(&mut src, frames, opts)?;
@@ -612,7 +647,7 @@ mod tests {
         let l = sine(48_000 + 17, 440.0, 0.5);
         let r = sine(48_000 + 17, 660.0, 0.4);
         for bits in [BitDepth::B16, BitDepth::B24] {
-            for dither in [Dither::None, Dither::Tpdf { seed: 1 }, Dither::Tpdf { seed: 99 }] {
+            for dither in [Dither::None, Dither::default(), Dither::Tpdf { seed: 99 }, Dither::Shaped { seed: 1 }] {
                 let opts = FlacOptions { bits, dither, ..Default::default() };
                 let (bytes, rep) = encode_f32_stereo(48_000, &l, &r, &opts).unwrap();
                 assert!(rep.verified);
@@ -638,7 +673,7 @@ mod tests {
 
     #[test]
     fn quantizer_edges() {
-        let mut q = Quantizer::new(BitDepth::B16, Dither::None);
+        let mut q = Quantizer::new(BitDepth::B16, Dither::None, 1);
         assert_eq!(q.quantize(1.0), 32767);
         assert_eq!(q.quantize(-1.0), -32767);
         assert_eq!(q.quantize(2.0), 32767);
@@ -649,9 +684,15 @@ mod tests {
         assert_eq!((q.clipped, q.non_finite), (2, 3));
         assert_eq!(q.quantize(0.25 / 32767.0), 0);
         assert_eq!(q.quantize(0.75 / 32767.0), 1);
-        let mut q = Quantizer::new(BitDepth::B24, Dither::None);
+        let mut q = Quantizer::new(BitDepth::B24, Dither::None, 1);
         assert_eq!(q.quantize(1.0), 8_388_607);
         assert_eq!(q.quantize(-1.5), -8_388_608);
+        // shaped: the same counts and non-finite values, and a NaN leaves the error history clean
+        let mut q = Quantizer::new(BitDepth::B16, Dither::Shaped { seed: 1 }, 2);
+        let got: Vec<i32> = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 2.0, -2.0, 0.0].map(|x| q.quantize(x)).into();
+        assert_eq!(got[..5], [0, 32767, -32768, 32767, -32768]);
+        assert_eq!((q.clipped, q.non_finite), (2, 3));
+        assert!(q.errors.iter().flatten().all(|e| e.is_finite() && e.abs() <= SHAPING_LIMIT));
     }
 
     /// Values from an independent Python implementation of the engine's TPDF quantiser, so the arithmetic stays
@@ -685,6 +726,40 @@ mod tests {
         for (bits, seed, want) in cases {
             let (got, q) = quantize_interleaved(&[&left, &right], bits, Dither::Tpdf { seed }).unwrap();
             assert_eq!(got, want, "{bits:?} seed {seed}");
+            assert_eq!(q.clipped, 2);
+            // shaped dither is plain TPDF at 24 bits
+            if bits == BitDepth::B24 {
+                assert_eq!(quantize_interleaved(&[&left, &right], bits, Dither::Shaped { seed }).unwrap().0, want);
+            }
+        }
+    }
+
+    /// Values from an independent Python implementation of the engine's shaped quantiser (which reproduces the
+    /// TPDF values above with the filter set to zero), so the error feedback stays pinned too.
+    #[test]
+    fn shaped_matches_reference_values() {
+        let left = [0.0, 1e-4, -2e-4, 3e-5, 0.5, -0.25, 1e-5, 0.0, 0.125, -1e-4, 1.5, 0.3, -0.3, 2e-4];
+        let right =
+            [0.0, -1e-4, 5e-5, 0.75, -0.75, 1.0 / 32768.0, -1.0 / 32768.0, 1e-3, -1e-3, 0.9999, -1.5, 0.0, 6e-5, -6e-5];
+        let cases: [(u64, [i32; 28]); 2] = [
+            (
+                1,
+                [
+                    0, 0, 3, -4, -6, 3, 1, 24574, 16382, -24574, -8189, -1, -3, 2, 3, 28, 4094, -25, -3, 32753,
+                    32767, -32768, 9833, -17, -9835, 20, 14, -19,
+                ],
+            ),
+            (
+                7,
+                [
+                    0, 0, 3, -4, -6, 3, 0, 24574, 16385, -24575, -8193, 2, 1, -4, 0, 37, 4095, -37, -2, 32767,
+                    32767, -32768, 9836, -4, -9839, 8, 17, -9,
+                ],
+            ),
+        ];
+        for (seed, want) in cases {
+            let (got, q) = quantize_interleaved(&[&left, &right], BitDepth::B16, Dither::Shaped { seed }).unwrap();
+            assert_eq!(got, want, "seed {seed}");
             assert_eq!(q.clipped, 2);
         }
     }

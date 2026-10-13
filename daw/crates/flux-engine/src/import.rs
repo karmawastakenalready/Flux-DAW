@@ -107,12 +107,12 @@ fn eq_from(v: &Value) -> Vec<EqBand> {
                 "high_shelf" => EqKind::HighShelf,
                 _ => EqKind::Peak,
             };
-            out.push(EqBand {
+            out.push(EqBand::new(
                 kind,
-                hz: b.get(1).and_then(|x| x.as_f64()).unwrap_or(1000.0),
-                db: b.get(2).and_then(|x| x.as_f64()).unwrap_or(0.0),
-                q: b.get(3).and_then(|x| x.as_f64()).unwrap_or(0.9),
-            });
+                b.get(1).and_then(|x| x.as_f64()).unwrap_or(1000.0),
+                b.get(2).and_then(|x| x.as_f64()).unwrap_or(0.0),
+                b.get(3).and_then(|x| x.as_f64()).unwrap_or(0.9),
+            ));
         }
     }
     out

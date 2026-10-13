@@ -4,16 +4,192 @@ use super::arrange::{engine_state, kind_label, section_color};
 use super::theme::*;
 use super::widgets::*;
 use super::{Action, Feed, Gui, Tab, effects, master_cmd, mixer_cmd, mmss};
-use crate::state::State;
+use crate::state::{LastRender, State};
+use flux_analysis::master::{MasterMove, MasterReport, Part, Saturation, TonalBalance, TonalStyle, phase_limits};
+use flux_analysis::matcheq::EqShape;
 use flux_core::commands::{Bus, Command, MasterPatch, MixerPatch};
-use flux_core::{Chain, ChorusFx, Comp, Insert, InsertPosition, Instrument, Project, ReverbFx, ReverbParams, Track, TrackRef};
+use flux_core::{Chain, ChorusFx, Comp, EqPhase, Insert, InsertPosition, Instrument, Project, ReverbFx, ReverbParams, Track, TrackRef};
 use flux_engine::render::TrackStat;
 use eframe::egui::{self, Align, Align2, Color32, CornerRadius, Id, Layout, Margin, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, UiBuilder, vec2};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 pub(super) struct AnalysisCache {
     seq: u64,
     bars: Vec<f64>,
     bands: Vec<(String, f64)>,
+}
+
+/// A master check: its report, or why it failed.
+type Checked = Result<Arc<MasterReport>, String>;
+
+/// The master check the analysis shows: the agent's last check of the render, or one run here against the style
+/// picked (on a thread of its own, so the window doesn't wait for it).
+#[derive(Default)]
+pub(super) struct MasterView {
+    /// The style picked here; None shows the agent's last check, else a check against the balanced masters.
+    style: Option<TonalStyle>,
+    /// The render (by seq) and the style picked that `shown`'s check is for, and the check.
+    shown: Option<(u64, Option<TonalStyle>, Checked)>,
+    /// A check running: the render and the style picked it's for.
+    running: Option<(u64, Option<TonalStyle>, JoinHandle<anyhow::Result<MasterReport>>)>,
+    /// Run checks on the GUI thread instead (tests: a snapshot can't wait for a thread).
+    pub(super) inline: bool,
+}
+
+/// The styles a master is checked against, as their menu lists them.
+const STYLES: [(TonalStyle, &str, &str); 4] = [
+    (TonalStyle::Balanced, "Balanced", "band-based game and pop"),
+    (TonalStyle::Cinematic, "Cinematic", "orchestral and ambient"),
+    (TonalStyle::Electronic, "Electronic", "synths and beats"),
+    (TonalStyle::Acoustic, "Acoustic", "small acoustic groups"),
+];
+
+fn style_name(s: TonalStyle) -> &'static str {
+    STYLES.iter().find(|x| x.0 == s).map_or("Balanced", |x| x.1)
+}
+
+/// A frequency in words: "250 Hz", "2.5 kHz".
+fn hz_words(v: f64) -> String {
+    if v >= 1000.0 { format!("{} kHz", (v / 100.0).round() / 10.0) } else { format!("{v:.0} Hz") }
+}
+
+/// A master move in words, for a finding's tooltip.
+fn move_text(m: &MasterMove) -> String {
+    let on = |p: Part| match p {
+        Part::Stereo => "",
+        Part::Mid => " on the mid",
+        Part::Side => " on the side",
+    };
+    let shape = |s: EqShape| match s {
+        EqShape::Peak => "a peak",
+        EqShape::LowShelf => "a low shelf",
+        EqShape::HighShelf => "a high shelf",
+    };
+    match *m {
+        MasterMove::Eq { shape: s, hz, db, q, part } => format!("EQ {} at {}, {db:+.1} dB, Q {q:.2}{}", shape(s), hz_words(hz), on(part)),
+        MasterMove::HighPass { hz, slope } => format!("EQ high-pass at {}, {slope} dB per octave", hz_words(hz)),
+        MasterMove::MonoBelow { hz } => format!("mono below {}", hz_words(hz)),
+        MasterMove::Width { width } => format!("width times {width:.2}"),
+        MasterMove::DeEss { hz, range_db } => format!("de-esser above {}, range {range_db:.1} dB", hz_words(hz)),
+        MasterMove::DynEq { shape: s, hz, q, range_db } => format!("dynamic EQ: {} at {}, Q {q:.2}, range {range_db:.1} dB", shape(s), hz_words(hz)),
+        MasterMove::Exciter { hz_lo, hz_hi, mix, mode } => {
+            let curve = if mode == Saturation::Tube { "tube" } else { "tape" };
+            format!("exciter from {} to {}, {:.0}% {curve}", hz_words(hz_lo), hz_words(hz_hi), mix * 100.0)
+        }
+        MasterMove::Imager { hz_lo, hz_hi, width } => format!("imager: {} to {} at {:.0}% width", hz_words(hz_lo), hz_words(hz_hi), width * 100.0),
+        MasterMove::Loudness { target_lufs } => format!("loudness target {target_lufs:.1} LUFS"),
+        MasterMove::Limiter { release_ms, clip_db } => {
+            let mut parts = vec![];
+            if let Some(r) = release_ms {
+                parts.push(format!("release {r:.0} ms"));
+            }
+            if let Some(c) = clip_db {
+                parts.push(format!("clip {c:.1} dB"));
+            }
+            format!("limiter {}", parts.join(", "))
+        }
+    }
+}
+
+/// How far the tonal plot reaches above and below the target (dB).
+const TONAL_SPAN_DB: f64 = 12.0;
+
+/// The tonal balance, `h` tall: each 1/3-octave band's deviation from the target (the line) and its tolerance (the
+/// shaded band around 0); the bands outside it are marked.
+fn tonal_plot(ui: &mut egui::Ui, t: &TonalBalance, h: f32) {
+    let (full, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
+    let rect = Rect::from_min_max(Pos2::new(full.left() + 24.0, full.top()), Pos2::new(full.right(), full.bottom() - 16.0));
+    let p = ui.painter();
+    p.rect_filled(rect, 2.0, FIELD);
+    let y_of = |d: f64| rect.center().y - (d.clamp(-TONAL_SPAN_DB, TONAL_SPAN_DB) / TONAL_SPAN_DB) as f32 * rect.height() * 0.5;
+    let n = t.bands.len().max(1);
+    let bw = rect.width() / n as f32;
+    let x_of = |i: usize| rect.left() + (i as f32 + 0.5) * bw;
+    let corridor = FIELD.lerp_to_gamma(ACCENT_TINT, 0.75);
+    for (i, b) in t.bands.iter().enumerate() {
+        let x0 = rect.left() + i as f32 * bw;
+        p.rect_filled(Rect::from_min_max(Pos2::new(x0, y_of(b.tolerance_db)), Pos2::new(x0 + bw, y_of(-b.tolerance_db))), 0.0, corridor);
+    }
+    for g in [-6.0, 0.0, 6.0] {
+        let y = px(y_of(g));
+        p.hline(rect.x_range(), y, Stroke::new(1.0, if g == 0.0 { LINE_STRONG } else { LINE_SOFT }));
+        let label = if g == 0.0 { "0".to_string() } else { format!("{g:+.0}") };
+        p.text(Pos2::new(rect.left() - 5.0, y), Align2::RIGHT_CENTER, label, mono(9.0), TEXT3);
+    }
+    let points: Vec<Pos2> = t.bands.iter().enumerate().filter_map(|(i, b)| b.deviation_db.map(|d| Pos2::new(x_of(i), y_of(d)))).collect();
+    p.add(egui::Shape::line(points, Stroke::new(1.5, ACCENT)));
+    for (i, b) in t.bands.iter().enumerate() {
+        if let (true, Some(d)) = (b.outside, b.deviation_db) {
+            p.circle_filled(Pos2::new(x_of(i), y_of(d)), 2.5, WARN);
+        }
+    }
+    for (f, label) in [(63.0, "63"), (125.0, "125"), (250.0, "250"), (500.0, "500"), (1000.0, "1k"), (2000.0, "2k"), (4000.0, "4k"), (8000.0, "8k"), (16000.0, "16k")] {
+        if let Some(i) = t.bands.iter().position(|b: &flux_analysis::master::TonalBand| (b.centre_hz / f).log2().abs() < 0.1) {
+            p.text(Pos2::new(x_of(i), full.bottom()), Align2::CENTER_BOTTOM, label, body(10.0), TEXT3);
+        }
+    }
+    if let Some(at) = resp.hover_pos() {
+        let i = (((at.x - rect.left()).max(0.0) / bw) as usize).min(n - 1);
+        if let Some(b) = t.bands.get(i) {
+            let text = match b.deviation_db {
+                Some(d) => format!("{}: {d:+.1} dB from the target (tolerance \u{b1}{:.1} dB)", hz_words(b.centre_hz), b.tolerance_db),
+                None => format!("{}: too quiet to measure", hz_words(b.centre_hz)),
+            };
+            resp.on_hover_text(text);
+        }
+    }
+}
+
+/// A band's correlation on a bar from -1 to 1: filled from 0, blue while it's above the band's phase warning limit
+/// (the tick), else coloured as a warning or a problem.
+fn correlation_bar(p: &egui::Painter, r: Rect, c: f64, (warn, problem): (f64, f64)) {
+    p.rect_filled(r, 2.0, FIELD);
+    let x_of = |v: f64| r.left() + ((v.clamp(-1.0, 1.0) + 1.0) * 0.5) as f32 * r.width();
+    let (a, b) = (x_of(0.0), x_of(c));
+    let fill = if c >= warn {
+        ACCENT
+    } else if c >= problem {
+        WARN
+    } else {
+        ERR
+    };
+    p.rect_filled(Rect::from_min_max(Pos2::new(a.min(b), r.top() + 3.0), Pos2::new(a.max(b).max(a.min(b) + 1.0), r.bottom() - 3.0)), 1.0, fill);
+    p.vline(px(a), r.y_range(), Stroke::new(1.0, LINE_STRONG));
+    p.vline(px(x_of(warn)), r.y_range().shrink(2.0), Stroke::new(1.0, TEXT3));
+}
+
+/// A sub-panel of the analysis, `w` wide.
+fn analysis_panel(ui: &mut egui::Ui, w: f32, pad: Margin, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new().inner_margin(pad).show(ui, |ui| {
+        ui.set_width(w - 32.0);
+        ui.vertical(add);
+    });
+}
+
+/// A sub-panel's title, with `right` at its right end (all the titles of a row line up, with a control or not).
+fn panel_head(ui: &mut egui::Ui, name: &str, right: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(CELL_H);
+        title(ui, name);
+        ui.with_layout(Layout::right_to_left(Align::Center), right);
+    });
+}
+
+/// A vertical hairline between sub-panels, `h` tall.
+fn panel_sep(ui: &mut egui::Ui, h: f32) {
+    let (sep, _) = ui.allocate_exact_size(vec2(1.0, h), Sense::hover());
+    ui.painter().vline(px(sep.left()), sep.y_range(), Stroke::new(1.0, LINE_SOFT));
+}
+
+/// What a sub-panel shows while its check runs, or when it failed.
+fn check_pending(ui: &mut egui::Ui, rep: &Option<Checked>) {
+    match rep {
+        None => caption(ui, "Checking the master\u{2026}"),
+        Some(Err(e)) => caption(ui, &format!("The check failed: {e}")),
+        Some(Ok(_)) => caption(ui, ""),
+    };
 }
 
 const STRIP_W: f32 = 84.0;
@@ -128,8 +304,7 @@ const STRIP_KNOB_W: f32 = 52.0;
 fn slope_menu(ui: &mut egui::Ui, slope: u32, on: bool, which: &str) -> Option<u32> {
     let resp = chip(ui, STRIP_KNOB_W, &format!("{slope} dB"), on, &format!("{which} cut slope, {slope} dB per octave"));
     let resp = resp.on_hover_text(if on { format!("The {which} cut's slope: {slope} dB per octave") } else { format!("Turn the {which} cut on first") });
-    let slopes = [(12, "12 dB per octave", "gentle"), (24, "24 dB per octave", ""), (36, "36 dB per octave", ""), (48, "48 dB per octave", "steep")];
-    menu_pick(&resp, slope, &slopes, 180.0)
+    menu_pick(&resp, slope, &effects::SLOPES, 180.0)
 }
 
 /// Widths for the sections of an inspector tab, each given as (narrowest, full): every section gets its full width
@@ -1012,6 +1187,32 @@ impl Gui {
                 act.push(master_cmd(make(x)));
             }
         };
+        // the loud levels the last render measured, for the stages set as they were then
+        let was = last.map(|r| &r.project.master);
+        let loud = last.map(|r| &r.out.master_loud);
+        let dyn_loud: Vec<Option<f64>> = (m.dyn_eq.iter().enumerate())
+            .map(|(i, b)| {
+                let same = was.and_then(|w| w.dyn_eq.get(i)).is_some_and(|r| r.kind == b.kind && r.hz == b.hz && r.q == b.q);
+                loud.filter(|_| same).and_then(|l| l.dyn_eq.get(i).copied())
+            })
+            .collect();
+        let deess_loud = loud.filter(|_| was.and_then(|w| w.deess).map(|d| d.hz) == m.deess.map(|d| d.hz)).and_then(|l| l.deess);
+        let split_as_rendered = |now: Option<&Vec<f64>>, then: Option<&Vec<f64>>, levels: &[f64]| -> Vec<Option<f64>> {
+            match (now, loud) {
+                (Some(x), Some(_)) if then == Some(x) => (0..=x.len()).map(|i| levels.get(i).copied()).collect(),
+                _ => vec![],
+            }
+        };
+        let mb_loud = split_as_rendered(
+            m.multiband.as_ref().map(|x| &x.crossovers_hz),
+            was.and_then(|w| w.multiband.as_ref()).map(|x| &x.crossovers_hz),
+            loud.map_or(&[][..], |l| &l.multiband),
+        );
+        let ex_loud = split_as_rendered(
+            m.exciter.as_ref().map(|x| &x.crossovers_hz),
+            was.and_then(|w| w.exciter.as_ref()).map(|x| &x.crossovers_hz),
+            loud.map_or(&[][..], |l| &l.exciter),
+        );
         // the loudness and its limiter first, then the chain in the order it runs, the reverb and the inserts
         let w = fit_widths(
             ui.available_width(),
@@ -1019,7 +1220,11 @@ impl Gui {
                 fixed(row_w(4)),
                 effect_w(m.glue.is_some(), row_w(5)),
                 effect_w(!m.eq.is_empty(), effects::EQ_W),
+                effect_w(!m.dyn_eq.is_empty(), effects::DYN_EQ_W),
+                effect_w(m.deess.is_some(), row_w(3)),
                 effect_w(m.multiband.is_some(), effects::MULTIBAND_W),
+                effect_w(m.exciter.is_some(), effects::EXCITER_W),
+                fixed(effects::IMAGER_W),
                 fixed(effects::OFF_W),
                 fixed(row_w(4)),
                 (248.0, INSERTS_W),
@@ -1059,30 +1264,52 @@ impl Gui {
             let n = m.eq.len();
             let sub = if n == 0 { "After the glue".to_string() } else { format!("{n} band{}, after the glue", if n == 1 { "" } else { "s" }) };
             section(ui, w[2], "EQ", &sub, |ui| {
+                let mut linear = m.eq_phase == EqPhase::Linear;
+                let flip = ui.horizontal(|ui| switch(ui, &mut linear, "Linear phase")).inner;
+                if flip {
+                    let phase = if linear { EqPhase::Linear } else { EqPhase::Minimum };
+                    act.push(master_cmd(MasterPatch { eq_phase: Some(phase), ..Default::default() }));
+                }
+                ui.add_space(6.0);
                 if let Some(v) = effects::eq(ui, "m_eq", "Master EQ", &m.eq) {
                     act.push(master_cmd(MasterPatch { eq: Some(v), ..Default::default() }));
                 }
             });
-            section(ui, w[3], "Multiband", "Compresses each band apart", |ui| {
-                // the bands' levels count while they split where they did at the render
-                let rendered = last.and_then(|r| r.project.master.multiband.as_ref()).map(|x| &x.crossovers_hz);
-                let same = rendered.is_some() && rendered == m.multiband.as_ref().map(|x| &x.crossovers_hz);
-                let loud: Vec<Option<f64>> = match (last, &m.multiband) {
-                    (Some(r), Some(mb)) if same => (0..mb.bands.len()).map(|i| r.out.multiband_loud_db.get(i).copied()).collect(),
-                    _ => vec![],
-                };
-                if let Some(v) = effects::multiband(ui, "m_multiband", m.multiband.as_ref(), &loud) {
+            let n = m.dyn_eq.len();
+            let sub = if n == 0 { "Cuts a range when it's loud".to_string() } else { format!("{n} band{}, after the EQ", if n == 1 { "" } else { "s" }) };
+            section(ui, w[3], "Dynamic EQ", &sub, |ui| {
+                if let Some(v) = effects::dyn_eq(ui, "m_dyn", &m.dyn_eq, &dyn_loud) {
+                    act.push(master_cmd(MasterPatch { dyn_eq: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[4], "De-esser", "Tames bursts of sibilance", |ui| {
+                if let Some(v) = effects::deess(ui, "m_deess", m.deess, KNOB_W, deess_loud) {
+                    act.push(master_cmd(MasterPatch { deess: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[5], "Multiband", "Compresses each band apart", |ui| {
+                if let Some(v) = effects::multiband(ui, "m_multiband", m.multiband.as_ref(), &mb_loud) {
                     act.push(master_cmd(MasterPatch { multiband: Some(v), ..Default::default() }));
                 }
             });
-            section(ui, w[4], "Image", "Stereo, before the limiter", |ui| {
+            section(ui, w[6], "Exciter", "Harmonics for a dull or thin band", |ui| {
+                if let Some(v) = effects::exciter(ui, "m_exciter", m.exciter.as_ref(), &ex_loud) {
+                    act.push(master_cmd(MasterPatch { exciter: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[7], "Imager", "Each band's width", |ui| {
+                if let Some(v) = effects::imager(ui, "m_imager", m.imager.as_ref()) {
+                    act.push(master_cmd(MasterPatch { imager: Some(v), ..Default::default() }));
+                }
+            });
+            section(ui, w[8], "Image", "Stereo, before the limiter", |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     mk(ui, Knob::new("Mono below", 20.0, 500.0, 0.0, f_hz).scale(Scale::LogOff), "m_mono", m.mono_below_hz, &|v| MasterPatch { mono_below_hz: Some(v), ..Default::default() }, act);
                     mk(ui, Knob::new("Width", 0.0, 2.0, 1.0, f_pct), "m_width", m.width, &|v| MasterPatch { width: Some(v), ..Default::default() }, act);
                 });
             });
-            section(ui, w[5], "Shared reverb", "Every track's Verb knob sends here", |ui| {
+            section(ui, w[9], "Shared reverb", "Every track's Verb knob sends here", |ui| {
                 let rv = m.reverb;
                 let mut out = effects::algorithm(ui, "m_reverb", rv);
                 for row in [
@@ -1105,13 +1332,175 @@ impl Gui {
                     caption(ui, "Replaced by the reverb return's inserts (Return still sets their level)");
                 }
             });
-            section(ui, w[6], "Reverb return", "Effects here replace the shared reverb", |ui| inserts_ui(ui, p, Chain::Reverb, act));
-            section(ui, w[7], "Master inserts", "After the reverb joins, before glue", |ui| inserts_ui(ui, p, Chain::Master, act));
+            section(ui, w[10], "Reverb return", "Effects here replace the shared reverb", |ui| inserts_ui(ui, p, Chain::Reverb, act));
+            section(ui, w[11], "Master inserts", "After the reverb joins, before glue", |ui| inserts_ui(ui, p, Chain::Master, act));
         });
     }
 
     // -----------------------------------------------------------------------------------------
     // analysis
+
+    /// The master check of render `r` the analysis shows: the agent's last check of it, unless a style was picked
+    /// here, else one run against the style picked. None while it runs.
+    fn master_report(&mut self, ctx: &egui::Context, r: &Arc<LastRender>) -> Option<Checked> {
+        let v = &mut self.master_view;
+        if v.style.is_none()
+            && let Some(rep) = crate::measure::checked(r)
+        {
+            return Some(Ok(rep));
+        }
+        let want = (r.seq, v.style);
+        if let Some((seq, style, rep)) = &v.shown
+            && (*seq, *style) == want
+        {
+            return Some(rep.clone());
+        }
+        let style = v.style.unwrap_or_default();
+        let done = |x: anyhow::Result<MasterReport>| x.map(Arc::new).map_err(|e| format!("{e:#}"));
+        let rep = if v.inline {
+            done(crate::measure::check_for_gui(r, style))
+        } else {
+            match v.running.take() {
+                Some((seq, s, h)) if (seq, s) == want && h.is_finished() => match h.join() {
+                    Ok(x) => done(x),
+                    Err(_) => Err("the check stopped unexpectedly (a bug in Flux)".to_string()),
+                },
+                running => {
+                    // a check of another render or style is left to finish on its own
+                    v.running = match running {
+                        Some(job) if (job.0, job.1) == want => Some(job),
+                        _ => {
+                            let r = r.clone();
+                            match std::thread::Builder::new().name("master-check".into()).spawn(move || crate::measure::check_for_gui(&r, style)) {
+                                Ok(h) => Some((want.0, want.1, h)),
+                                Err(e) => return Some(Err(format!("couldn't start the check: {e}"))),
+                            }
+                        }
+                    };
+                    ctx.request_repaint_after(Duration::from_millis(100));
+                    return None;
+                }
+            }
+        };
+        v.shown = Some((want.0, want.1, rep.clone()));
+        Some(rep)
+    }
+
+    /// The master check, as the agent's `master` tool makes it: the tonal balance against the target, each band's
+    /// stereo image, and the findings with the score.
+    fn master_check_ui(&mut self, ui: &mut egui::Ui, r: &Arc<LastRender>, pad: Margin) {
+        const PLOT_H: f32 = 132.0;
+        let rep = self.master_report(ui.ctx(), r);
+        let ok = rep.as_ref().and_then(|x| x.as_ref().ok()).cloned();
+        let w = ui.available_width();
+        let tonal_w = (w * 0.4).floor().max(380.0);
+        let stereo_w = 300.0;
+        let findings_w = (w - tonal_w - stereo_w - 2.0).max(320.0);
+        let mut pick = None;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            analysis_panel(ui, tonal_w, pad, |ui| {
+                panel_head(ui, "Tonal balance", |ui| {
+                    let now = self.master_view.style.or(ok.as_ref().map(|x| x.style)).unwrap_or_default();
+                    let name = style_name(now);
+                    let resp = chip(ui, 104.0, name, true, &format!("Target style, {name}")).on_hover_text("Which masters the balance is held against");
+                    pick = menu_pick(&resp, now, &STYLES, 220.0);
+                });
+                let Some(rep) = &ok else { return check_pending(ui, &rep) };
+                let Some(t) = &rep.tonal else {
+                    caption(ui, "Too quiet to measure");
+                    return;
+                };
+                let against = if t.target == "reference" { "the reference".to_string() } else { format!("the {} masters", t.target) };
+                caption(ui, &format!("1/3 octaves against {against}, at equal loudness"));
+                ui.add_space(8.0);
+                tonal_plot(ui, t, PLOT_H);
+                ui.add_space(4.0);
+                let closest = t.closest_style.filter(|s| s.name() != t.target).map(|s| format!(" \u{b7} closest to {}", style_name(s).to_lowercase())).unwrap_or_default();
+                caption(ui, &format!("{:.1} dB RMS from the target{closest}", t.deviation_rms_db));
+            });
+            panel_sep(ui, 214.0);
+            analysis_panel(ui, stereo_w, pad, |ui| {
+                panel_head(ui, "Stereo", |_| {});
+                let Some(rep) = &ok else { return check_pending(ui, &rep) };
+                caption(ui, "Correlation per band: 1 is mono, under 0 cancels");
+                ui.add_space(8.0);
+                let s = &rep.stereo;
+                for b in &s.bands {
+                    let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+                    let p = ui.painter();
+                    let name = match b.band {
+                        "low" => "Low",
+                        "low_mid" => "Low mid",
+                        "mid" => "Mid",
+                        _ => "High",
+                    };
+                    p.text(Pos2::new(row.left(), row.center().y), Align2::LEFT_CENTER, name, medium(11.0), TEXT2);
+                    let bar = Rect::from_min_max(Pos2::new(row.left() + 64.0, row.top() + 3.0), Pos2::new(row.right() - 44.0, row.bottom() - 3.0));
+                    match b.correlation {
+                        Some(c) => {
+                            correlation_bar(p, bar, c, phase_limits(b.band));
+                            p.text(Pos2::new(row.right(), row.center().y), Align2::RIGHT_CENTER, format!("{c:.2}"), mono(10.5), TEXT);
+                            let side = b.side_mid_db.map(|x| format!(", its side {:.1} dB under its mid", -x)).unwrap_or_default();
+                            resp.on_hover_text(format!("{} to {}: correlation {c:.2}{side}", hz_words(b.lo_hz), hz_words(b.hi_hz)));
+                        }
+                        None => {
+                            p.rect_filled(bar, 2.0, FIELD);
+                            p.text(Pos2::new(row.right(), row.center().y), Align2::RIGHT_CENTER, "\u{2013}", mono(10.5), TEXT3);
+                            resp.on_hover_text("Too quiet to measure");
+                        }
+                    }
+                }
+                ui.add_space(6.0);
+                let mut facts = vec![];
+                if let Some(c) = s.correlation {
+                    facts.push(format!("Whole master {c:.2}"));
+                }
+                if let Some(d) = s.fold_down_lu {
+                    // + 0.0 turns a -0.0 into 0.0
+                    facts.push(format!("mono fold-down {:+.1} LU", (d * 10.0).round() / 10.0 + 0.0));
+                }
+                ui.add(egui::Label::new(RichText::new(facts.join(" \u{b7} ")).font(body(11.0)).color(TEXT3)).wrap());
+            });
+            panel_sep(ui, 214.0);
+            analysis_panel(ui, findings_w, pad, |ui| {
+                panel_head(ui, "Findings", |ui| {
+                    if let Some(rep) = &ok {
+                        ui.label(RichText::new(format!("Score {} of 100", rep.score)).font(semibold(12.0)).color(TEXT))
+                            .on_hover_text("100 is a master with nothing to fix; each finding takes off points by how much it matters");
+                    }
+                });
+                let Some(rep) = &ok else { return check_pending(ui, &rep) };
+                let l = &rep.loudness;
+                let fig = |v: Option<f64>, unit: &str| v.map_or("\u{2013}".to_string(), |x| format!("{x:.1} {unit}"));
+                caption(ui, &format!("LRA {} \u{b7} PLR {} \u{b7} loudest 3 s {}", fig(l.lra_lu, "LU"), fig(l.plr_db, "dB"), fig(l.short_term_max_lufs, "LUFS")));
+                ui.add_space(8.0);
+                if rep.issues.is_empty() {
+                    caption(ui, "Nothing to fix");
+                    return;
+                }
+                egui::ScrollArea::vertical().id_salt("findings").max_height(PLOT_H + 16.0).auto_shrink([false, true]).show(ui, |ui| {
+                    for i in &rep.issues {
+                        let dot = match i.severity {
+                            "problem" => ERR,
+                            "warn" => WARN,
+                            _ => TEXT3,
+                        };
+                        let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::hover());
+                        let g = one_line(ui, &i.message, body(11.0), TEXT2, row.width() - 14.0);
+                        let p = ui.painter();
+                        p.circle_filled(Pos2::new(row.left() + 4.0, row.center().y), 3.0, dot);
+                        p.galley(Pos2::new(row.left() + 14.0, row.center().y - g.size().y * 0.5), g, TEXT2);
+                        let fix = i.suggestion.as_ref().map(|m| format!("\n\nThe move: {}", move_text(m))).unwrap_or_default();
+                        resp.on_hover_text(format!("{}{fix}", i.message));
+                    }
+                });
+            });
+        });
+        if let Some(s) = pick {
+            self.master_view.style = Some(s);
+        }
+    }
 
     fn analysis_tab(&mut self, ui: &mut egui::Ui, st: &State) {
         let Some(r) = st.render.clone() else {
@@ -1236,6 +1625,9 @@ impl Gui {
                 });
             });
         });
+        ui.painter().hline(ui.max_rect().x_range(), px(ui.cursor().top()) - 1.0, Stroke::new(1.0, LINE_SOFT));
+
+        self.master_check_ui(ui, &r, pad);
         ui.painter().hline(ui.max_rect().x_range(), px(ui.cursor().top()) - 1.0, Stroke::new(1.0, LINE_SOFT));
 
         // per-track loudness per section

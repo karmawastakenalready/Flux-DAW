@@ -4,7 +4,7 @@
 //! block, and the whole-buffer functions (used by the offline render) run the same processors from silence,
 //! so both paths share one implementation.
 
-use flux_core::{AmpFx, ChorusFx, Comp, DelayFx, EqBand, EqKind, Gate, ReverbParams};
+use flux_core::{AmpFx, Channel, ChorusFx, Comp, DelayFx, EqBand, EqKind, Gate, ReverbParams};
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
@@ -125,15 +125,38 @@ pub struct BqState {
     z2: f64,
 }
 
-/// A cascade of biquads with stereo memory.
+/// A cascade of biquads with stereo memory. Each stage filters both channels, or only the mid or the side signal.
 #[derive(Clone, Default)]
 pub struct Chain {
-    stages: Vec<(Biquad, [BqState; 2])>,
+    stages: Vec<(Biquad, [BqState; 2], Channel)>,
+}
+
+/// Left and right into mid and side, in place: `(L + R) / 2` and `(L - R) / 2`.
+pub fn to_mid_side(l: &mut [f32], r: &mut [f32]) {
+    for (a, b) in l.iter_mut().zip(r.iter_mut()) {
+        let (m, s) = ((*a + *b) * 0.5, (*a - *b) * 0.5);
+        *a = m;
+        *b = s;
+    }
+}
+
+/// Mid and side back into left and right, in place.
+pub fn from_mid_side(m: &mut [f32], s: &mut [f32]) {
+    for (a, b) in m.iter_mut().zip(s.iter_mut()) {
+        let (l, r) = (*a + *b, *a - *b);
+        *a = l;
+        *b = r;
+    }
 }
 
 impl Chain {
     pub fn push(&mut self, f: Biquad) {
-        self.stages.push((f, [BqState::default(); 2]));
+        self.push_on(f, Channel::Stereo);
+    }
+
+    /// A stage that filters only `ch` of the signal.
+    pub fn push_on(&mut self, f: Biquad, ch: Channel) {
+        self.stages.push((f, [BqState::default(); 2], ch));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -146,28 +169,56 @@ impl Chain {
     }
 
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        for (f, s) in self.stages.iter_mut() {
-            f.run(&mut s[0], l);
-            f.run(&mut s[1], r);
+        // the signal stays in mid/side between neighbouring mid or side stages
+        let mut ms = false;
+        for (f, s, ch) in self.stages.iter_mut() {
+            let want = !ch.is_stereo();
+            if want != ms {
+                if want { to_mid_side(l, r) } else { from_mid_side(l, r) }
+                ms = want;
+            }
+            match ch {
+                Channel::Stereo => {
+                    f.run(&mut s[0], l);
+                    f.run(&mut s[1], r);
+                }
+                Channel::Mid => f.run(&mut s[0], l),
+                Channel::Side => f.run(&mut s[1], r),
+            }
+        }
+        if ms {
+            from_mid_side(l, r);
         }
     }
 
-    /// One channel (`ch` 0 or 1) of the cascade.
+    /// One channel (`ch` 0 or 1) of the cascade, for chains whose stages all filter both channels.
     pub fn process_ch(&mut self, ch: usize, x: &mut [f32]) {
-        for (f, s) in self.stages.iter_mut() {
+        for (f, s, _) in self.stages.iter_mut() {
             f.run(&mut s[ch], x);
         }
     }
 
     /// Take new coefficients but keep the memory when the shape is unchanged (no click on a knob move).
     pub fn retune(&mut self, new: Chain) {
-        if new.stages.len() == self.stages.len() {
+        let same = new.stages.len() == self.stages.len() && self.stages.iter().zip(&new.stages).all(|(a, b)| a.2 == b.2);
+        if same {
             for (a, b) in self.stages.iter_mut().zip(new.stages) {
                 a.0 = b.0;
             }
         } else {
             *self = new;
         }
+    }
+
+    /// The cascade's gain at `hz` (dB) on `part` of the signal: the mid or the side (the stages on both channels and
+    /// those on that part), or with `Channel::Stereo` the stages on both channels only.
+    pub fn magnitude_db(&self, hz: f64, sr: f64, part: Channel) -> f64 {
+        self.stages.iter().filter(|s| s.2.is_stereo() || s.2 == part).map(|(f, _, _)| f.magnitude_db(hz, sr)).sum()
+    }
+
+    /// Whether any stage filters only the mid or the side.
+    pub fn has_mid_side(&self) -> bool {
+        self.stages.iter().any(|s| !s.2.is_stereo())
     }
 }
 
@@ -195,6 +246,7 @@ pub fn apply_filter(buf: &mut Stereo, f: Biquad) {
 pub fn eq_chain(sr: f64, bands: &[EqBand]) -> Chain {
     let mut c = Chain::default();
     for b in bands {
+        let ch = b.channel;
         let kind = match b.kind {
             EqKind::Peak => FilterKind::Peak,
             EqKind::LowShelf => FilterKind::LowShelf,
@@ -202,13 +254,20 @@ pub fn eq_chain(sr: f64, bands: &[EqBand]) -> Chain {
             EqKind::Notch => FilterKind::Notch,
             // two gentle shelves meeting at 0 dB at the pivot
             EqKind::Tilt => {
-                c.push(Biquad::new(FilterKind::LowShelf, sr, b.hz, TILT_Q, -b.db));
-                c.push(Biquad::new(FilterKind::HighShelf, sr, b.hz, TILT_Q, b.db));
+                c.push_on(Biquad::new(FilterKind::LowShelf, sr, b.hz, TILT_Q, -b.db), ch);
+                c.push_on(Biquad::new(FilterKind::HighShelf, sr, b.hz, TILT_Q, b.db), ch);
+                continue;
+            }
+            EqKind::HighPass | EqKind::LowPass => {
+                let kind = if b.kind == EqKind::HighPass { FilterKind::Highpass } else { FilterKind::Lowpass };
+                for (f, _, _) in pass_filter(kind, sr, b.hz, b.slope).stages {
+                    c.push_on(f, ch);
+                }
                 continue;
             }
         };
         let q = if matches!(b.kind, EqKind::Peak | EqKind::Notch) { b.q } else { b.q.max(0.5) };
-        c.push(Biquad::new(kind, sr, b.hz, q, b.db));
+        c.push_on(Biquad::new(kind, sr, b.hz, q, b.db), ch);
     }
     c
 }

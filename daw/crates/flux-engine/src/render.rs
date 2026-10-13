@@ -15,13 +15,12 @@
 
 use crate::dsp::{self, Stereo};
 use crate::automation::MixCurves;
-use crate::fx::multiband::{self, MultibandComp};
 use crate::fx::{dynamics, limiter, reverb};
 use crate::routing::Routing;
 use crate::strip::{Mode, Strip, Trace};
-use crate::{clips, license, paths, rig, sfizz, vst, worker};
+use crate::{clips, license, mastering, paths, rig, sfizz, vst, worker};
 use anyhow::{bail, Context, Result};
-use flux_core::{Insert, InsertPosition, Instrument, Master, Project, ReverbAlgorithm, TimeMap, Track};
+use flux_core::{Insert, InsertPosition, Instrument, Project, ReverbAlgorithm, TimeMap, Track};
 use rustfft::{num_complex::Complex, FftPlanner};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -120,8 +119,9 @@ pub struct RenderOutput {
     pub bar_starts: Vec<usize>,
     /// Loud level (dBFS) at the glue compressor input, when its threshold is relative.
     pub glue_loud_db: Option<f64>,
-    /// Each multiband compressor band's loud level (dBFS) at its input, which its thresholds count from.
-    pub multiband_loud_db: Vec<f64>,
+    /// The loud levels (dBFS) the master's dynamic EQ, de-esser, multiband compressor and exciter counted from, each
+    /// measured at its input.
+    pub master_loud: mastering::Levels,
     /// The ceiling the limiter settled on (dBTP): under the master's by the margin its true-peak overshoot needed.
     pub limiter_ceiling_db: f64,
     /// Layer stems (`RenderOptions::layers`), each the same length as the master. Fine to analyse;
@@ -900,16 +900,6 @@ fn feeding(r: &Routing, b: usize) -> Vec<usize> {
     out
 }
 
-/// The master's stereo image: mono below `mono_below_hz`, then its width.
-fn image(buf: &mut Stereo, sr: f64, m: &Master) {
-    if m.mono_below_hz > 0.0 {
-        dsp::MonoBelow::new(sr, m.mono_below_hz).process(&mut buf.0, &mut buf.1);
-    }
-    if m.width != 1.0 {
-        dsp::place(buf, 0.0, m.width);
-    }
-}
-
 /// Seconds of lead-in a looped render needs for its reverbs to reach steady state (the classic reverb's tail always
 /// fits in the usual lead-in).
 fn reverb_lead_in_s(p: &Project, r: &Routing) -> f64 {
@@ -1126,17 +1116,8 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
         let env = dynamics::compress_aligned(&mut bus.0, &mut bus.1, srf, g, thr);
         glue_env = parts.then_some(env);
     }
-    dsp::apply_eq(&mut bus, srf, &p.master.eq);
-    // the multiband compressor, with each band's gain at each sample for the parts
-    let mut multiband_loud_db = vec![];
-    let band_gains: Option<Vec<Vec<f32>>> = p.master.multiband.as_ref().map(|mb| {
-        multiband_loud_db = multiband::band_loud_levels(&bus, srf, mb);
-        let mut comp = MultibandComp::new(srf, mb, &multiband_loud_db);
-        let mut gains = vec![vec![]; if parts { comp.bands() } else { 0 }];
-        comp.process(&mut bus.0, &mut bus.1, parts.then_some(&mut gains[..]));
-        gains
-    });
-    image(&mut bus, srf, &p.master);
+    // EQ, dynamic EQ, de-esser, multiband, exciter, imager and image, recording what the parts need
+    let (master_loud, tone_rec) = mastering::render(&mut bus, srf, &p.master, parts);
 
     // loudness drive + true-peak limiter (peak analysis done once: it scales linearly with drive)
     let peaks = dsp::oversampled_peaks(&bus);
@@ -1221,11 +1202,7 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
                 dry.1[k] *= env[k];
             }
         }
-        dsp::apply_eq(&mut dry, srf, &p.master.eq);
-        if let (Some(mb), Some(g)) = (&p.master.multiband, &band_gains) {
-            multiband::apply_band_gains(&mut dry, srf, mb, g);
-        }
-        image(&mut dry, srf, &p.master);
+        mastering::replay(&mut dry, srf, &p.master, &master_loud, &tone_rec);
         let (m, g) = &out_gain;
         for k in 0..work {
             let gg = m[k] * g;
@@ -1329,7 +1306,7 @@ pub fn render(p: &Project, opts: &RenderOptions) -> Result<RenderOutput> {
         render_seconds: t0.elapsed().as_secs_f64(),
         bar_starts,
         glue_loud_db,
-        multiband_loud_db,
+        master_loud,
         limiter_ceiling_db: used.1,
         layers,
         layer_sum_error_db,

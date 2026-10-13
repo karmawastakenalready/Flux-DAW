@@ -8,12 +8,12 @@
 //! song is rendered and checked again so the reply shows what it did.
 
 use crate::state::{LastRender, Shared};
-use crate::tools::{ensure_render, ensure_render_with, get, master_chain_json, multiband_edges, rel, req, text, tool, Content};
+use crate::tools::{ensure_render, ensure_render_with, get, master_chain_json, rel, req, split_edges, text, tool, Content};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use flux_analysis::card::catalog::{self, Isolation, RunOptions};
 use flux_analysis::card::CardOptions;
 use flux_analysis::loudness::{check_game_with, GameInput, GameOptions};
-use flux_analysis::master::{check_master, MasterIssue, MasterMove, MasterOptions, MasterReport, TonalStyle};
+use flux_analysis::master::{check_master, MasterIssue, MasterMove, MasterOptions, MasterReport, Part, Saturation, TonalStyle, DEESS_THRESHOLD_DB, STEREO_CROSSOVERS_HZ};
 use flux_analysis::matcheq::{match_eq_spectra, EqShape, LongTermSpectrum, MatchOptions};
 use flux_analysis::meta::{LayersManifest, Section};
 use flux_analysis::mix::{check_mix, MixChange, MixFix, MixOptions, MixReport, RegionStems};
@@ -22,7 +22,10 @@ use flux_analysis::spectro::SpectroOptions;
 use flux_analysis::{Audio, AudioRef};
 use flux_core::commands::{MasterPatch, MixerPatch, SendSpec};
 use flux_core::pitch::PitchSpec;
-use flux_core::{Command, Comp, DeEss, Detector, EqBand, EqKind, Limiter, Master, MbBand, Mixer, Multiband, Project, TimeMap, TrackRef};
+use flux_core::{
+    Channel, Command, Comp, DeEss, Detector, DynBand, EqBand, EqKind, Exciter, Imager, Limiter, Master, MbBand, Mixer, Multiband, Project,
+    SatMode, TimeMap, TrackRef,
+};
 use flux_engine::{paths, RenderOptions, RenderOutput};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -69,12 +72,15 @@ what was applied, what was skipped and why, and the counts and section measureme
         tool("master", "Master the song for the game and check it as a mastering engineer would, without ears: loudness \
 against the target (the project's: -15 LUFS integrated, -1 dBTP true peak by default), tonal balance against a style \
 curve or a reference track, stereo and a mono low end, dynamics (PLR, loudness range, squashed attacks), the layer \
-stems and the loop seam. Scored 0-100: 100 has nothing to fix, every lost point has an issue saying why, and most issues \
-carry a move for the master (an EQ band, mono below, width, the multiband, the limiter, the target) with an index. \
-Actions: check (default; renders if stale, then a few seconds; with layer stems when the project has layers); apply (the \
-check's moves, all or `apply` indices, as one undo step, then renders and checks again: before and after; an EQ move \
-folds into a master EQ band of the same kind within a third of an octave, each band and setting changes once a round, \
-and a band stops at +-6 dB: past that the balance belongs in the mix); match (EQ the master toward `reference`); auto (check, apply, render and check again up to `passes` times, stopping when a pass \
+stems, the loop seam and technical faults (DC offset, subsonic rumble, a top end cut off by a low-rate source). Scored \
+0-100: 100 has nothing to fix, every lost point has an issue saying why, and most issues carry a move for the master \
+(an EQ band on both channels or on the side alone, a high-pass, the de-esser, a dynamic EQ band for a range that is too \
+loud only at times, the exciter for a dull or cut-off top, an imager band, mono below, width, the limiter, the target) \
+with an index. Actions: check (default; renders if stale, then a few seconds; with layer stems when the project has \
+layers); apply (the check's moves, all or `apply` indices, as one undo step, then renders and checks again: before and \
+after; an EQ move folds into a master EQ band of the same kind and channel within a third of an octave, and a band stops \
+at +-6 dB: past that the balance belongs in the mix; a high-pass only rises, the de-esser and a dynamic EQ band only \
+deepen, the exciter only blends in more; each band and setting changes once a round); match (EQ the master toward `reference`); auto (check, apply, render and check again up to `passes` times, stopping when a pass \
 gains under 1 point and undoing a pass that loses points); preset (set a named master chain). Every change is one undo \
 step in activity. Mix first (mix_check), master last.", json!({
             "action": {"enum": ["check", "apply", "match", "auto", "preset"], "description": "default check"},
@@ -555,6 +561,17 @@ fn kind_name(k: EqKind) -> &'static str {
         EqKind::HighShelf => "high shelf",
         EqKind::Notch => "notch",
         EqKind::Tilt => "tilt",
+        EqKind::HighPass => "high-pass",
+        EqKind::LowPass => "low-pass",
+    }
+}
+
+/// An EQ band's kind in words, with the part of the stereo signal it works on unless that's both channels.
+fn band_name(b: &EqBand) -> String {
+    match b.channel {
+        Channel::Stereo => kind_name(b.kind).to_string(),
+        Channel::Mid => format!("mid {}", kind_name(b.kind)),
+        Channel::Side => format!("side {}", kind_name(b.kind)),
     }
 }
 
@@ -566,9 +583,26 @@ fn eq_kind(s: EqShape) -> EqKind {
     }
 }
 
-/// The band of an EQ that `band` would fold into: the same kind, within a third of an octave.
+fn channel(p: Part) -> Channel {
+    match p {
+        Part::Stereo => Channel::Stereo,
+        Part::Mid => Channel::Mid,
+        Part::Side => Channel::Side,
+    }
+}
+
+fn sat_mode(s: Saturation) -> SatMode {
+    match s {
+        Saturation::Tape => SatMode::Tape,
+        Saturation::Tube => SatMode::Tube,
+    }
+}
+
+/// The band of an EQ that `band` would fold into: the same kind on the same channel, within a third of an octave.
 fn near_band(eq: &[EqBand], band: &EqBand) -> Option<usize> {
-    eq.iter().position(|b| b.kind == band.kind && b.hz > 0.0 && band.hz > 0.0 && (b.hz / band.hz).log2().abs() <= EQ_MERGE_OCT + 1e-9)
+    eq.iter().position(|b| {
+        b.kind == band.kind && b.channel == band.channel && b.hz > 0.0 && band.hz > 0.0 && (b.hz / band.hz).log2().abs() <= EQ_MERGE_OCT + 1e-9
+    })
 }
 
 /// Add `band` to an EQ, or fold it into the band `near_band` finds: the gains add (that band keeps its frequency and
@@ -580,14 +614,14 @@ fn merge_eq(eq: &mut Vec<EqBand>, band: EqBand, max_db: f64) -> Outcome {
             let old = eq[i];
             let db = r2((old.db + band.db).clamp(-max_db, max_db));
             if (db - old.db).abs() < 0.05 {
-                return Err(format!("the {} at {} is already at {:+.1} dB, as far as these changes go", kind_name(old.kind), hz_text(old.hz), old.db));
+                return Err(format!("the {} at {} is already at {:+.1} dB, as far as these changes go", band_name(&old), hz_text(old.hz), old.db));
             }
             if db.abs() < 0.1 {
                 eq.remove(i);
-                Ok(format!("removed the {} at {} (the change cancelled it)", kind_name(old.kind), hz_text(old.hz)))
+                Ok(format!("removed the {} at {} (the change cancelled it)", band_name(&old), hz_text(old.hz)))
             } else {
                 eq[i].db = db;
-                Ok(format!("{} at {}: {:+.1} -> {db:+.1} dB", kind_name(old.kind), hz_text(old.hz), old.db))
+                Ok(format!("{} at {}: {:+.1} -> {db:+.1} dB", band_name(&old), hz_text(old.hz), old.db))
             }
         }
         None => Ok(add_band(eq, band, max_db)),
@@ -596,9 +630,9 @@ fn merge_eq(eq: &mut Vec<EqBand>, band: EqBand, max_db: f64) -> Outcome {
 
 /// Add `band` to an EQ as a band of its own, within the EQ's ranges and +-`max_db`.
 fn add_band(eq: &mut Vec<EqBand>, band: EqBand, max_db: f64) -> String {
-    let b = EqBand { kind: band.kind, hz: band.hz.clamp(20.0, 20000.0), db: r2(band.db.clamp(-max_db, max_db)), q: band.q.clamp(0.1, 10.0) };
+    let b = EqBand { hz: band.hz.clamp(20.0, 20000.0), db: r2(band.db.clamp(-max_db, max_db)), q: band.q.clamp(0.1, 10.0), ..band };
     eq.push(b);
-    format!("added a {} of {:+.1} dB at {}, Q {:.2}", kind_name(b.kind), b.db, hz_text(b.hz), b.q)
+    format!("added a {} of {:+.1} dB at {}, Q {:.2}", band_name(&b), b.db, hz_text(b.hz), b.q)
 }
 
 /// The track a fix names: its exact name, else the one track with that name in another case. A missing or ambiguous
@@ -638,7 +672,7 @@ fn scale_level(what: &str, x: &mut f64, scale: f64) -> Option<String> {
 fn mix_change(p: &Project, ti: usize, m: &mut Mixer, c: &MixChange) -> Outcome {
     let me = p.tracks[ti].id;
     match *c {
-        MixChange::EqCut { hz, db, q } | MixChange::EqBoost { hz, db, q } => merge_eq(&mut m.eq, EqBand { kind: EqKind::Peak, hz, db, q }, EQ_MAX_DB)
+        MixChange::EqCut { hz, db, q } | MixChange::EqBoost { hz, db, q } => merge_eq(&mut m.eq, EqBand::new(EqKind::Peak, hz, db, q), EQ_MAX_DB)
             .map(|d| format!("EQ: {d}"))
             .map_err(|e| format!("{e}: change the part itself (its sound, octave or level) instead")),
         MixChange::HighPass { hz } => {
@@ -709,29 +743,40 @@ instrument (turn that down by hand)"
             Ok(if old > 0.0 { format!("mono below {} -> {}", hz_text(old), hz_text(m.mono_below_hz)) } else { format!("mono below {}", hz_text(m.mono_below_hz)) })
         }
         MixChange::DeEss { hz, range_db } => {
-            let (hz, range_db) = (hz.clamp(1000.0, 16000.0), range_db.clamp(-24.0, 0.0));
-            match &mut m.deess {
-                None => {
-                    let d = DeEss { hz: hz.round(), range_db, ..DeEss::default() };
-                    m.deess = Some(d);
-                    Ok(format!("added a de-esser above {}, range {:.1} dB, threshold {:.0} dB under the band's loud level", hz_text(d.hz), d.range_db, -d.threshold_db))
-                }
-                Some(d) => {
-                    let (h, r) = (d.hz.min(hz.round()), d.range_db.min(range_db));
-                    if h < d.hz || r < d.range_db {
-                        let was = format!("{}, {:.1} dB", hz_text(d.hz), d.range_db);
-                        (d.hz, d.range_db) = (h, r);
-                        return Ok(format!("de-esser {was} -> above {}, {:.1} dB", hz_text(h), r));
-                    }
-                    let t = (d.threshold_db - 3.0).max(-30.0);
-                    if t >= d.threshold_db {
-                        return Err(format!("its de-esser is already at its deepest ({:.0} dB threshold): cut the band with its EQ instead", d.threshold_db));
-                    }
-                    let old = d.threshold_db;
-                    d.threshold_db = t;
-                    Ok(format!("de-esser threshold {old:.0} -> {t:.0} dB, so it catches more"))
-                }
+            deess_change(&mut m.deess, hz, range_db, DeEss::default().threshold_db).map_err(|e| format!("its {e}: cut the band with its EQ instead"))
+        }
+    }
+}
+
+/// Turn on a de-esser above `hz` with `range_db`, or deepen the one there: its band reaches down to `hz` and its
+/// range to `range_db`, and when both already do, its threshold comes down 3 dB (to -30) so it catches more.
+fn deess_change(slot: &mut Option<DeEss>, hz: f64, range_db: f64, threshold_db: f64) -> Outcome {
+    let (hz, range_db) = (hz.clamp(1000.0, 16000.0), range_db.clamp(-24.0, 0.0));
+    match slot {
+        None => {
+            let d = DeEss { hz: hz.round(), range_db, threshold_db };
+            *slot = Some(d);
+            let at = match d.threshold_db {
+                t if t.abs() < 0.5 => "at".to_string(),
+                t if t < 0.0 => format!("{:.0} dB under", -t),
+                t => format!("{t:.0} dB over"),
+            };
+            Ok(format!("added a de-esser above {}, range {:.1} dB, threshold {at} the band's loud level", hz_text(d.hz), d.range_db))
+        }
+        Some(d) => {
+            let (h, r) = (d.hz.min(hz.round()), d.range_db.min(range_db));
+            if h < d.hz || r < d.range_db {
+                let was = format!("{}, {:.1} dB", hz_text(d.hz), d.range_db);
+                (d.hz, d.range_db) = (h, r);
+                return Ok(format!("de-esser {was} -> above {}, {:.1} dB", hz_text(h), r));
             }
+            let t = (d.threshold_db - 3.0).max(-30.0);
+            if t >= d.threshold_db {
+                return Err(format!("de-esser is already at its deepest ({:.0} dB threshold)", d.threshold_db));
+            }
+            let old = d.threshold_db;
+            d.threshold_db = t;
+            Ok(format!("de-esser threshold {old:.0} -> {t:.0} dB, so it catches more"))
         }
     }
 }
@@ -818,10 +863,10 @@ fn plan_mix(p: &Project, fixes: &[MixFix], chosen: &[usize]) -> (Vec<Command>, V
     (cmds, applied, skipped)
 }
 
-/// The band of a multiband compressor that holds most of `lo..hi` Hz, by overlap on a log-frequency scale (the band
-/// around its centre when it overlaps none).
-fn mb_band(mb: &Multiband, lo: f64, hi: f64) -> usize {
-    let edges = multiband_edges(mb);
+/// The band of a split at `crossovers_hz` (the exciter's, the imager's) that holds most of `lo..hi` Hz, by overlap on
+/// a log-frequency scale (the band around its centre when it overlaps none).
+fn split_band(crossovers_hz: &[f64], lo: f64, hi: f64) -> usize {
+    let edges = split_edges(crossovers_hz);
     let (lo, hi) = (lo.max(1.0), hi.max(lo.max(1.0)));
     let mut best = (0, 0.0);
     for (i, &(a, b)) in edges.iter().enumerate() {
@@ -837,56 +882,149 @@ fn mb_band(mb: &Multiband, lo: f64, hi: f64) -> usize {
     edges.iter().position(|&(_, b)| c < b).unwrap_or(edges.len().saturating_sub(1))
 }
 
-/// Deepen a multiband band so it takes about `reduce_db` more off its loud level (where its relative threshold counts
-/// from): with the ratio at least `min_ratio`, the threshold goes where the loud level's gain reduction grows by that
-/// much (kept within -24..0 dB and never raised).
-fn deepen(b: &mut MbBand, reduce_db: f64, min_ratio: f64) -> Outcome {
-    let slope = |r: f64| 1.0 - 1.0 / r.max(1.0);
-    let now = (-b.threshold_db).max(0.0) * slope(b.ratio);
-    let ratio = b.ratio.max(min_ratio);
-    let threshold = ((-(now + reduce_db.abs()) / slope(ratio)).clamp(-24.0, 0.0)).min(b.threshold_db);
-    let threshold = (threshold * 10.0).round() / 10.0;
-    if threshold >= b.threshold_db - 0.05 && ratio <= b.ratio {
-        return Err(format!("its threshold is already {:.1} dB under the band's loud level: cut the region in the tracks or with the EQ instead", -b.threshold_db));
+/// The deepest a move takes a master dynamic EQ band's range (dB).
+const DYN_EQ_MAX_DB: f64 = 12.0;
+/// The lowest a move takes a master dynamic EQ band's threshold (dB under the band's loud level).
+const DYN_EQ_MIN_THRESHOLD_DB: f64 = -12.0;
+
+/// A dynamic EQ move on the master: a new band (from 4 dB under the range's loud level, ratio 3), or the band of the
+/// same kind within a third of an octave deepened by `range_db` (to -12 dB), then brought down to catch more.
+fn master_dyn_eq(m: &mut Master, kind: EqKind, hz: f64, q: f64, range_db: f64, done: &mut BTreeSet<String>) -> Outcome {
+    let hz = hz.clamp(20.0, 20000.0).round();
+    let range_db = range_db.clamp(-DYN_EQ_MAX_DB, -0.5);
+    let near = m.dyn_eq.iter().position(|b| b.kind == kind && b.channel == Channel::Stereo && (b.hz / hz).log2().abs() <= EQ_MERGE_OCT + 1e-9);
+    let at = near.map_or(hz, |i| m.dyn_eq[i].hz);
+    claim(done, &format!("dynamic EQ band at {}", hz_text(at)))?;
+    let Some(i) = near else {
+        let b = DynBand {
+            kind,
+            hz,
+            q: r2(q.clamp(0.1, 10.0)),
+            threshold_db: -4.0,
+            relative: true,
+            ratio: 3.0,
+            range_db: r2(range_db),
+            attack_ms: 5.0,
+            release_ms: 80.0,
+            channel: Channel::Stereo,
+        };
+        m.dyn_eq.push(b);
+        return Ok(format!(
+            "dynamic EQ: added a {} at {}, Q {:.2}, turning it down by up to {:.1} dB while it's over 4 dB under its loud level",
+            kind_name(kind),
+            hz_text(hz),
+            b.q,
+            -b.range_db
+        ));
+    };
+    let b = &mut m.dyn_eq[i];
+    let r = r2((b.range_db + range_db).max(-DYN_EQ_MAX_DB));
+    if r < b.range_db - 0.05 {
+        let old = b.range_db;
+        b.range_db = r;
+        return Ok(format!("dynamic EQ {} at {}: range {old:.1} -> {r:.1} dB", kind_name(b.kind), hz_text(b.hz)));
     }
-    let was = format!("threshold {:.1} dB, ratio {:.1}", b.threshold_db, b.ratio);
-    b.threshold_db = threshold;
-    b.ratio = r2(ratio);
-    let more = (-threshold).max(0.0) * slope(ratio) - now;
-    Ok(format!("{was} -> {threshold:.1} dB, {:.1}: about {more:.1} dB more off its loud moments", b.ratio))
+    let t = (b.threshold_db - 2.0).max(DYN_EQ_MIN_THRESHOLD_DB);
+    if t >= b.threshold_db - 0.05 {
+        return Err(format!(
+            "the dynamic EQ {} at {} is already at its deepest ({:.0} dB range from {:.0} dB under its loud level): the rest belongs in \
+the mix (mix_check's regions name the tracks playing there)",
+            kind_name(b.kind),
+            hz_text(b.hz),
+            b.range_db,
+            -b.threshold_db
+        ));
+    }
+    let old = b.threshold_db;
+    b.threshold_db = t;
+    Ok(format!("dynamic EQ {} at {}: threshold {old:.0} -> {t:.0} dB, so it acts more of the time", kind_name(b.kind), hz_text(b.hz)))
 }
 
-/// A sibilance move on the master, which has no de-esser: the multiband's top band does the job, its lower edge
-/// brought down to `hz` where the crossovers allow (or a band of its own added above it), compressing harder.
-fn master_deess(m: &mut Master, hz: f64, range_db: f64) -> Outcome {
-    let mut notes = vec![];
-    if m.multiband.is_none() {
-        m.multiband = Some(Multiband::default());
-        notes.push("turned on the multiband compressor (its default bands)".to_string());
+/// An exciter move on the master: the band of its split holding most of `hz_lo..hz_hi` blends in at least `mix` of
+/// the saturated band on `mode`'s curve. Turned on for the move, the exciter starts with every band at mix 0, so only
+/// the band asked for changes the sound.
+fn master_exciter(m: &mut Master, hz_lo: f64, hz_hi: f64, mix: f64, mode: Saturation, done: &mut BTreeSet<String>) -> Outcome {
+    let added = m.exciter.is_none();
+    let e = m.exciter.get_or_insert_with(|| {
+        let mut e = Exciter::default();
+        e.bands.iter_mut().for_each(|b| b.mix = 0.0);
+        e
+    });
+    if e.bands.len() != e.crossovers_hz.len() + 1 {
+        return Err("the exciter's bands don't match its crossovers: set the exciter again".into());
     }
-    let Some(mb) = m.multiband.as_mut() else { return Err("no multiband".into()) };
-    let n = mb.crossovers_hz.len();
-    if n == 0 || mb.bands.len() != n + 1 {
-        return Err("the multiband's bands don't match its crossovers: set the multiband again".into());
+    let i = split_band(&e.crossovers_hz, hz_lo, hz_hi);
+    let (lo, hi) = split_edges(&e.crossovers_hz)[i];
+    claim(done, &format!("exciter band {} - {}", hz_text(lo), hz_text(hi)))?;
+    let b = &mut e.bands[i];
+    let mix = r2(mix.clamp(0.0, 1.0));
+    if b.mix >= mix - 0.005 {
+        return Err(format!(
+            "the exciter's {} - {} band already blends in {:.0} %: brighter sources in the mix (or samples recorded at a higher rate) are \
+what's left",
+            hz_text(lo),
+            hz_text(hi),
+            b.mix * 100.0
+        ));
     }
-    let last = mb.crossovers_hz[n - 1];
-    if last > hz * 1.05 {
-        let floor = if n >= 2 { (mb.crossovers_hz[n - 2] * 1.55).ceil() } else { 30.0 };
-        let to = hz.max(floor).round();
-        if to < last {
-            mb.crossovers_hz[n - 1] = to;
-            notes.push(format!("moved its top crossover {} -> {}", hz_text(last), hz_text(to)));
+    let old = b.mix;
+    (b.mix, b.mode) = (mix, sat_mode(mode));
+    let on = if added { "turned on the exciter (its other bands at mix 0); " } else { "" };
+    let mode = if b.mode == SatMode::Tube { "tube" } else { "tape" };
+    Ok(format!("{on}exciter {} - {} band: mix {:.0} -> {:.0} %, {mode}", hz_text(lo), hz_text(hi), old * 100.0, mix * 100.0))
+}
+
+/// An imager move on the master: the width of the band of its split holding most of `hz_lo..hz_hi` scaled by `width`
+/// (0 to 2). Turned on for the move, the imager splits where the report's stereo bands meet, every band at width 1.
+fn master_imager(m: &mut Master, hz_lo: f64, hz_hi: f64, width: f64, done: &mut BTreeSet<String>) -> Outcome {
+    let added = m.imager.is_none();
+    let im = m.imager.get_or_insert_with(|| Imager { crossovers_hz: STEREO_CROSSOVERS_HZ.to_vec(), widths: vec![1.0; STEREO_CROSSOVERS_HZ.len() + 1] });
+    if im.widths.len() != im.crossovers_hz.len() + 1 {
+        return Err("the imager's widths don't match its crossovers: set the imager again".into());
+    }
+    let i = split_band(&im.crossovers_hz, hz_lo, hz_hi);
+    let (lo, hi) = split_edges(&im.crossovers_hz)[i];
+    claim(done, &format!("imager band {} - {}", hz_text(lo), hz_text(hi)))?;
+    let old = im.widths[i];
+    let new = r2((old * width).clamp(0.0, 2.0));
+    if (new - old).abs() < 0.005 {
+        return Err(format!(
+            "the imager's {} - {} band is already at width {old:.2}: change the tracks playing there instead (their width and pan)",
+            hz_text(lo),
+            hz_text(hi)
+        ));
+    }
+    im.widths[i] = new;
+    let on = if added { "turned on the imager (its other bands at width 1); " } else { "" };
+    Ok(format!("{on}imager {} - {} band: width {old:.2} -> {new:.2}", hz_text(lo), hz_text(hi)))
+}
+
+/// A high-pass move on the master: a high-pass at `hz` falling `slope` dB per octave added to the master EQ, or the
+/// one there raised to `hz` and steepened to `slope` (never lowered or made gentler).
+fn master_high_pass(m: &mut Master, hz: f64, slope: u32) -> Outcome {
+    let hz = hz.clamp(10.0, 500.0).round();
+    let slope = (slope.clamp(12, 48) / 12) * 12;
+    match m.eq.iter().position(|b| b.kind == EqKind::HighPass && b.channel == Channel::Stereo) {
+        Some(i) => {
+            let old = m.eq[i];
+            let (h, s) = (old.hz.max(hz), old.slope.max(slope));
+            if h <= old.hz && s == old.slope {
+                return Err(format!(
+                    "the master EQ's high-pass is already at {}, {} dB/octave: what's left down there comes from the tracks (their hpf_hz)",
+                    hz_text(old.hz),
+                    old.slope
+                ));
+            }
+            (m.eq[i].hz, m.eq[i].slope) = (h, s);
+            Ok(format!("EQ high-pass {}, {} dB/octave -> {}, {s} dB/octave", hz_text(old.hz), old.slope, hz_text(h)))
         }
-    } else if last < hz / 2.0 && n < 3 && hz <= 16000.0 {
-        let top = mb.bands[n];
-        mb.crossovers_hz.push(hz.round());
-        mb.bands.push(top);
-        notes.push(format!("added a crossover at {} so the sibilance gets a band of its own", hz_text(hz)));
+        None => {
+            let mut b = EqBand::new(EqKind::HighPass, hz, 0.0, 0.71);
+            b.slope = slope;
+            m.eq.push(b);
+            Ok(format!("EQ: added a high-pass at {}, {slope} dB/octave", hz_text(hz)))
+        }
     }
-    let top = mb.bands.len() - 1;
-    let d = deepen(&mut mb.bands[top], range_db.abs() / 2.0, 3.0)?;
-    notes.push(format!("its top band ({} up): {d}", hz_text(*mb.crossovers_hz.last().unwrap_or(&hz))));
-    Ok(format!("the master has no de-esser, so the multiband's top band stands in: {}", notes.join("; ")))
 }
 
 /// Claim a master setting for this pass: each is changed once, by the most important move that wants it.
@@ -897,22 +1035,21 @@ fn claim(done: &mut BTreeSet<String>, key: &str) -> std::result::Result<(), Stri
     Ok(())
 }
 
-/// The multiband's top band as `claim` names it.
-fn top_band_key(m: &Master) -> String {
-    let (lo, hi) = multiband_edges(&m.multiband.clone().unwrap_or_default()).last().copied().unwrap_or((0.0, 0.0));
-    format!("multiband band {lo:.0}-{hi:.0} Hz")
-}
-
 /// One master move carried out on a copy of the master. `done` holds the settings already changed in this pass;
 /// `delivery` is the loudness the song ships at, and a target move further than 1 LU from it is only taken when
 /// `picked` by index.
 fn master_move(m: &mut Master, mv: &MasterMove, done: &mut BTreeSet<String>, delivery: f64, picked: bool) -> Outcome {
     match *mv {
-        MasterMove::Eq { shape, hz, db, q } => {
-            let band = EqBand { kind: eq_kind(shape), hz, db, q };
+        MasterMove::Eq { shape, hz, db, q, part } => {
+            let band = EqBand { channel: channel(part), ..EqBand::new(eq_kind(shape), hz, db, q) };
             // each band once a pass: two regions' moves can land on the same band
             let at = near_band(&m.eq, &band).map_or(hz.clamp(20.0, 20000.0), |i| m.eq[i].hz);
-            claim(done, &format!("EQ band at {}", hz_text(at)))?;
+            let on = match band.channel {
+                Channel::Stereo => "",
+                Channel::Mid => "mid ",
+                Channel::Side => "side ",
+            };
+            claim(done, &format!("EQ {on}band at {}", hz_text(at)))?;
             merge_eq(&mut m.eq, band, MASTER_EQ_MAX_DB)
                 .map(|d| format!("EQ: {d}"))
                 .map_err(|e| format!("{e} on the master: the rest belongs in the mix (mix_check's regions name the tracks playing there)"))
@@ -937,29 +1074,19 @@ fn master_move(m: &mut Master, mv: &MasterMove, done: &mut BTreeSet<String>, del
             m.width = new;
             Ok(format!("width {old:.2} -> {new:.2}"))
         }
+        MasterMove::HighPass { hz, slope } => {
+            claim(done, "EQ high-pass")?;
+            master_high_pass(m, hz, slope)
+        }
         MasterMove::DeEss { hz, range_db } => {
-            claim(done, &top_band_key(m))?;
-            let did = master_deess(m, hz, range_db)?;
-            // its crossover may have moved: the band under its new edges is taken too
-            let now = top_band_key(m);
-            if !done.contains(&now) {
-                claim(done, &now)?;
-            }
-            Ok(did)
+            claim(done, "de-esser")?;
+            deess_change(&mut m.deess, hz, range_db, DEESS_THRESHOLD_DB).map_err(|e| {
+                format!("the master's {e}: the sibilance comes from the tracks (give the vocals, cymbals or plucks carrying it a de-esser of their own)")
+            })
         }
-        MasterMove::Multiband { hz_lo, hz_hi, reduce_db, .. } => {
-            let added = m.multiband.is_none();
-            let mb = m.multiband.get_or_insert_with(Multiband::default);
-            if mb.crossovers_hz.is_empty() || mb.bands.len() != mb.crossovers_hz.len() + 1 {
-                return Err("the multiband's bands don't match its crossovers: set the multiband again".into());
-            }
-            let i = mb_band(mb, hz_lo, hz_hi);
-            let (lo, hi) = multiband_edges(mb)[i];
-            claim(done, &format!("multiband band {lo:.0}-{hi:.0} Hz"))?;
-            let d = deepen(&mut mb.bands[i], reduce_db, 2.0)?;
-            let on = if added { "turned on the multiband compressor (its default bands); " } else { "" };
-            Ok(format!("{on}multiband {lo:.0}-{hi:.0} Hz band: {d}"))
-        }
+        MasterMove::DynEq { shape, hz, q, range_db } => master_dyn_eq(m, eq_kind(shape), hz, q, range_db, done),
+        MasterMove::Exciter { hz_lo, hz_hi, mix, mode } => master_exciter(m, hz_lo, hz_hi, mix, mode, done),
+        MasterMove::Imager { hz_lo, hz_hi, width } => master_imager(m, hz_lo, hz_hi, width, done),
         MasterMove::Loudness { target_lufs } => {
             if (target_lufs - m.target_lufs).abs() < 0.05 {
                 return Err(format!(
@@ -1053,6 +1180,21 @@ fn master_patch(a: &Master, b: &Master) -> Option<MasterPatch> {
     if set(a.eq != b.eq) {
         p.eq = Some(b.eq.clone());
     }
+    if set(a.eq_phase != b.eq_phase) {
+        p.eq_phase = Some(b.eq_phase);
+    }
+    if set(a.dyn_eq != b.dyn_eq) {
+        p.dyn_eq = Some(b.dyn_eq.clone());
+    }
+    if set(a.deess != b.deess) {
+        p.deess = Some(b.deess);
+    }
+    if set(a.exciter != b.exciter) {
+        p.exciter = Some(b.exciter.clone());
+    }
+    if set(a.imager != b.imager) {
+        p.imager = Some(b.imager.clone());
+    }
     if set(a.target_lufs != b.target_lufs) {
         p.target_lufs = Some(b.target_lufs);
     }
@@ -1102,7 +1244,7 @@ fn preset(name: &str) -> Result<Preset> {
             mix,
         }))
     };
-    let band = |threshold_db, ratio, attack_ms, release_ms| MbBand { threshold_db, ratio, attack_ms, release_ms, gain_db: 0.0 };
+    let band = MbBand::new;
     let limiter = |lookahead_ms, release_ms, clip_db| Limiter { lookahead_ms, release_ms, auto_release: true, clip_db };
     Ok(match name {
         "transparent" => Preset { glue: None, multiband: None, limiter: Limiter::default(), mono_below_hz: None },
@@ -1288,6 +1430,17 @@ fn run_master_check(r: &LastRender, args: &MasterArgs, reference: Option<&Audio>
         sections: out.sections.iter().filter(|s| s.start < s.end && s.start < n).map(|s| (s.name.clone(), s.start, s.end.min(n))).collect(),
     };
     check_master(AudioRef::master(out), &o)
+}
+
+/// The agent's last master check, if it measured render `r`: what the GUI's analysis shows first.
+pub fn checked(r: &Arc<LastRender>) -> Option<Arc<MasterReport>> {
+    last_master_check().lock().as_ref().filter(|c| c.measured(r)).map(|c| c.report.clone())
+}
+
+/// Render `r` checked against `style`'s masters at the project's own target and ceiling: the GUI's analysis, where
+/// the agent hasn't checked it.
+pub fn check_for_gui(r: &LastRender, style: TonalStyle) -> Result<MasterReport> {
+    run_master_check(r, &MasterArgs { style, reference: None, target_lufs: None, ceiling_dbtp: None }, None)
 }
 
 /// The current revision rendered and checked (the check reused while the render and the options are the same).
@@ -1507,7 +1660,7 @@ fn master_match(sh: &Arc<Shared>, a: &Value, args: &MasterArgs) -> Result<Vec<Co
         // was there before, never into another of the fit
         let (mut did, mut left, mut fresh) = (vec![], vec![], vec![]);
         for b in &fit.bands {
-            let band = EqBand { kind: eq_kind(b.shape), hz: b.hz, db: b.db, q: b.q };
+            let band = EqBand::new(eq_kind(b.shape), b.hz, b.db, b.q);
             if near_band(&m.eq, &band).is_none() {
                 did.push(add_band(&mut fresh, band, MASTER_EQ_MAX_DB));
                 continue;
@@ -1814,7 +1967,6 @@ fn instrument_card(a: &Value) -> Result<Vec<Content>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_analysis::master::MultibandRegion;
     use flux_core::Session;
 
     fn project(cmds: Value) -> Project {
@@ -1826,7 +1978,7 @@ mod tests {
     }
 
     fn peak(hz: f64, db: f64, q: f64) -> EqBand {
-        EqBand { kind: EqKind::Peak, hz, db, q }
+        EqBand::new(EqKind::Peak, hz, db, q)
     }
 
     fn fix(track: &str, change: MixChange) -> MixFix {
@@ -1870,7 +2022,7 @@ mod tests {
         merge(&mut eq, peak(350.0, -2.0, 2.0));
         assert_eq!(eq, [peak(300.0, -5.0, 1.0)], "a band 0.22 octave away merges, keeping the first's frequency and Q");
         merge(&mut eq, peak(400.0, -2.0, 1.0));
-        merge(&mut eq, EqBand { kind: EqKind::LowShelf, hz: 300.0, db: 2.0, q: 0.7 });
+        merge(&mut eq, EqBand::new(EqKind::LowShelf, 300.0, 2.0, 0.7));
         assert_eq!(eq.len(), 3, "0.42 octave away, or another kind, is a band of its own");
         merge(&mut eq, peak(290.0, -10.0, 1.0));
         assert_eq!(eq[0].db, -12.0);
@@ -1982,60 +2134,105 @@ mod tests {
     }
 
     #[test]
-    fn multiband_moves_find_the_band_by_frequency() {
-        let mb = Multiband::default();
-        assert_eq!(mb.crossovers_hz, [150.0, 2500.0, 8000.0]);
+    fn split_moves_find_the_band_by_frequency() {
+        let x = Multiband::default().crossovers_hz;
+        assert_eq!(x, [150.0, 2500.0, 8000.0]);
         for ((lo, hi), band) in [((200.0, 500.0), 1), ((3000.0, 6000.0), 2), ((40.0, 100.0), 0), ((10000.0, 16000.0), 3), ((100.0, 300.0), 1), ((6000.0, 9000.0), 2)] {
-            assert_eq!(mb_band(&mb, lo, hi), band, "{lo}-{hi} Hz");
+            assert_eq!(split_band(&x, lo, hi), band, "{lo}-{hi} Hz");
         }
-        let three = Multiband { crossovers_hz: vec![300.0, 3000.0], bands: mb.bands[..3].to_vec() };
         for ((lo, hi), band) in [((200.0, 500.0), 1), ((5000.0, 8000.0), 2), ((50.0, 100.0), 0), ((1000.0, 1000.0), 1)] {
-            assert_eq!(mb_band(&three, lo, hi), band, "{lo}-{hi} Hz");
+            assert_eq!(split_band(&[300.0, 3000.0], lo, hi), band, "{lo}-{hi} Hz");
+        }
+        // the report's stereo bands land on the imager's bands one to one
+        for (i, w) in split_edges(&STEREO_CROSSOVERS_HZ).iter().enumerate() {
+            assert_eq!(split_band(&STEREO_CROSSOVERS_HZ, w.0, w.1), i);
         }
     }
 
     #[test]
-    fn deepening_a_band_takes_that_much_more_off_its_loud_level() {
-        let band = |threshold_db, ratio| MbBand { threshold_db, ratio, attack_ms: 10.0, release_ms: 100.0, gain_db: 0.0 };
-        let mut b = band(-4.0, 2.0);
-        deepen(&mut b, 2.0, 2.0).unwrap();
-        assert_eq!((b.threshold_db, b.ratio), (-8.0, 2.0));
-        let mut b = band(-4.0, 2.0);
-        deepen(&mut b, 3.0, 3.0).unwrap();
-        assert_eq!((b.threshold_db, b.ratio), (-7.5, 3.0));
-        let mut b = band(-2.0, 4.0);
-        deepen(&mut b, 2.0, 2.0).unwrap();
-        assert_eq!((b.threshold_db, b.ratio), (-4.7, 4.0));
-        let mut b = band(-24.0, 2.0);
-        assert!(deepen(&mut b, 2.0, 2.0).unwrap_err().contains("already"));
-        assert_eq!(b, band(-24.0, 2.0));
-    }
-
-    #[test]
-    fn the_multiband_top_band_stands_in_for_a_master_de_esser() {
+    fn the_master_stages_turn_on_and_deepen_with_their_moves() {
         let base = Master::default();
+        let mv = |m: &mut Master, x: MasterMove| master_move(m, &x, &mut BTreeSet::new(), -15.0, false);
+        let ok = |m: &mut Master, x: MasterMove| mv(m, x.clone()).unwrap_or_else(|e| panic!("{x:?}: {e}"));
+
+        // a side-only EQ band is a band of its own beside a stereo one at the same frequency
         let mut m = base.clone();
-        let did = master_deess(&mut m, 6000.0, -6.0).unwrap();
-        assert!(did.contains("no de-esser") && did.contains("turned on"), "{did}");
-        let mb = m.multiband.clone().unwrap();
-        assert_eq!(mb.crossovers_hz, [150.0, 2500.0, 6000.0]);
-        assert_eq!((mb.bands[3].threshold_db, mb.bands[3].ratio), (-7.5, 3.0));
+        ok(&mut m, MasterMove::Eq { shape: EqShape::Peak, hz: 3000.0, db: -1.5, q: 1.0, part: Part::Stereo });
+        let did = ok(&mut m, MasterMove::Eq { shape: EqShape::HighShelf, hz: 8000.0, db: -2.0, q: 0.7, part: Part::Side });
+        ok(&mut m, MasterMove::Eq { shape: EqShape::Peak, hz: 3000.0, db: -1.0, q: 1.0, part: Part::Side });
+        assert!(did.contains("side high shelf"), "{did}");
+        assert_eq!(m.eq.iter().map(|b| (b.hz, b.db, b.channel)).collect::<Vec<_>>(), [
+            (3000.0, -1.5, Channel::Stereo),
+            (8000.0, -2.0, Channel::Side),
+            (3000.0, -1.0, Channel::Side)
+        ]);
         assert!(valid(&base, &m));
-        // the top crossover only comes down as far as the 1.5x spacing allows
+
+        // a high-pass only rises and steepens
         let mut m = base.clone();
-        master_deess(&mut m, 3000.0, -6.0).unwrap();
-        assert_eq!(m.multiband.as_ref().unwrap().crossovers_hz, [150.0, 2500.0, 3875.0]);
+        ok(&mut m, MasterMove::HighPass { hz: 20.0, slope: 24 });
+        let hp: Vec<_> = m.eq.iter().filter(|b| b.kind == EqKind::HighPass).map(|b| (b.hz, b.slope)).collect();
+        assert_eq!(hp, [(20.0, 24)]);
         assert!(valid(&base, &m));
-        // two crossovers well below the sibilance: it gets a band of its own
-        let mut two = base.clone();
-        two.multiband = Some(Multiband { crossovers_hz: vec![150.0, 2500.0], bands: Multiband::default().bands[..3].to_vec() });
-        let mut m = two.clone();
-        master_deess(&mut m, 7000.0, -4.0).unwrap();
-        let mb = m.multiband.clone().unwrap();
-        assert_eq!((mb.crossovers_hz.as_slice(), mb.bands.len()), (&[150.0, 2500.0, 7000.0][..], 4));
-        assert_eq!(mb.bands[2], two.multiband.as_ref().unwrap().bands[2]);
-        assert!(mb.bands[3].ratio >= 3.0);
-        assert!(valid(&two, &m));
+        let mut at = m.clone();
+        assert!(mv(&mut at, MasterMove::HighPass { hz: 15.0, slope: 12 }).unwrap_err().contains("already at 20 Hz"));
+        assert_eq!(at, m);
+
+        // the de-esser turns on, then reaches lower and deeper, then catches more, down to its deepest
+        let mut m = base.clone();
+        ok(&mut m, MasterMove::DeEss { hz: 7000.0, range_db: -4.0 });
+        assert_eq!(m.deess, Some(DeEss { hz: 7000.0, range_db: -4.0, threshold_db: DEESS_THRESHOLD_DB }));
+        ok(&mut m, MasterMove::DeEss { hz: 6000.0, range_db: -6.0 });
+        ok(&mut m, MasterMove::DeEss { hz: 6000.0, range_db: -6.0 });
+        assert_eq!(m.deess, Some(DeEss { hz: 6000.0, range_db: -6.0, threshold_db: DEESS_THRESHOLD_DB - 3.0 }));
+        assert!(valid(&base, &m));
+        m.deess.as_mut().unwrap().threshold_db = -30.0;
+        assert!(mv(&mut m, MasterMove::DeEss { hz: 6000.0, range_db: -6.0 }).unwrap_err().contains("deepest"));
+
+        // a dynamic EQ band, deepened by the next move on the same range until it's as deep as a move takes it
+        let mut m = base.clone();
+        let harsh = MasterMove::DynEq { shape: EqShape::Peak, hz: 3160.0, q: 0.9, range_db: -4.0 };
+        ok(&mut m, harsh.clone());
+        assert_eq!((m.dyn_eq.len(), m.dyn_eq[0].hz, m.dyn_eq[0].range_db, m.dyn_eq[0].threshold_db), (1, 3160.0, -4.0, -4.0));
+        ok(&mut m, MasterMove::DynEq { shape: EqShape::Peak, hz: 3500.0, q: 0.9, range_db: -4.0 });
+        ok(&mut m, MasterMove::DynEq { shape: EqShape::HighShelf, hz: 10000.0, q: 0.7, range_db: -3.0 });
+        assert_eq!(m.dyn_eq.iter().map(|b| (b.kind, b.hz, b.range_db)).collect::<Vec<_>>(), [
+            (EqKind::Peak, 3160.0, -8.0),
+            (EqKind::HighShelf, 10000.0, -3.0)
+        ]);
+        assert!(valid(&base, &m));
+        for _ in 0..6 {
+            let _ = mv(&mut m, harsh.clone());
+        }
+        assert_eq!((m.dyn_eq[0].range_db, m.dyn_eq[0].threshold_db), (-12.0, -12.0));
+        assert!(mv(&mut m, harsh).unwrap_err().contains("deepest"));
+
+        // the exciter turns on with only the band asked for, which then only blends in more
+        let mut m = base.clone();
+        let air = MasterMove::Exciter { hz_lo: 2500.0, hz_hi: 8000.0, mix: 0.5, mode: Saturation::Tape };
+        let did = ok(&mut m, air.clone());
+        assert!(did.contains("turned on"), "{did}");
+        let e = m.exciter.clone().unwrap();
+        assert_eq!(e.bands.iter().map(|b| b.mix).collect::<Vec<_>>(), [0.0, 0.0, 0.5, 0.0]);
+        assert!(valid(&base, &m));
+        assert!(mv(&mut m, air).unwrap_err().contains("already blends in 50 %"));
+        ok(&mut m, MasterMove::Exciter { hz_lo: 9000.0, hz_hi: 16000.0, mix: 0.3, mode: Saturation::Tube });
+        assert_eq!((m.exciter.as_ref().unwrap().bands[3].mix, m.exciter.as_ref().unwrap().bands[3].mode), (0.3, SatMode::Tube));
+
+        // the imager splits where the report measures, and its moves scale a band's width
+        let mut m = base.clone();
+        ok(&mut m, MasterMove::Imager { hz_lo: 5000.0, hz_hi: 20000.0, width: 0.8 });
+        assert_eq!(m.imager, Some(Imager { crossovers_hz: STEREO_CROSSOVERS_HZ.to_vec(), widths: vec![1.0, 1.0, 1.0, 0.8] }));
+        ok(&mut m, MasterMove::Imager { hz_lo: 150.0, hz_hi: 800.0, width: 1.2 });
+        assert_eq!(m.imager.as_ref().unwrap().widths, [1.0, 1.2, 1.0, 0.8]);
+        assert!(valid(&base, &m));
+
+        // one change per stage band and pass
+        let mut done = BTreeSet::new();
+        let mut m = base.clone();
+        master_move(&mut m, &MasterMove::DeEss { hz: 7000.0, range_db: -4.0 }, &mut done, -15.0, false).unwrap();
+        let again = master_move(&mut m, &MasterMove::DeEss { hz: 6000.0, range_db: -6.0 }, &mut done, -15.0, false);
+        assert!(again.unwrap_err().contains("already changed"));
     }
 
     #[test]
@@ -2043,17 +2240,17 @@ mod tests {
         let base = Master::default();
         let mv = |m: MasterMove| Some(m);
         let issues = [
-            issue("muddy", mv(MasterMove::Eq { shape: EqShape::Peak, hz: 250.0, db: -2.0, q: 1.0 })),
-            issue("boxy", mv(MasterMove::Eq { shape: EqShape::Peak, hz: 270.0, db: -1.5, q: 1.0 })),
+            issue("muddy", mv(MasterMove::Eq { shape: EqShape::Peak, hz: 250.0, db: -2.0, q: 1.0, part: Part::Stereo })),
+            issue("boxy", mv(MasterMove::Eq { shape: EqShape::Peak, hz: 270.0, db: -1.5, q: 1.0, part: Part::Stereo })),
             issue("too_wide", mv(MasterMove::Width { width: 0.8 })),
             issue("wide_again", mv(MasterMove::Width { width: 0.9 })),
             issue("loudness_target", mv(MasterMove::Loudness { target_lufs: -17.0 })),
             issue("seam", None),
             issue("true_peak", mv(MasterMove::Limiter { release_ms: None, clip_db: Some(1.5) })),
-            issue("mud_when_loud", mv(MasterMove::Multiband { band: MultibandRegion::LowMid, hz_lo: 200.0, hz_hi: 500.0, reduce_db: 2.0 })),
+            issue("mud_when_loud", mv(MasterMove::DynEq { shape: EqShape::Peak, hz: 320.0, q: 0.9, range_db: -4.0 })),
             issue("wide_low_end", mv(MasterMove::MonoBelow { hz: 120.0 })),
-            issue("harsh_when_loud", mv(MasterMove::Multiband { band: MultibandRegion::HighMid, hz_lo: 3000.0, hz_hi: 6000.0, reduce_db: 2.0 })),
-            issue("mud_again", mv(MasterMove::Multiband { band: MultibandRegion::LowMid, hz_lo: 250.0, hz_hi: 400.0, reduce_db: 2.0 })),
+            issue("harsh_when_loud", mv(MasterMove::DynEq { shape: EqShape::Peak, hz: 3160.0, q: 0.9, range_db: -3.0 })),
+            issue("mud_again", mv(MasterMove::DynEq { shape: EqShape::Peak, hz: 350.0, q: 0.9, range_db: -2.0 })),
             issue("sibilance", mv(MasterMove::DeEss { hz: 7000.0, range_db: -6.0 })),
         ];
         let all: Vec<usize> = (0..issues.len()).collect();
@@ -2064,11 +2261,10 @@ mod tests {
         assert!(skipped[2]["why"].as_str().unwrap().contains("pick this issue"));
         assert_eq!(m.eq, [peak(250.0, -2.0, 1.0)]);
         assert_eq!((m.width, m.mono_below_hz, m.target_lufs, m.limiter.clip_db), (0.8, 120.0, -15.0, 1.5));
-        let mb = m.multiband.clone().unwrap();
-        assert_eq!(mb.crossovers_hz, [150.0, 2500.0, 7000.0]);
-        assert_eq!((mb.bands[1].threshold_db, mb.bands[1].ratio), (-6.3, 2.0), "low mids: 1.1 dB off the loud level, then 3.1");
-        assert!(mb.bands[2].threshold_db < Multiband::default().bands[2].threshold_db);
-        assert!(mb.bands[3].ratio >= 3.0);
+        assert!(skipped[3]["why"].as_str().unwrap().contains("dynamic EQ band at 320 Hz"), "{}", skipped[3]);
+        assert_eq!(m.dyn_eq.iter().map(|b| (b.hz, b.range_db)).collect::<Vec<_>>(), [(320.0, -4.0), (3160.0, -3.0)]);
+        assert_eq!(m.deess, Some(DeEss { hz: 7000.0, range_db: -6.0, threshold_db: DEESS_THRESHOLD_DB }));
+        assert_eq!(m.multiband, base.multiband, "moves leave the multiband to presets and the agent");
         assert!(valid(&base, &m));
 
         // picked by index: the target move is taken, and a move-less issue says why it was not
@@ -2102,6 +2298,7 @@ mod tests {
         wider.width = 1.2;
         let patch = master_patch(&base, &wider).unwrap();
         assert!(patch.width == Some(1.2) && patch.eq.is_none() && patch.multiband.is_none() && patch.limiter.is_none());
+        assert!(patch.dyn_eq.is_none() && patch.deess.is_none() && patch.exciter.is_none() && patch.imager.is_none() && patch.eq_phase.is_none());
     }
 
     #[test]

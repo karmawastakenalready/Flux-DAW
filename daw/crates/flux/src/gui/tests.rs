@@ -452,6 +452,7 @@ fn demo_gui(feed: impl FnOnce(&Project) -> Feed) -> Gui {
     let mut g = Gui::new(demo_shared());
     let f = feed(&g.sh.lock().session.project);
     g.feed = Some(f);
+    g.master_view.inline = true;
     g
 }
 
@@ -553,6 +554,25 @@ fn bottom_tabs() {
     results.unwrap();
 }
 
+/// The analysis of the mixed demo: under the loudness per bar and the spectrum, the master check (the tonal balance
+/// against the balanced masters, each band's correlation, the findings with the score), then the track balance.
+#[test]
+fn analysis_master_check() {
+    let mut h = mixing_stage(1280.0, 640.0, Tab::Analysis, "Flute");
+    settle(&mut h);
+    h.snapshot("bottom_analysis_master");
+    // another style's masters: the check runs again against them, and the project is left as it was
+    let before = log_since(&h, 0).0;
+    let chip = h.get_by_label("Target style, Balanced").rect();
+    h.get_by_label("Target style, Balanced").click();
+    h.run();
+    entry(&h, chip, "Cinematic").expect("Cinematic").click();
+    h.run();
+    assert!(h.query_by_label("Target style, Cinematic").is_some());
+    assert!(h.query_by_label_contains("against the cinematic masters").is_some());
+    assert_eq!(log_since(&h, 0).0, before, "picking a style changes nothing in the project");
+}
+
 /// A cut's slope chip, under its knob, opens a menu; a pick sets the slope. The low cut is off, so its chip is inert.
 #[test]
 fn slope_chip_sets_the_cut_slope() {
@@ -599,13 +619,22 @@ fn mixing_gui(feed: impl FnOnce(&Project) -> Feed) -> Gui {
                 "algorithm": "plate", "decay_s": 1.6, "width": 0.8, "mix": 0.2}}},
         {"op": "set_master", "master": {
             "glue": {"threshold_db": -3, "relative": true, "ratio": 1.8, "attack_ms": 30, "release_ms": 250, "auto_release": true},
-            "eq": [{"kind": "low_shelf", "hz": 90, "db": -1.5}, {"kind": "peak", "hz": 3200, "db": -1, "q": 1.4}, {"kind": "tilt", "hz": 1000, "db": 0.5}],
+            "eq": [{"kind": "high_pass", "hz": 28, "db": 0, "slope": 24}, {"kind": "low_shelf", "hz": 90, "db": -1.5},
+                {"kind": "peak", "hz": 3200, "db": -1, "q": 1.4}, {"kind": "tilt", "hz": 1000, "db": 0.5},
+                {"kind": "high_shelf", "hz": 9000, "db": 1, "q": 0.7, "channel": "side"}],
+            "eq_phase": "linear",
+            "dyn_eq": [{"kind": "peak", "hz": 3150, "q": 1.2, "threshold_db": -4, "ratio": 3, "range_db": -4},
+                {"kind": "low_shelf", "hz": 120, "q": 0.7, "threshold_db": -3, "ratio": 2, "range_db": -3, "channel": "side"}],
+            "deess": {"hz": 6500, "threshold_db": 0, "range_db": -4},
             "limiter": {"lookahead_ms": 5, "release_ms": 120, "auto_release": true, "clip_db": 1.5},
             "multiband": {"crossovers_hz": [150, 2500, 8000], "bands": [
                 {"threshold_db": -3, "ratio": 2, "attack_ms": 30, "release_ms": 200, "gain_db": 0},
-                {"threshold_db": -2, "ratio": 1.5, "attack_ms": 20, "release_ms": 150, "gain_db": 0.5},
-                {"threshold_db": -4, "ratio": 2.5, "attack_ms": 5, "release_ms": 80, "gain_db": -1},
+                {"threshold_db": -2, "ratio": 1.5, "attack_ms": 20, "release_ms": 150, "gain_db": 0.5, "knee_db": 3, "mix": 0.7},
+                {"threshold_db": -4, "ratio": 2.5, "attack_ms": 5, "release_ms": 80, "gain_db": -1, "channel": "side"},
                 {"threshold_db": -6, "ratio": 3, "attack_ms": 2, "release_ms": 60, "gain_db": -1.5}]},
+            "exciter": {"crossovers_hz": [2500, 8000], "bands": [{"drive_db": 3, "mix": 0}, {"drive_db": 6, "mix": 0.2, "mode": "tube"},
+                {"drive_db": 6, "mix": 0.3}]},
+            "imager": {"crossovers_hz": [150, 800, 5000], "widths": [0.6, 1.0, 1.1, 1.25]},
             "mono_below_hz": 120, "width": 1.1,
             "reverb": {"room_size": 0.75, "damping": 0.5, "predelay_ms": 24, "hpf_hz": 220, "lpf_hz": 7500, "return_db": -2,
                 "algorithm": "plate", "decay_s": 2.8, "width": 0.9}}},
@@ -621,7 +650,10 @@ fn mixing_gui(feed: impl FnOnce(&Project) -> Feed) -> Gui {
     flute.dyn_eq_loud_db = vec![-21.3, -27.9];
     flute.deess_loud_db = Some(-29.6);
     r.out.glue_loud_db = Some(-16.8);
-    r.out.multiband_loud_db = vec![-19.5, -17.2, -24.8, -33.1];
+    r.out.master_loud.multiband = vec![-19.5, -17.2, -24.8, -33.1];
+    r.out.master_loud.dyn_eq = vec![-24.6, -31.2];
+    r.out.master_loud.deess = Some(-36.4);
+    r.out.master_loud.exciter = vec![-15.8, -27.5, -38.9];
     {
         let mut st = g.sh.lock();
         st.render_seq = 2;
@@ -669,21 +701,25 @@ fn mixer_with_buses() {
 /// last render measured where relative thresholds count from, then the track's routing.
 #[test]
 fn track_tab_effects() {
-    let mut h = mixing_stage(3270.0, 340.0, Tab::Track, "Flute");
+    let mut h = mixing_stage(3340.0, 340.0, Tab::Track, "Flute");
     settle(&mut h);
     h.snapshot("bottom_track_effects");
 }
 
-/// The master's chain: the limiter under the loudness, the glue, EQ, multiband with each band's loud level, the image
-/// and the shared reverb's algorithm.
+/// Width of the master tab with every stage on.
+const MASTER_W: f32 = 3960.0;
+
+/// The master's chain: the limiter under the loudness, the glue, the linear-phase EQ with a high-pass and a band on
+/// the side signal, the dynamic EQ, de-esser, multiband and exciter with the loud levels they count from, the imager,
+/// the image and the shared reverb's algorithm.
 #[test]
 fn master_tab_chain() {
-    let mut h = mixing_stage(2450.0, 340.0, Tab::Master, "Flute");
+    let mut h = mixing_stage(MASTER_W, 340.0, Tab::Master, "Flute");
     settle(&mut h);
     h.snapshot("bottom_master_chain");
-    // fewer bands keep the low ones and their crossovers
+    // fewer bands keep the low ones and their crossovers (the multiband's counts come first)
     let before = log_since(&h, 0).0;
-    h.get_by_label("3").click();
+    h.query_all_by_label("3").min_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).expect("the multiband's band counts").click();
     h.run();
     let st = h.state().sh.lock();
     let mb = st.session.project.master.multiband.clone().expect("multiband");
@@ -832,10 +868,64 @@ fn a_cell_drag_is_one_edit() {
     assert_eq!(log_since(&h, before).1.len(), 1);
 }
 
+/// The master's newer stages each change in one step the person can undo: the EQ's phase, the exciter's bands, a
+/// dynamic EQ band's part of the stereo signal.
+#[test]
+fn master_stages_edit_in_one_step_each() {
+    let mut h = mixing_stage(MASTER_W, 340.0, Tab::Master, "Flute");
+    let master = |h: &Stage| h.state().sh.lock().session.project.master.clone();
+    assert_eq!(master(&h).eq_phase, flux_core::EqPhase::Linear);
+    let before = log_since(&h, 0).0;
+    h.get_by_label("Linear phase").click();
+    h.run();
+    assert_eq!(master(&h).eq_phase, flux_core::EqPhase::Minimum);
+    // one band: the exciter saturates the whole range
+    h.get_by_label("1").click();
+    h.run();
+    let ex = master(&h).exciter.expect("exciter");
+    assert!(ex.crossovers_hz.is_empty() && ex.bands.len() == 1, "{ex:?}");
+    let chip = h.get_by_label("Dynamic EQ band 1 part, Stereo").rect();
+    h.get_by_label("Dynamic EQ band 1 part, Stereo").click();
+    h.run();
+    entry(&h, chip, "Side").expect("Side").click();
+    h.run();
+    assert_eq!(master(&h).dyn_eq[0].channel, flux_core::Channel::Side);
+    let (len, new) = log_since(&h, before);
+    assert_eq!(len, before + 3, "{new:?}");
+    assert!(new.iter().all(|e| e.0 == Source::Human), "{new:?}");
+}
+
+/// An EQ band can be a high- or low-pass, whose slope takes the place of its gain, and can work on the mid or the
+/// side signal alone.
+#[test]
+fn eq_bands_can_be_passes_on_a_stereo_part() {
+    let mut h = mixing_stage(3340.0, 340.0, Tab::Track, "Flute");
+    let chip = h.get_by_label("EQ band 1 type, Low shelf").rect();
+    h.get_by_label("EQ band 1 type, Low shelf").click();
+    h.run();
+    entry(&h, chip, "High-pass").expect("High-pass").click();
+    h.run();
+    assert!(h.query_by_label("EQ band 1 gain").is_none(), "a slope in place of the gain");
+    let chip = h.get_by_label("EQ band 1 slope, 12 dB per octave").rect();
+    h.get_by_label("EQ band 1 slope, 12 dB per octave").click();
+    h.run();
+    entry(&h, chip, "24 dB per octave").expect("24 dB per octave").click();
+    h.run();
+    let chip = h.get_by_label("EQ band 2 part, Stereo").rect();
+    h.get_by_label("EQ band 2 part, Stereo").click();
+    h.run();
+    entry(&h, chip, "Mid").expect("Mid").click();
+    h.run();
+    let eq = mixer_of(&h, "Flute").eq;
+    assert_eq!((eq[0].kind, eq[0].slope), (flux_core::EqKind::HighPass, 24));
+    assert_eq!(eq[1].channel, flux_core::Channel::Mid);
+}
+
 /// An EQ band's type menu offers notch and tilt; a notch has no gain to set.
 #[test]
 fn eq_bands_can_be_notches_and_tilts() {
-    let mut h = mixing_stage(3270.0, 340.0, Tab::Track, "Flute");
+    // tall enough for the whole menu to open below the chip
+    let mut h = mixing_stage(3340.0, 480.0, Tab::Track, "Flute");
     let chip = h.get_by_label("EQ band 2 type, Peak").rect();
     h.get_by_label("EQ band 2 type, Peak").click();
     h.run();

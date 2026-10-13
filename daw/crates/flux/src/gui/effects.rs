@@ -1,5 +1,5 @@
 //! Editors for the built-in effects of a channel strip and of the master (EQ, compressor, dynamic EQ, de-esser,
-//! reverb, multiband, limiter) and for a track's routing. Each shows the current settings and returns new ones when
+//! reverb, multiband, exciter, imager, limiter) and for a track's routing. Each shows the current settings and returns new ones when
 //! a gesture ends; the panels turn them into commands, so every edit is one undo step in the activity log, as the
 //! agent's are.
 
@@ -8,7 +8,10 @@ use super::theme::*;
 use super::widgets::*;
 use eframe::egui::{self, Align2, Id, Popup, Pos2, Response, RichText, Sense, Ui, vec2};
 use flux_core::commands::{MixerPatch, SendSpec, reaches};
-use flux_core::{Comp, DeEss, Detector, DynBand, EqBand, EqKind, Instrument, Limiter, MbBand, Multiband, Project, ReverbAlgorithm, ReverbFx, ReverbParams, Track, TrackRef};
+use flux_core::{
+    Channel, Comp, DeEss, Detector, DynBand, EqBand, EqKind, Exciter, ExciterBand, Imager, Instrument, Limiter, MbBand, Multiband, Project, ReverbAlgorithm, ReverbFx,
+    ReverbParams, SatMode, Track, TrackRef,
+};
 
 /// Width of a number column in an effect's table.
 const COL_W: f32 = 42.0;
@@ -18,6 +21,10 @@ const KIND_W: f32 = 76.0;
 const BAND_W: f32 = 60.0;
 /// Width of a row's remove button.
 const DEL_W: f32 = 20.0;
+/// Width of a band's stereo-part menu.
+const PART_W: f32 = 58.0;
+/// Width of an exciter band's curve menu.
+const CURVE_W: f32 = 58.0;
 /// Space between the controls of a row.
 const GAP: f32 = 4.0;
 /// Width of the routing menus.
@@ -26,11 +33,15 @@ const MENU_W: f32 = 200.0;
 /// Width of an effect's section while it's off (or has no bands): its switch and a line about what it does.
 pub const OFF_W: f32 = 168.0;
 /// Width of an EQ's band table.
-pub const EQ_W: f32 = KIND_W + 3.0 * COL_W + DEL_W + 4.0 * GAP;
+pub const EQ_W: f32 = KIND_W + 3.0 * COL_W + PART_W + DEL_W + 5.0 * GAP;
 /// Width of a dynamic EQ's band table.
-pub const DYN_EQ_W: f32 = KIND_W + 8.0 * COL_W + DEL_W + 9.0 * GAP;
+pub const DYN_EQ_W: f32 = KIND_W + 8.0 * COL_W + PART_W + DEL_W + 10.0 * GAP;
 /// Width of the multiband compressor's band table.
-pub const MULTIBAND_W: f32 = BAND_W + 7.0 * COL_W + 7.0 * GAP;
+pub const MULTIBAND_W: f32 = BAND_W + 9.0 * COL_W + PART_W + 10.0 * GAP;
+/// Width of the exciter's band table.
+pub const EXCITER_W: f32 = BAND_W + 4.0 * COL_W + CURVE_W + 5.0 * GAP;
+/// Width of the imager's section: its switch and band counts (its table of bands, crossovers and widths is narrower).
+pub const IMAGER_W: f32 = 184.0;
 /// Width of the routing section.
 pub const ROUTING_W: f32 = 236.0;
 
@@ -59,6 +70,9 @@ fn cell_q(v: f64) -> String {
     format!("{v:.2}")
 }
 fn cell_ratio(v: f64) -> String {
+    format!("{v:.1}")
+}
+fn cell_knee(v: f64) -> String {
     format!("{v:.1}")
 }
 fn cell_ms(v: f64) -> String {
@@ -107,12 +121,13 @@ fn row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
-/// A table's column names, numbers' right-aligned over their values.
+/// A table's column names, numbers' right-aligned over their values. Number columns are `COL_W` wide; the others
+/// (names, menus) read from the left.
 fn header(ui: &mut Ui, cols: &[(f32, &str)]) {
     row(ui, |ui| {
         for (i, &(w, name)) in cols.iter().enumerate() {
             let (r, _) = ui.allocate_exact_size(vec2(w, 14.0), Sense::hover());
-            let (x, align) = if i == 0 { (r.left() + 1.0, Align2::LEFT_CENTER) } else { (r.right() - 5.0, Align2::RIGHT_CENTER) };
+            let (x, align) = if i == 0 || w != COL_W { (r.left() + 1.0, Align2::LEFT_CENTER) } else { (r.right() - 5.0, Align2::RIGHT_CENTER) };
             ui.painter().text(Pos2::new(x, r.center().y), align, name, body(10.0), TEXT3);
         }
     });
@@ -173,13 +188,37 @@ fn loud_caption(ui: &mut Ui, relative: bool, loud_db: Option<f64>) {
 // EQ
 
 /// The kinds an EQ band can be, as its menu lists them.
-const EQ_KINDS: [(EqKind, &str, &str); 5] = [
+const EQ_KINDS: [(EqKind, &str, &str); 7] = [
     (EqKind::Peak, "Peak", ""),
     (EqKind::LowShelf, "Low shelf", ""),
     (EqKind::HighShelf, "High shelf", ""),
     (EqKind::Notch, "Notch", "cuts a narrow band"),
     (EqKind::Tilt, "Tilt", "tips the balance"),
+    (EqKind::HighPass, "High-pass", "cuts below"),
+    (EqKind::LowPass, "Low-pass", "cuts above"),
 ];
+
+/// The slopes of a high- or low-pass, as its menu lists them.
+pub const SLOPES: [(u32, &str, &str); 4] = [(12, "12 dB per octave", "gentle"), (24, "24 dB per octave", ""), (36, "36 dB per octave", ""), (48, "48 dB per octave", "steep")];
+
+/// The parts of the stereo signal a band can work on, as its menu lists them.
+const PARTS: [(Channel, &str, &str); 3] = [(Channel::Stereo, "Stereo", "both channels"), (Channel::Mid, "Mid", "the centre"), (Channel::Side, "Side", "the edges")];
+
+fn part_name(c: Channel) -> &'static str {
+    match c {
+        Channel::Stereo => "Stereo",
+        Channel::Mid => "Mid",
+        Channel::Side => "Side",
+    }
+}
+
+/// A band's stereo-part menu, named `label`. Returns a new pick.
+fn part_menu(ui: &mut Ui, label: &str, c: Channel) -> Option<Channel> {
+    let name = part_name(c);
+    let resp = chip(ui, PART_W, name, true, &format!("{label}, {name}"));
+    let resp = resp.on_hover_text("Which part of the stereo signal the band works on: both channels, the mid (the centre) or the side (the edges)");
+    menu_pick(&resp, c, &PARTS, 160.0)
+}
 
 /// The kinds a dynamic EQ band can be.
 const DYN_KINDS: [(EqKind, &str, &str); 3] = [(EqKind::Peak, "Peak", ""), (EqKind::LowShelf, "Low shelf", ""), (EqKind::HighShelf, "High shelf", "")];
@@ -191,6 +230,8 @@ fn kind_name(k: EqKind) -> &'static str {
         EqKind::HighShelf => "High shelf",
         EqKind::Notch => "Notch",
         EqKind::Tilt => "Tilt",
+        EqKind::HighPass => "High-pass",
+        EqKind::LowPass => "Low-pass",
     }
 }
 
@@ -199,15 +240,16 @@ fn free_hz(used: &[f64]) -> f64 {
     [1000.0, 250.0, 4000.0, 100.0, 8000.0, 500.0, 2000.0].into_iter().find(|&f: &f64| used.iter().all(|u| (u / f).log2().abs() > 0.5)).unwrap_or(1000.0)
 }
 
-/// An EQ: a row per band (type, frequency, gain, Q; a notch has no gain and a tilt no Q) and a button adding one.
-/// `name` begins the cells' names ("EQ", "Master EQ"). Returns the new band list.
+/// An EQ: a row per band (type, frequency, gain, Q and the part of the stereo signal it works on; a notch has no
+/// gain, a tilt no Q, and a high- or low-pass a slope in place of both) and a button adding one. `name` begins the
+/// cells' names ("EQ", "Master EQ"). Returns the new band list.
 pub fn eq(ui: &mut Ui, key: &str, name: &str, bands: &[EqBand]) -> Option<Vec<EqBand>> {
     let base = Id::new(key);
     let mut out = None;
     if bands.is_empty() {
         caption(ui, "No bands");
     } else {
-        header(ui, &[(KIND_W, "Type"), (COL_W, "Hz"), (COL_W, "dB"), (COL_W, "Q")]);
+        header(ui, &[(KIND_W, "Type"), (COL_W, "Hz"), (COL_W, "dB"), (COL_W, "Q"), (PART_W, "M/S")]);
         for (i, b) in bands.iter().enumerate() {
             let id = base.with(i);
             let n = i + 1;
@@ -226,13 +268,25 @@ pub fn eq(ui: &mut Ui, key: &str, name: &str, bands: &[EqBand]) -> Option<Vec<Eq
                 if let Some(v) = num(&label("frequency"), 20.0, 20000.0, cell_hz).scale(Scale::Log).show(ui, id.with("hz"), b.hz) {
                     out = set(EqBand { hz: v, ..*b });
                 }
-                let gain = label("gain");
-                if let Some(v) = num(&gain, -24.0, 24.0, cell_db).enabled(b.kind != EqKind::Notch).show(ui, id.with("db"), b.db) {
-                    out = set(EqBand { db: v, ..*b });
+                let pass = matches!(b.kind, EqKind::HighPass | EqKind::LowPass);
+                if pass {
+                    let s = b.slope;
+                    let resp = chip(ui, COL_W, &s.to_string(), true, &label(&format!("slope, {s} dB per octave"))).on_hover_text(format!("The slope: {s} dB per octave"));
+                    if let Some(v) = menu_pick(&resp, s, &SLOPES, 180.0) {
+                        out = set(EqBand { slope: v, ..*b });
+                    }
+                } else {
+                    let gain = label("gain");
+                    if let Some(v) = num(&gain, -24.0, 24.0, cell_db).enabled(b.kind != EqKind::Notch).show(ui, id.with("db"), b.db) {
+                        out = set(EqBand { db: v, ..*b });
+                    }
                 }
                 let q = label("Q");
-                if let Some(v) = num(&q, 0.1, 10.0, cell_q).scale(Scale::Log).enabled(b.kind != EqKind::Tilt).show(ui, id.with("q"), b.q) {
+                if let Some(v) = num(&q, 0.1, 10.0, cell_q).scale(Scale::Log).enabled(b.kind != EqKind::Tilt && !pass).show(ui, id.with("q"), b.q) {
                     out = set(EqBand { q: v, ..*b });
+                }
+                if let Some(c) = part_menu(ui, &label("part"), b.channel) {
+                    out = set(EqBand { channel: c, ..*b });
                 }
                 if remove(ui, "Remove the band (undo brings it back)") {
                     let mut v = bands.to_vec();
@@ -246,22 +300,25 @@ pub fn eq(ui: &mut Ui, key: &str, name: &str, bands: &[EqBand]) -> Option<Vec<Eq
     if button_ex(ui, Some(Icon::Plus), "Band", Kind::Secondary, true).on_hover_text("Add a band: a peak at 0 dB, ready to shape").clicked() {
         let used: Vec<f64> = bands.iter().map(|b| b.hz).collect();
         let mut v = bands.to_vec();
-        v.push(EqBand { kind: EqKind::Peak, hz: free_hz(&used), db: 0.0, q: 0.9 });
+        v.push(EqBand::new(EqKind::Peak, free_hz(&used), 0.0, 0.9));
         out = Some(v);
     }
     out
 }
 
-/// A dynamic EQ: a row per band (type, frequency, Q, threshold, range, ratio, attack, release, and the loud level its
-/// relative threshold counted from at the last render; `loud` per band, None where unmeasured) and a button adding
-/// one. Returns the new band list.
+/// A dynamic EQ: a row per band (type, frequency, Q, threshold, range, ratio, attack, release, the loud level its
+/// relative threshold counted from at the last render, and the part of the stereo signal it works on; `loud` per
+/// band, None where unmeasured) and a button adding one. Returns the new band list.
 pub fn dyn_eq(ui: &mut Ui, key: &str, bands: &[DynBand], loud: &[Option<f64>]) -> Option<Vec<DynBand>> {
     let base = Id::new(key);
     let mut out = None;
     if bands.is_empty() {
         caption(ui, "No bands");
     } else {
-        header(ui, &[(KIND_W, "Type"), (COL_W, "Hz"), (COL_W, "Q"), (COL_W, "Thr dB"), (COL_W, "Range"), (COL_W, "Ratio"), (COL_W, "Att ms"), (COL_W, "Rel ms"), (COL_W, "Loud")]);
+        header(
+            ui,
+            &[(KIND_W, "Type"), (COL_W, "Hz"), (COL_W, "Q"), (COL_W, "Thr dB"), (COL_W, "Range"), (COL_W, "Ratio"), (COL_W, "Att ms"), (COL_W, "Rel ms"), (COL_W, "Loud"), (PART_W, "M/S")],
+        );
         for (i, b) in bands.iter().enumerate() {
             let id = base.with(i);
             let n = i + 1;
@@ -304,6 +361,9 @@ pub fn dyn_eq(ui: &mut Ui, key: &str, bands: &[DynBand], loud: &[Option<f64>]) -
                     (true, Some(l)) => readout(ui, &format!("{l:.1}"), TEXT2, "The band's loud level at the last render (dBFS): its threshold counts from it"),
                     (true, None) => readout(ui, "\u{2013}", TEXT3, "Render to measure the band's loud level, which its threshold counts from"),
                 }
+                if let Some(c) = part_menu(ui, &label("part"), b.channel) {
+                    out = set(DynBand { channel: c, ..*b });
+                }
                 if remove(ui, "Remove the band (undo brings it back)") {
                     let mut v = bands.to_vec();
                     v.remove(i);
@@ -316,7 +376,7 @@ pub fn dyn_eq(ui: &mut Ui, key: &str, bands: &[DynBand], loud: &[Option<f64>]) -
     if button_ex(ui, Some(Icon::Plus), "Band", Kind::Secondary, true).on_hover_text("Add a band that turns its range down while it's loud").clicked() {
         let used: Vec<f64> = bands.iter().map(|b| b.hz).collect();
         let mut v = bands.to_vec();
-        v.push(DynBand { kind: EqKind::Peak, hz: free_hz(&used), q: 2.0, threshold_db: -3.0, relative: true, ratio: 3.0, range_db: -6.0, attack_ms: 5.0, release_ms: 80.0 });
+        v.push(DynBand { kind: EqKind::Peak, hz: free_hz(&used), q: 2.0, threshold_db: -3.0, relative: true, ratio: 3.0, range_db: -6.0, attack_ms: 5.0, release_ms: 80.0, channel: Channel::Stereo });
         out = Some(v);
     }
     out
@@ -425,18 +485,18 @@ pub fn limiter(ui: &mut Ui, key: &str, l: Limiter, kw: f32) -> Option<Limiter> {
 // ---------------------------------------------------------------------------------------------
 // multiband
 
-/// The names of a multiband compressor's bands, low to high.
+/// The names of a multiband effect's bands, low to high.
 fn band_names(n: usize) -> &'static [&'static str] {
     match n {
+        1 => &["All"],
         2 => &["Low", "High"],
         3 => &["Low", "Mid", "High"],
         _ => &["Low", "Low mid", "High mid", "High"],
     }
 }
 
-/// What band `i` covers, in words.
-fn band_range(mb: &Multiband, i: usize) -> String {
-    let x = &mb.crossovers_hz;
+/// What band `i` covers, in words, the bands split at crossovers `x`.
+fn band_range(x: &[f64], i: usize) -> String {
     match (i.checked_sub(1).and_then(|j| x.get(j)), x.get(i)) {
         (None, Some(hi)) => format!("Below {}", f_hz(*hi)),
         (Some(lo), Some(hi)) => format!("{} to {}", f_hz(*lo), f_hz(*hi)),
@@ -445,66 +505,123 @@ fn band_range(mb: &Multiband, i: usize) -> String {
     }
 }
 
-/// One more band: a crossover above the top one, or below the lowest without room there, or else in the middle of
-/// the widest gap; the band it splits off copies the band it came from. False when there is no room anywhere.
-fn add_band(m: &mut Multiband) -> bool {
-    let x = &m.crossovers_hz;
-    let (Some(&first), Some(&last)) = (x.first(), x.last()) else { return false };
-    let (at, hz) = if last * 3.0 <= 16000.0 {
-        (x.len(), last * 3.0)
+/// Where a new crossover goes among crossovers `x` (its index and frequency): above the top one, or below the lowest
+/// without room there, or else in the middle of the widest gap; 2.5 kHz when there are none. None when there is no
+/// room anywhere.
+fn new_crossover(x: &[f64]) -> Option<(usize, f64)> {
+    let (Some(&first), Some(&last)) = (x.first(), x.last()) else { return Some((0, 2500.0)) };
+    if last * 3.0 <= 16000.0 {
+        Some((x.len(), last * 3.0))
     } else if first / 3.0 >= 30.0 {
-        (0, first / 3.0)
+        Some((0, first / 3.0))
     } else {
-        let Some((k, w)) = x.windows(2).enumerate().max_by(|a, b| (a.1[1] / a.1[0]).total_cmp(&(b.1[1] / b.1[0]))) else { return false };
-        if w[1] / w[0] < 2.3 {
-            return false;
-        }
-        (k + 1, (w[0] * w[1]).sqrt())
-    };
-    let Some(&src) = m.bands.get(at) else { return false };
-    m.crossovers_hz.insert(at, hz);
-    m.bands.insert(at, src);
-    true
+        let (k, w) = x.windows(2).enumerate().max_by(|a, b| (a.1[1] / a.1[0]).total_cmp(&(b.1[1] / b.1[0])))?;
+        (w[1] / w[0] >= 2.3).then(|| (k + 1, (w[0] * w[1]).sqrt()))
+    }
 }
 
-/// The multiband with `n` bands (2 to 4): bands added as [`add_band`] does, or the top ones taken away (the band
-/// left at the top keeps its own settings).
+/// Crossovers `x` and their `bands` (one more) with `n` bands: bands added where [`new_crossover`] puts them, each
+/// copying the band it splits off from, or the top ones taken away (the band left at the top keeps its own settings).
+/// Stops short where there is no room for another.
+fn resize_bands<T: Clone>(x: &mut Vec<f64>, bands: &mut Vec<T>, n: usize) {
+    while bands.len() > n && x.pop().is_some() {
+        bands.pop();
+    }
+    while bands.len() < n {
+        let Some((at, hz)) = new_crossover(x) else { break };
+        let Some(src) = bands.get(at).cloned() else { break };
+        x.insert(at, hz);
+        bands.insert(at, src);
+    }
+}
+
+/// The multiband with `n` bands (2 to 4), as [`resize_bands`] makes them.
 fn with_bands(mb: &Multiband, n: usize) -> Multiband {
-    let n = n.clamp(2, 4);
     let mut m = mb.clone();
-    while m.bands.len() > n && m.crossovers_hz.len() > 1 {
-        m.crossovers_hz.pop();
-        m.bands.pop();
-    }
-    while m.bands.len() < n {
-        if !add_band(&mut m) {
-            break;
-        }
-    }
+    resize_bands(&mut m.crossovers_hz, &mut m.bands, n.clamp(2, 4));
     m
 }
 
-/// A multiband compressor: on/off and its number of bands, then a row per band (where it ends, threshold, ratio,
-/// attack, release, gain, and the loud level its threshold counted from at the last render; `loud` per band, None
-/// where unmeasured). Returns the new settings (None = off).
-pub fn multiband(ui: &mut Ui, key: &str, mb: Option<&Multiband>, loud: &[Option<f64>]) -> Option<Option<Multiband>> {
-    let mut out = None;
-    let flip = on_off(ui, mb.is_some(), |ui| {
-        let Some(mb) = mb else { return };
+/// A band's name, what it covers on hover.
+fn band_cell(ui: &mut Ui, name: &str, x: &[f64], i: usize) {
+    let (r, resp) = ui.allocate_exact_size(vec2(BAND_W, CELL_H), Sense::hover());
+    ui.painter().text(Pos2::new(r.left() + 1.0, r.center().y), Align2::LEFT_CENTER, name, medium(11.0), TEXT2);
+    resp.on_hover_text(band_range(x, i));
+}
+
+/// Where band `i` ends: the crossover to the next, kept half an octave from its neighbours (the top band runs to the
+/// top of the range). Returns the new crossovers.
+fn crossover_cell(ui: &mut Ui, label: &str, x: &[f64], i: usize, id: Id) -> Option<Vec<f64>> {
+    let Some(&hz) = x.get(i) else {
+        readout(ui, "\u{2013}", TEXT3, "The top band runs to the top of the range");
+        return None;
+    };
+    let lo = if i == 0 { 30.0 } else { x[i - 1] * 1.51 };
+    let hi = x.get(i + 1).map_or(16000.0, |next| next / 1.51);
+    let v = num(label, lo, hi.max(lo), cell_hz).scale(Scale::Log).show(ui, id, hz)?;
+    let mut x = x.to_vec();
+    x[i] = v;
+    Some(x)
+}
+
+/// A multiband effect's switch and its number of bands (`counts`, each with its hint). Returns a flip, and a new
+/// count picked.
+fn bands_switch(ui: &mut Ui, key: &str, on: bool, n: usize, counts: &[(usize, &str)]) -> (Option<bool>, Option<usize>) {
+    let mut pick = None;
+    let flip = on_off(ui, on, |ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         caption(ui, "Bands");
-        let mut n = mb.bands.len();
-        let counts = [(2, "2", true, "Two bands"), (3, "3", true, "Three bands"), (4, "4", true, "Four bands")];
-        if segmented(ui, &format!("{key}_bands"), &mut n, &counts) {
-            out = Some(Some(with_bands(mb, n)));
+        let mut v = n;
+        let names = ["1", "2", "3", "4"];
+        let segs: Vec<Segment<usize>> = counts.iter().map(|&(k, hint)| (k, names[k.clamp(1, 4) - 1], true, hint)).collect();
+        if segmented(ui, &format!("{key}_bands"), &mut v, &segs) {
+            pick = Some(v);
         }
     });
+    (flip, pick)
+}
+
+/// A band's loud level at the last render, which `what` counts from.
+fn loud_cell(ui: &mut Ui, loud: Option<f64>, what: &str) {
+    match loud {
+        Some(l) => readout(ui, &format!("{l:.1}"), TEXT2, &format!("The band's loud level at the last render (dBFS): its {what} counts from it")),
+        None => readout(ui, "\u{2013}", TEXT3, &format!("Render to measure the band's loud level, which its {what} counts from")),
+    }
+}
+
+/// The band counts of the multiband compressor and the imager.
+const TWO_TO_FOUR: [(usize, &str); 3] = [(2, "Two bands"), (3, "Three bands"), (4, "Four bands")];
+
+/// A multiband compressor: on/off and its number of bands, then a row per band (where it ends, threshold, ratio,
+/// knee, attack, release, mix, gain, the loud level its threshold counted from at the last render, and the part of
+/// the stereo signal it compresses; `loud` per band, None where unmeasured). Returns the new settings (None = off).
+pub fn multiband(ui: &mut Ui, key: &str, mb: Option<&Multiband>, loud: &[Option<f64>]) -> Option<Option<Multiband>> {
+    let mut out = None;
+    let (flip, n) = bands_switch(ui, key, mb.is_some(), mb.map_or(0, |m| m.bands.len()), &TWO_TO_FOUR);
+    if let (Some(n), Some(mb)) = (n, mb) {
+        out = Some(Some(with_bands(mb, n)));
+    }
     if let Some(on) = flip {
         out = Some(on.then(|| mb.cloned().unwrap_or_default()));
     }
     let Some(mb) = mb else { return out };
     ui.add_space(6.0);
-    header(ui, &[(BAND_W, "Band"), (COL_W, "To Hz"), (COL_W, "Thr dB"), (COL_W, "Ratio"), (COL_W, "Att ms"), (COL_W, "Rel ms"), (COL_W, "Gain"), (COL_W, "Loud")]);
+    header(
+        ui,
+        &[
+            (BAND_W, "Band"),
+            (COL_W, "To Hz"),
+            (COL_W, "Thr dB"),
+            (COL_W, "Ratio"),
+            (COL_W, "Knee"),
+            (COL_W, "Att ms"),
+            (COL_W, "Rel ms"),
+            (COL_W, "Mix"),
+            (COL_W, "Gain"),
+            (COL_W, "Loud"),
+            (PART_W, "M/S"),
+        ],
+    );
     let names = band_names(mb.bands.len());
     let base = Id::new(key);
     for (i, b) in mb.bands.iter().enumerate() {
@@ -517,21 +634,9 @@ pub fn multiband(ui: &mut Ui, key: &str, mb: Option<&Multiband>, loud: &[Option<
         };
         let label = |what: &str| format!("Multiband {} band {what}", name.to_lowercase());
         row(ui, |ui| {
-            let (r, resp) = ui.allocate_exact_size(vec2(BAND_W, CELL_H), Sense::hover());
-            ui.painter().text(Pos2::new(r.left() + 1.0, r.center().y), Align2::LEFT_CENTER, name, medium(11.0), TEXT2);
-            resp.on_hover_text(band_range(mb, i));
-            // where the band ends: the crossover to the next, kept half an octave from its neighbours
-            match mb.crossovers_hz.get(i) {
-                Some(&x) => {
-                    let lo = if i == 0 { 30.0 } else { mb.crossovers_hz[i - 1] * 1.51 };
-                    let hi = mb.crossovers_hz.get(i + 1).map_or(16000.0, |next| next / 1.51);
-                    if let Some(v) = num(&label("crossover"), lo, hi.max(lo), cell_hz).scale(Scale::Log).show(ui, id.with("x"), x) {
-                        let mut m = mb.clone();
-                        m.crossovers_hz[i] = v;
-                        out = Some(Some(m));
-                    }
-                }
-                None => readout(ui, "\u{2013}", TEXT3, "The top band runs to the top of the range"),
+            band_cell(ui, name, &mb.crossovers_hz, i);
+            if let Some(x) = crossover_cell(ui, &label("crossover"), &mb.crossovers_hz, i, id.with("x")) {
+                out = Some(Some(Multiband { crossovers_hz: x, ..mb.clone() }));
             }
             if let Some(v) = num(&label("threshold"), -24.0, 6.0, cell_db).show(ui, id.with("thr"), b.threshold_db) {
                 out = set(MbBand { threshold_db: v, ..*b });
@@ -539,18 +644,118 @@ pub fn multiband(ui: &mut Ui, key: &str, mb: Option<&Multiband>, loud: &[Option<
             if let Some(v) = num(&label("ratio"), 1.0, 10.0, cell_ratio).scale(Scale::Log).show(ui, id.with("ratio"), b.ratio) {
                 out = set(MbBand { ratio: v, ..*b });
             }
+            if let Some(v) = num(&label("knee"), 0.0, 24.0, cell_knee).show(ui, id.with("knee"), b.knee_db) {
+                out = set(MbBand { knee_db: v, ..*b });
+            }
             if let Some(v) = num(&label("attack"), 0.1, 200.0, cell_ms).scale(Scale::Log).show(ui, id.with("att"), b.attack_ms) {
                 out = set(MbBand { attack_ms: v, ..*b });
             }
             if let Some(v) = num(&label("release"), 5.0, 2000.0, cell_ms).scale(Scale::Log).show(ui, id.with("rel"), b.release_ms) {
                 out = set(MbBand { release_ms: v, ..*b });
             }
+            if let Some(v) = num(&label("mix"), 0.0, 1.0, cell_pct).parse(parse_pct).show(ui, id.with("mix"), b.mix) {
+                out = set(MbBand { mix: v, ..*b });
+            }
             if let Some(v) = num(&label("gain"), -12.0, 12.0, cell_db).show(ui, id.with("gain"), b.gain_db) {
                 out = set(MbBand { gain_db: v, ..*b });
             }
-            match loud.get(i).copied().flatten() {
-                Some(l) => readout(ui, &format!("{l:.1}"), TEXT2, "The band's loud level at the last render (dBFS): its threshold counts from it"),
-                None => readout(ui, "\u{2013}", TEXT3, "Render to measure the band's loud level, which its threshold counts from"),
+            loud_cell(ui, loud.get(i).copied().flatten(), "threshold");
+            if let Some(c) = part_menu(ui, &label("part"), b.channel) {
+                out = set(MbBand { channel: c, ..*b });
+            }
+        });
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------------------------
+// exciter and imager
+
+/// The curves an exciter band can saturate with.
+const CURVES: [(SatMode, &str, &str); 2] = [(SatMode::Tape, "Tape", "clear and bright"), (SatMode::Tube, "Tube", "warmer and fuller")];
+
+/// An exciter: on/off and its number of bands, then a row per band (where it ends, drive, mix, curve, and the loud
+/// level its drive counted from at the last render; `loud` per band, None where unmeasured). Returns the new settings
+/// (None = off).
+pub fn exciter(ui: &mut Ui, key: &str, ex: Option<&Exciter>, loud: &[Option<f64>]) -> Option<Option<Exciter>> {
+    let mut out = None;
+    let counts = [(1, "One band: the whole range"), (2, "Two bands"), (3, "Three bands"), (4, "Four bands")];
+    let (flip, n) = bands_switch(ui, key, ex.is_some(), ex.map_or(0, |e| e.bands.len()), &counts);
+    if let (Some(n), Some(ex)) = (n, ex) {
+        let mut e = ex.clone();
+        resize_bands(&mut e.crossovers_hz, &mut e.bands, n.clamp(1, 4));
+        out = Some(Some(e));
+    }
+    if let Some(on) = flip {
+        out = Some(on.then(|| ex.cloned().unwrap_or_default()));
+    }
+    let Some(ex) = ex else { return out };
+    ui.add_space(6.0);
+    header(ui, &[(BAND_W, "Band"), (COL_W, "To Hz"), (COL_W, "Drive"), (COL_W, "Mix"), (CURVE_W, "Curve"), (COL_W, "Loud")]);
+    let names = band_names(ex.bands.len());
+    let base = Id::new(key);
+    for (i, b) in ex.bands.iter().enumerate() {
+        let id = base.with(i);
+        let name = names.get(i).copied().unwrap_or("Band");
+        let set = |nb: ExciterBand| {
+            let mut e = ex.clone();
+            e.bands[i] = nb;
+            Some(Some(e))
+        };
+        let label = |what: &str| format!("Exciter {} band {what}", name.to_lowercase());
+        row(ui, |ui| {
+            band_cell(ui, name, &ex.crossovers_hz, i);
+            if let Some(x) = crossover_cell(ui, &label("crossover"), &ex.crossovers_hz, i, id.with("x")) {
+                out = Some(Some(Exciter { crossovers_hz: x, ..ex.clone() }));
+            }
+            if let Some(v) = num(&label("drive"), -12.0, 24.0, cell_db).show(ui, id.with("drive"), b.drive_db) {
+                out = set(ExciterBand { drive_db: v, ..*b });
+            }
+            if let Some(v) = num(&label("mix"), 0.0, 1.0, cell_pct).parse(parse_pct).show(ui, id.with("mix"), b.mix) {
+                out = set(ExciterBand { mix: v, ..*b });
+            }
+            let curve = CURVES.iter().find(|c| c.0 == b.mode).map_or("Tape", |c| c.1);
+            let resp = chip(ui, CURVE_W, curve, true, &label(&format!("curve, {curve}"))).on_hover_text("Tape adds odd harmonics, clear and bright; tube adds even ones too, warmer and fuller");
+            if let Some(m) = menu_pick(&resp, b.mode, &CURVES, 180.0) {
+                out = set(ExciterBand { mode: m, ..*b });
+            }
+            loud_cell(ui, loud.get(i).copied().flatten(), "drive");
+        });
+    }
+    out
+}
+
+/// A multiband imager: on/off and its number of bands, then a row per band (where it ends and its width). Returns the
+/// new settings (None = off).
+pub fn imager(ui: &mut Ui, key: &str, im: Option<&Imager>) -> Option<Option<Imager>> {
+    let mut out = None;
+    let (flip, n) = bands_switch(ui, key, im.is_some(), im.map_or(0, |m| m.widths.len()), &TWO_TO_FOUR);
+    if let (Some(n), Some(im)) = (n, im) {
+        let mut m = im.clone();
+        resize_bands(&mut m.crossovers_hz, &mut m.widths, n.clamp(2, 4));
+        out = Some(Some(m));
+    }
+    if let Some(on) = flip {
+        out = Some(on.then(|| im.cloned().unwrap_or_default()));
+    }
+    let Some(im) = im else { return out };
+    ui.add_space(6.0);
+    header(ui, &[(BAND_W, "Band"), (COL_W, "To Hz"), (COL_W, "Width")]);
+    let names = band_names(im.widths.len());
+    let base = Id::new(key);
+    for (i, &w) in im.widths.iter().enumerate() {
+        let id = base.with(i);
+        let name = names.get(i).copied().unwrap_or("Band");
+        let label = |what: &str| format!("Imager {} band {what}", name.to_lowercase());
+        row(ui, |ui| {
+            band_cell(ui, name, &im.crossovers_hz, i);
+            if let Some(x) = crossover_cell(ui, &label("crossover"), &im.crossovers_hz, i, id.with("x")) {
+                out = Some(Some(Imager { crossovers_hz: x, ..im.clone() }));
+            }
+            if let Some(v) = num(&label("width"), 0.0, 2.0, cell_pct).parse(parse_pct).show(ui, id.with("w"), w) {
+                let mut m = im.clone();
+                m.widths[i] = v;
+                out = Some(Some(m));
             }
         });
     }
@@ -801,7 +1006,7 @@ mod tests {
     use flux_core::AuxSend;
 
     fn mb(x: &[f64]) -> Multiband {
-        let band = MbBand { threshold_db: -3.0, ratio: 2.0, attack_ms: 10.0, release_ms: 100.0, gain_db: 0.0 };
+        let band = MbBand::new(-3.0, 2.0, 10.0, 100.0);
         Multiband { crossovers_hz: x.to_vec(), bands: vec![band; x.len() + 1] }
     }
 

@@ -95,13 +95,56 @@ fn clip_props(extra: Value) -> Map<String, Value> {
 
 fn eq_s() -> Value {
     json!({"type": "array", "description": "EQ bands, applied in order (replaces the whole list)", "items": obj(json!({
-        "kind": {"enum": ["peak", "low_shelf", "high_shelf", "notch", "tilt"], "description": "peak: a bell at hz; low_shelf / \
-high_shelf: everything below / above hz; notch: cuts a narrow band out at hz (a ringing resonance; q sets how narrow, db is ignored); \
-tilt: db above hz and -db below through gentle shelves (q ignored), to make the whole sound brighter or darker"},
-        "hz": {"type": "number", "minimum": 20, "maximum": 20000},
-        "db": {"type": "number", "description": "gain (notch: ignored, give 0); cuts are safer than boosts, and a few dB is usually enough"},
-        "q": {"type": "number", "description": "width: 0.5-0.9 broad (default 0.9), 2-4 narrow (a resonance), 6-12 for a notch; shelves 0.5-1"}}),
-        &["kind", "hz", "db"])})
+        "kind": {"enum": ["peak", "low_shelf", "high_shelf", "notch", "tilt", "high_pass", "low_pass"], "description": "peak: a bell at \
+hz; low_shelf / high_shelf: everything below / above hz; notch: cuts a narrow band out at hz (a ringing resonance; q sets how narrow, \
+db is ignored); tilt: db above hz and -db below through gentle shelves (q ignored), to make the whole sound brighter or darker; \
+high_pass / low_pass: removes everything below / above hz at `slope` (db and q ignored): a 20-30 Hz high-pass takes out rumble and \
+DC that only cost headroom"},
+        "hz": {"type": "number", "minimum": 10, "maximum": 20000},
+        "db": {"type": "number", "description": "gain (default 0; notch and passes have none); cuts are safer than boosts, and a few dB is usually enough"},
+        "q": {"type": "number", "description": "width: 0.5-0.9 broad (default 0.9), 2-4 narrow (a resonance), 6-12 for a notch; shelves 0.5-1"},
+        "slope": {"type": "integer", "enum": [12, 24, 36, 48], "description": "high_pass / low_pass: dB per octave (default 12)"},
+        "channel": channel_s()}),
+        &["kind", "hz"])})
+}
+
+/// Which part of the stereo signal a band works on.
+fn channel_s() -> Value {
+    json!({"enum": ["stereo", "mid", "side"], "description": "stereo (default): both channels; mid: only what's in the centre \
+(L+R: the bass, kick, lead, vocal); side: only what's wide (L-R: reverb, wide pads, doubled guitars). A side high shelf brightens \
+the width without touching the lead; a side low cut tightens the low end"})
+}
+
+/// Dynamic EQ bands, on a track or the master.
+fn dyn_eq_s() -> Value {
+    json!({"type": "array", "description": "dynamic EQ bands, after the compressor (replaces the list): each turns its range down \
+only while that range is loud, by at most range_db. For a resonance or boomy note that pops out, or harshness that comes and goes, where a \
+static cut would thin out the rest of the time", "items": obj(json!({
+        "kind": {"enum": ["peak", "low_shelf", "high_shelf"]},
+        "hz": {"type": "number", "minimum": 20, "maximum": 20000}, "q": {"type": "number", "description": "default 0.9; 2-4 for a resonance"},
+        "threshold_db": {"type": "number", "description": "where it starts acting: dB under the band's loud level when relative (render \
+shows it under the track's dyn_eq, or the master_chain's), else dBFS; -3 to -6 catches the loud moments"},
+        "relative": {"type": "boolean", "description": "default true"},
+        "ratio": {"type": "number", "minimum": 1, "description": "default 3"},
+        "range_db": {"type": "number", "minimum": -24, "maximum": 0, "description": "the most it turns the band down (default -6)"},
+        "attack_ms": {"type": "number", "description": "default 5"}, "release_ms": {"type": "number", "description": "default 80"},
+        "channel": channel_s()}),
+        &["kind", "hz", "threshold_db"])})
+}
+
+/// A de-esser, on a track or the master.
+fn deess_s(after: &str) -> Value {
+    json!({"description": format!("de-esser after {after}: turns the band above hz down while it's loud (sibilance, hats and \
+cymbals, pick and bow noise, bright leads); null removes it"), "anyOf": [{"type": "null"}, obj(json!({
+        "hz": {"type": "number", "minimum": 1000, "maximum": 16000, "description": "where the band starts: 5000-8000 (default 6000); lower for harsh leads"},
+        "threshold_db": {"type": "number", "description": "dB under the band's loud level (render shows it under the track's deess, or the master_chain's); lower catches more (default -6)"},
+        "range_db": {"type": "number", "minimum": -24, "maximum": 0, "description": "the most it turns the band down (default -6)"}}), &[])]})
+}
+
+/// Crossovers that split the master into bands.
+fn crossovers_s(min: usize) -> Value {
+    json!({"type": "array", "items": {"type": "number", "minimum": 30, "maximum": 16000}, "minItems": min, "maxItems": 3,
+        "description": format!("ascending, each at least half an octave (x1.5) above the last: {min}-3 crossovers make {}-4 bands", min + 1)})
 }
 
 fn comp_s() -> Value {
@@ -172,23 +215,8 @@ fn mixer_s() -> Value {
             "duck": {"description": "sidechain ducking keyed by another track's note-ons; null removes it", "anyOf": [{"type": "null"}, obj(json!({
                 "source_track": track_ref(), "depth_db": {"type": "number"}, "release_ms": {"type": "number"}}), &["source_track", "depth_db", "release_ms"])]},
             "reverb_send": {"type": "number", "minimum": 0, "maximum": 1, "description": "send to the master's shared reverb"},
-            "dyn_eq": {"type": "array", "description": "dynamic EQ bands, after the compressor (replaces the list): each turns its range down \
-only while that range is loud, by at most range_db. For a resonance or boomy note that pops out, or harshness that comes and goes, where a \
-static cut would thin out the rest of the time", "items": obj(json!({
-                "kind": {"enum": ["peak", "low_shelf", "high_shelf"]},
-                "hz": {"type": "number", "minimum": 20, "maximum": 20000}, "q": {"type": "number", "description": "default 0.9; 2-4 for a resonance"},
-                "threshold_db": {"type": "number", "description": "where it starts acting: dB under the band's loud level when relative (render \
-shows it under the track's dyn_eq), else dBFS; -3 to -6 catches the loud moments"},
-                "relative": {"type": "boolean", "description": "default true"},
-                "ratio": {"type": "number", "minimum": 1, "description": "default 3"},
-                "range_db": {"type": "number", "minimum": -24, "maximum": 0, "description": "the most it turns the band down (default -6)"},
-                "attack_ms": {"type": "number", "description": "default 5"}, "release_ms": {"type": "number", "description": "default 80"}}),
-                &["kind", "hz", "threshold_db"])},
-            "deess": {"description": "de-esser after the dynamic EQ: turns the band above hz down while it's loud (sibilance, hats and \
-cymbals, pick and bow noise, bright leads); null removes it", "anyOf": [{"type": "null"}, obj(json!({
-                "hz": {"type": "number", "minimum": 1000, "maximum": 16000, "description": "where the band starts: 5000-8000 (default 6000); lower for harsh leads"},
-                "threshold_db": {"type": "number", "description": "dB under the band's loud level (render shows it under the track's deess); lower catches more (default -6)"},
-                "range_db": {"type": "number", "minimum": -24, "maximum": 0, "description": "the most it turns the band down (default -6)"}}), &[])]},
+            "dyn_eq": dyn_eq_s(),
+            "deess": deess_s("the dynamic EQ"),
             "reverb": {"description": "a reverb in the strip, after the delay; null removes it. On an aux return (a bus that tracks send to) set \
 mix 1 so the bus returns only the reverb; on a track, mix 0.1-0.3. Settings left out take their defaults", "anyOf": [{"type": "null"}, obj(Value::Object(reverb_props(json!({
                 "mix": {"type": "number", "minimum": 0, "maximum": 1, "description": "the reverb's share of the output: 1 = only the reverb (default), 0.2 = mostly dry"}}))),
@@ -208,6 +236,12 @@ fn master_s() -> Value {
         json!({
             "glue": comp_s(),
             "eq": eq_s(),
+            "eq_phase": {"enum": ["minimum", "linear"], "description": "the master EQ's filters: minimum (default) shifts the phase a \
+little around each band, as an analog EQ does; linear keeps attacks exactly as mixed, for broad tonal moves and mid/side bands, at about \
+0.1 s more latency live and a little pre-ringing before sharp attacks where a band is narrow. High-passes always run in minimum phase \
+(linear phase can't follow them that low); keep narrow bands under 40 Hz in minimum phase for the same reason"},
+            "dyn_eq": dyn_eq_s(),
+            "deess": deess_s("the master's dynamic EQ"),
             "target_lufs": {"type": "number", "description": "integrated loudness target (default -15, Roblox's); the master drives the mix there"},
             "ceiling_dbtp": {"type": "number", "maximum": 0, "description": "true-peak ceiling (default -1)"},
             "reverb": {"description": "the shared reverb the tracks' reverb_send feeds. Replaces the whole reverb: settings left \
@@ -220,18 +254,39 @@ ceiling. Replaces the whole limiter: fields left out take their defaults, not th
                 "release_ms": {"type": "number", "minimum": 0, "maximum": 2000, "description": "how slowly the gain recovers (default 80; 150-300 smoother on sustained music, 30-60 punchier)"},
                 "auto_release": {"type": "boolean", "description": "short peaks recover fast, sustained limiting at release_ms (default true)"},
                 "clip_db": {"type": "number", "minimum": 0, "maximum": 6, "description": "the most a soft-clipping stage takes off the sharpest peaks before the lookahead stage (default 1; 1.5-2.5 louder and denser drums, 0 off)"}}},
-            "multiband": {"description": "multiband compressor after the master EQ: the master split at the crossovers, each band compressed on \
-its own, so a region that flares up (boomy bass notes, harsh peaks) is held back only then. null removes it. A good start: crossovers \
-[150, 2500, 8000], thresholds -3 to -4, ratios 1.6-2", "anyOf": [{"type": "null"}, obj(json!({
-                "crossovers_hz": {"type": "array", "items": {"type": "number", "minimum": 30, "maximum": 16000}, "minItems": 1, "maxItems": 3,
-                    "description": "ascending, each at least half an octave (x1.5) above the last: 1-3 crossovers make 2-4 bands"},
+            "multiband": {"description": "multiband compressor after the master EQ, dynamic EQ and de-esser: the master split at the \
+crossovers, each band compressed on its own, so a region that flares up (boomy bass notes, harsh peaks) is held back only then. null \
+removes it. A good start: crossovers [150, 2500, 8000], thresholds -3 to -4, ratios 1.6-2", "anyOf": [{"type": "null"}, obj(json!({
+                "crossovers_hz": crossovers_s(1),
                 "bands": {"type": "array", "description": "one per band, low to high", "items": obj(json!({
                     "threshold_db": {"type": "number", "description": "dB under the band's loud level (render shows it in master_chain): -3 to -6"},
                     "ratio": {"type": "number", "minimum": 1}, "attack_ms": {"type": "number", "description": "default 15; slower in the lows (30), faster in the highs (5)"},
                     "release_ms": {"type": "number", "description": "default 150"},
-                    "gain_db": {"type": "number", "minimum": -12, "maximum": 12, "description": "the band's level after it (default 0)"}}),
+                    "gain_db": {"type": "number", "minimum": -12, "maximum": 12, "description": "the band's level after it (default 0)"},
+                    "knee_db": {"type": "number", "minimum": 0, "maximum": 24, "description": "soft knee: the ratio eases in over this many dB (default 6; 10-12 more transparent, 0 hard)"},
+                    "mix": {"type": "number", "minimum": 0, "maximum": 1, "description": "parallel compression: the compressed band's share (default 1); 0.4-0.6 adds density and keeps the attacks"},
+                    "channel": channel_s()}),
                     &["threshold_db", "ratio"])}}), &["crossovers_hz", "bands"])]},
-            "mono_below_hz": {"type": "number", "minimum": 0, "maximum": 500, "description": "the master is mono below this (after the multiband), 0 = off: 100-150 keeps a wide low end from wandering and wasting headroom"},
+            "exciter": {"description": "multiband exciter after the multiband compressor: each band saturated on its own (4x \
+oversampled) and blended in, adding harmonics that bring out a dull or thin range without raising its noise and harshness as an EQ \
+boost would. null removes it. A gentle start: {} (its defaults: the top two bands at mix 0.15 and 0.25 add air and presence)",
+                "anyOf": [{"type": "null"}, obj(json!({
+                "crossovers_hz": {"type": "array", "items": {"type": "number", "minimum": 30, "maximum": 16000}, "maxItems": 3,
+                    "description": "ascending, each at least half an octave (x1.5) above the last: 0-3 crossovers make 1-4 bands (default [150, 2500, 8000])"},
+                "bands": {"type": "array", "description": "one per band, low to high", "items": obj(json!({
+                    "drive_db": {"type": "number", "minimum": -12, "maximum": 24, "description": "how hard the band's loud passages drive \
+the curve, counted from the band's loud level (render shows it in master_chain): 0 rounds only the peaks, 6 (default) is warm, 12 clearly saturated"},
+                    "mix": {"type": "number", "minimum": 0, "maximum": 1, "description": "the saturated band's share (0 = untouched): 0.1-0.3 is usually plenty"},
+                    "mode": {"enum": ["tape", "tube"], "description": "tape (default): odd harmonics, clear and bright, for presence and \
+air; tube: even and odd harmonics, warmer and fuller, for a thin low-mid or bass that needs to be heard on small speakers"}}),
+                    &["mix"])}}), &[])]},
+            "imager": {"description": "multiband stereo imager after the exciter: each band's width on its own (the side signal \
+scaled), so the lows can be narrowed and the highs widened in one place. null removes it. E.g. crossovers [150, 2500, 8000], widths \
+[0.6, 1.0, 1.1, 1.2]", "anyOf": [{"type": "null"}, obj(json!({
+                "crossovers_hz": crossovers_s(1),
+                "widths": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 2}, "description": "one per band, low to \
+high: 0 mono, 1 as mixed, up to 2. Widening past 1.3 thins the mono fold-down"}}), &["crossovers_hz", "widths"])]},
+            "mono_below_hz": {"type": "number", "minimum": 0, "maximum": 500, "description": "the master is mono below this (after the imager), 0 = off: 100-150 keeps a wide low end from wandering and wasting headroom"},
             "width": {"type": "number", "minimum": 0, "maximum": 2, "description": "the master's stereo width (0 mono, 1 as mixed, default)"},
         }),
         &[],
@@ -482,11 +537,14 @@ Returns loudness, true peak, loop-seam error and per-track status. Waits for com
 balance, per-track brightness/attack (hi3k_db, attack_db) and (bars=true) per-bar loudness, plus automatic warnings \
 (including harsh or sharp-attack tracks, which this project's listener dislikes).", json!({
             "sections": {"type": "boolean"}, "balance": {"type": "boolean"}, "bands": {"type": "boolean"}, "bars": {"type": "boolean"}}), &[]),
-        tool("export", "Write the master: wav16 (TPDF-dithered), wav32 (float) or flac (16-bit). Re-renders first if the render is stale. \
+        tool("export", "Write the master: wav16 (dithered), wav32 (float) or flac (16-bit, dithered). Re-renders first if the render is stale. \
 Reports file size and Roblox upload limits. layers=true also writes one file per track layer (base, melody, percussion... set with \
 update_track layer), which sum to the master, plus a <name>.layers.json manifest (tempo, loop length, section times) for the game. A layer carried by an instrument whose license forbids exposing it (Spectrasonics: Omnisphere, Keyscape, Trilian) is refused: give that layer other instruments too.", json!({
             "path": {"type": "string"}, "format": {"enum": ["wav16", "wav32", "flac"]}, "render_if_stale": {"type": "boolean"},
-            "layers": {"type": "boolean"}}), &[]),
+            "layers": {"type": "boolean"},
+            "dither": {"enum": ["tpdf", "shaped"], "description": "how 16-bit files are dithered: tpdf (default) is flat noise at \
+-96 dBFS; shaped moves that noise out of 1-6 kHz, where hearing is sharpest, into the top octave (about 20 dB quieter where it \
+counts), for songs with quiet passages, fade-outs or long reverb tails. Loudness and true peak don't change; a FLAC grows about 5-7%"}}), &[]),
         tool("transport", "Play on this computer's speakers (for the human), stop, seek, or get the playhead. mode=live plays the current \
 project straight away through the live engine (edits are heard while playing); mode=render plays the last offline render (the exact master).", json!({
             "action": {"enum": ["play", "stop", "seek", "status"]},
@@ -1606,14 +1664,20 @@ fn dynamics_json(m: &Mixer, t: &flux_engine::render::TrackStat, o: &mut Value) {
 
 /// The edges of the multiband compressor's bands, low to high (Hz).
 pub(crate) fn multiband_edges(mb: &flux_core::Multiband) -> Vec<(f64, f64)> {
+    split_edges(&mb.crossovers_hz)
+}
+
+/// The edges of the bands a split at `crossovers_hz` makes, low to high (Hz).
+pub(crate) fn split_edges(crossovers_hz: &[f64]) -> Vec<(f64, f64)> {
     let mut e = vec![20.0];
-    e.extend(&mb.crossovers_hz);
+    e.extend(crossovers_hz);
     e.push(20000.0);
     e.windows(2).map(|w| (w[0], w[1])).collect()
 }
 
 /// What the master's dynamics did in a render: the loudness drive, the limiter's largest gain reduction and the
-/// ceiling it settled on, and the glue's and each multiband band's loud level with the threshold it makes (dBFS).
+/// ceiling it settled on, and the loud level each relative stage counted from with the threshold it makes (dBFS):
+/// the glue, the dynamic EQ bands, the de-esser and the multiband bands; and each exciter band's loud level.
 pub(crate) fn master_chain_json(p: &Project, out: &flux_engine::RenderOutput) -> Value {
     let m = &p.master;
     let mut o = json!({"drive_db": r1(out.drive_db), "limiter_max_gr_db": r1(out.limiter_gr_db), "limiter_ceiling_dbtp": r1(out.limiter_ceiling_db)});
@@ -1630,9 +1694,37 @@ pub(crate) fn master_chain_json(p: &Project, out: &flux_engine::RenderOutput) ->
             .enumerate()
             .map(|(i, ((lo, hi), b))| {
                 let mut x = json!({"band": format!("{lo:.0}-{hi:.0} Hz"), "ratio": b.ratio});
-                if let Some(&loud) = out.multiband_loud_db.get(i) {
+                if let Some(&loud) = out.master_loud.multiband.get(i) {
                     x["loud_db"] = r1(loud);
                     x["threshold_dbfs"] = r1(loud + b.threshold_db);
+                }
+                x
+            })
+            .collect::<Vec<_>>());
+    }
+    if !m.dyn_eq.is_empty() {
+        o["dyn_eq"] = json!(m
+            .dyn_eq
+            .iter()
+            .enumerate()
+            .map(|(i, b)| match out.master_loud.dyn_eq.get(i) {
+                Some(&loud) if b.relative => json!({"hz": b.hz, "loud_db": r1(loud), "threshold_dbfs": r1(loud + b.threshold_db)}),
+                _ => json!({"hz": b.hz, "threshold_dbfs": r1(b.threshold_db)}),
+            })
+            .collect::<Vec<_>>());
+    }
+    if let (Some(d), Some(loud)) = (&m.deess, out.master_loud.deess) {
+        o["deess"] = json!({"hz": d.hz, "loud_db": r1(loud), "threshold_dbfs": r1(loud + d.threshold_db)});
+    }
+    if let Some(e) = &m.exciter {
+        o["exciter"] = json!(split_edges(&e.crossovers_hz)
+            .iter()
+            .zip(&e.bands)
+            .enumerate()
+            .map(|(i, ((lo, hi), b))| {
+                let mut x = json!({"band": format!("{lo:.0}-{hi:.0} Hz"), "mix": b.mix});
+                if let Some(&loud) = out.master_loud.exciter.get(i) {
+                    x["loud_db"] = r1(loud);
                 }
                 x
             })
@@ -1763,15 +1855,18 @@ or cut the highs", tb.hi3k_db))
     }
 }
 
-/// Write audio in an export format. FLAC is 16-bit with the same dither as wav16, tagged with `title`,
-/// and, for loops, with LOOPSTART / LOOPLENGTH over the whole file; every file is decoded again and its
-/// MD5 checked.
-fn write_audio(format: &str, sr: u32, buf: &(Vec<f32>, Vec<f32>), path: &Path, title: &str, looped: bool) -> Result<()> {
+/// Write audio in an export format. wav16 and FLAC are 16-bit with TPDF dither (noise-shaped with `shaped`); FLAC is
+/// tagged with `title` and, for loops, with LOOPSTART / LOOPLENGTH over the whole file; every file is decoded again
+/// and its MD5 checked.
+fn write_audio(format: &str, sr: u32, buf: &(Vec<f32>, Vec<f32>), path: &Path, title: &str, looped: bool, shaped: bool) -> Result<()> {
+    use flux_assets::flac::{Dither, FlacOptions};
     match format {
+        "wav16" if shaped => flux_engine::render::write_wav_i16(path, sr, &flux_engine::dither::to_i16_shaped(buf, 1)),
         "wav16" => flux_engine::render::write_wav_i16(path, sr, &flux_engine::dsp::to_i16_tpdf(buf, 1)),
         "wav32" => flux_engine::render::write_wav_f32(path, sr, buf),
         _ => {
-            let mut opts = flux_assets::flac::FlacOptions::default().tag("TITLE", title);
+            let dither = if shaped { Dither::Shaped { seed: 1 } } else { Dither::Tpdf { seed: 1 } };
+            let mut opts = FlacOptions { dither, ..FlacOptions::default() }.tag("TITLE", title);
             if looped {
                 opts = opts.looped(0, buf.0.len() as u64);
             }
@@ -1788,6 +1883,11 @@ fn export(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
         f => bail!("unknown format '{f}' (wav16, wav32, flac)"),
     };
     let layers = get::<bool>(a, "layers")?.unwrap_or(false);
+    let shaped = match get::<String>(a, "dither")?.as_deref() {
+        None | Some("tpdf") => false,
+        Some("shaped") => true,
+        Some(d) => bail!("unknown dither '{d}' (tpdf, shaped)"),
+    };
     let (stale, has_layers) = {
         let st = sh.lock();
         (st.render.as_ref().map(|r| r.revision) != Some(st.session.revision), st.render.as_ref().is_some_and(|r| !r.out.layers.is_empty()))
@@ -1818,16 +1918,17 @@ fn export(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
-    write_audio(&format, r.out.sr, &(r.out.left.clone(), r.out.right.clone()), &path, &name, r.out.looped)?;
+    write_audio(&format, r.out.sr, &(r.out.left.clone(), r.out.right.clone()), &path, &name, r.out.looped, shaped)?;
     let bytes = std::fs::metadata(&path)?.len();
     let dur = r.out.duration_s();
     let mut report = json!({
-        "path": rel(&path), "format": format, "bytes": bytes, "mb": r1(bytes as f64 / 1e6), "revision": r.revision,
+        "path": rel(&path), "format": format, "bytes": bytes,
+        "dither": if format == "wav32" { Value::Null } else { json!(if shaped { "shaped" } else { "tpdf" }) }, "mb": r1(bytes as f64 / 1e6), "revision": r.revision,
         "duration_s": r1(dur), "loudness": analysis::loudness(&r.out),
         "roblox": {"under_20mb": bytes < 20_000_000, "under_7min": dur < 420.0, "sample_rate_ok": r.out.sr <= 48000},
     });
     if layers {
-        report["layers"] = export_layers(&r, &format, &path)?;
+        report["layers"] = export_layers(&r, &format, &path, shaped)?;
     }
     // the file also gets the bar lines, for game_audio_check's loop-seam test
     let mut file_report = report.clone();
@@ -1839,7 +1940,7 @@ fn export(sh: &Arc<Shared>, a: &Value) -> Result<Vec<Content>> {
 }
 
 /// One file per layer beside the master (`<base>_<layer>.<ext>`) and a `<base>.layers.json` manifest for the game.
-fn export_layers(r: &crate::state::LastRender, format: &str, master: &Path) -> Result<Value> {
+fn export_layers(r: &crate::state::LastRender, format: &str, master: &Path, shaped: bool) -> Result<Value> {
     let o = &r.out;
     let layers = o.exportable_layers()?;
     if layers.is_empty() {
@@ -1851,7 +1952,7 @@ fn export_layers(r: &crate::state::LastRender, format: &str, master: &Path) -> R
     let mut files = vec![];
     for (name, buf) in layers {
         let f = dir.join(format!("{stem}_{}.{ext}", slug(name)));
-        write_audio(format, o.sr, buf, &f, &format!("{} ({name})", r.project.name), o.looped)?;
+        write_audio(format, o.sr, buf, &f, &format!("{} ({name})", r.project.name), o.looped, shaped)?;
         let peak = buf.0.iter().chain(buf.1.iter()).fold(0f32, |m, x| m.max(x.abs()));
         let lufs = flux_engine::render::measure(&buf.0, &buf.1, o.sr).map(|m| m.0).unwrap_or(f64::NEG_INFINITY);
         let tracks: Vec<&str> = r.project.tracks.iter().filter(|t| t.layer_name() == name).map(|t| t.name.as_str()).collect();
@@ -2314,4 +2415,84 @@ fn encode_png(img: &eframe::egui::ColorImage, max_w: usize) -> Result<Vec<u8>> {
         wr.finish()?;
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_core::{Channel, Comp, DeEss, DynBand, EqBand, EqKind, EqPhase, Exciter, Imager, Master, MbBand, Multiband};
+    use std::collections::BTreeSet;
+
+    /// The property names of an object schema, or of the object in a nullable one (`anyOf` with null).
+    fn keys(s: &Value) -> BTreeSet<String> {
+        let o = s["anyOf"].as_array().and_then(|a| a.iter().find(|x| x["type"] == "object")).unwrap_or(s);
+        o["properties"].as_object().unwrap_or_else(|| panic!("not an object schema: {s}")).keys().cloned().collect()
+    }
+
+    /// The fields a value serializes with.
+    fn fields(v: impl serde::Serialize) -> BTreeSet<String> {
+        serde_json::to_value(v).unwrap().as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn the_master_schema_names_every_master_setting() {
+        // every optional setting set away from its default, so none is skipped when serialized
+        let band = EqBand { slope: 24, channel: Channel::Side, ..EqBand::new(EqKind::HighPass, 30.0, 0.0, 0.7) };
+        let dyn_band = DynBand { channel: Channel::Mid, ..DeEss::default().band() };
+        let mb_band = MbBand { knee_db: 12.0, mix: 0.5, channel: Channel::Mid, ..MbBand::new(-3.0, 2.0, 15.0, 150.0) };
+        let mb = Multiband { bands: vec![mb_band; 4], ..Multiband::default() };
+        let m = Master {
+            glue: Some(Comp::default()),
+            eq: vec![band],
+            eq_phase: EqPhase::Linear,
+            dyn_eq: vec![dyn_band],
+            deess: Some(DeEss::default()),
+            multiband: Some(mb.clone()),
+            exciter: Some(Exciter::default()),
+            imager: Some(Imager::default()),
+            mono_below_hz: 120.0,
+            width: 1.1,
+            ..Master::default()
+        };
+        let s = master_s();
+        let mut want = fields(&m);
+        // set with add_insert and the automation commands
+        for elsewhere in ["inserts", "reverb_inserts", "automation"] {
+            want.remove(elsewhere);
+        }
+        assert_eq!(keys(&s), want, "master_s() and Master differ");
+        let p = &s["properties"];
+        assert_eq!(keys(&p["eq"]["items"]), fields(band));
+        assert_eq!(keys(&p["dyn_eq"]["items"]), fields(dyn_band));
+        assert_eq!(keys(&p["deess"]), fields(DeEss::default()));
+        assert_eq!(keys(&p["multiband"]), fields(&mb));
+        let nested = |k: &str, f: &str| keys(&p[k]["anyOf"].as_array().unwrap()[1]["properties"][f]["items"]);
+        assert_eq!(nested("multiband", "bands"), fields(mb_band));
+        assert_eq!(keys(&p["exciter"]), fields(Exciter::default()));
+        assert_eq!(nested("exciter", "bands"), fields(Exciter::default().bands[0]));
+        assert_eq!(keys(&p["imager"]), fields(Imager::default()));
+        // the track strip shares the EQ and dynamic EQ schemas
+        let mixer = &mixer_s()["properties"];
+        assert_eq!(mixer["eq"], p["eq"]);
+        assert_eq!(mixer["dyn_eq"], p["dyn_eq"]);
+    }
+
+    #[test]
+    fn every_master_setting_in_the_schema_parses() {
+        // the schema's own examples and defaults, as an agent would send them
+        let cmd = json!({"op": "set_master", "master": {
+            "eq": [{"kind": "high_pass", "hz": 25, "db": 0, "slope": 24}, {"kind": "high_shelf", "hz": 8000, "db": 1.5, "channel": "side"}],
+            "eq_phase": "linear",
+            "dyn_eq": [{"kind": "peak", "hz": 250, "threshold_db": -4, "channel": "mid"}],
+            "deess": {},
+            "multiband": {"crossovers_hz": [150, 2500, 8000], "bands": [{"threshold_db": -4, "ratio": 2, "knee_db": 10, "mix": 0.5, "channel": "mid"},
+                {"threshold_db": -3, "ratio": 1.6}, {"threshold_db": -3, "ratio": 1.8}, {"threshold_db": -4, "ratio": 2}]},
+            "exciter": {},
+            "imager": {"crossovers_hz": [150, 2500, 8000], "widths": [0.6, 1.0, 1.1, 1.2]}}});
+        let mut p = Project::new("Test", 120.0, 8);
+        flux_core::commands::apply(&mut p, &serde_json::from_value::<Command>(cmd).unwrap()).unwrap();
+        assert_eq!(p.master.exciter, Some(Exciter::default()));
+        assert_eq!(p.master.eq_phase, EqPhase::Linear);
+        assert_eq!(p.master.imager.as_ref().map(|i| i.widths.len()), Some(4));
+    }
 }

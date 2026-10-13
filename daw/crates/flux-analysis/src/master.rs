@@ -7,12 +7,13 @@
 //!   ratio (PLR), peak-to-short-term-loudness ratio (PSR: every 100 ms, the true peak of the last 3 s over their
 //!   short-term loudness, so the densest passage shows), crest factor and the distance to the target. A loop is
 //!   measured as it plays repeated (see [`crate::loudness::loudness_stats`]) and its seam is checked.
+//! - **Technical**: a DC offset, rumble under 20 Hz, and a top end cut off short (a low-bitrate or resampled source).
 //! - **Tonal balance**: the loudness-normalised 1/3-octave spectrum (25 Hz to 16 kHz) against a target curve with a
 //!   tolerance corridor, per band and over named regions (sub, boom, warmth, mud, boxiness, honk, harshness,
-//!   sibilance, air); bursts of sibilance, which a static EQ cannot fix; and the EQ that brings the regions outside
-//!   the corridor back into it.
-//! - **Stereo**: correlation, side over mid and width in four bands, the low end's width, what a mono fold-down
-//!   loses, and phase trouble.
+//!   sibilance, air); how much each region comes and goes, and how wide it is; bursts of sibilance, which a static
+//!   EQ cannot fix; and the EQ that brings the regions outside the corridor back into it.
+//! - **Stereo**: correlation, side over mid and width in four bands against the style's masters or the reference,
+//!   the low end's width, what a mono fold-down loses, and phase trouble in each band.
 //! - **Dynamics**: PLR and LRA verdicts, squashed transients and the loudness of each section.
 //! - **Layers**: each layer stem's loudness and true peak, what each adds stacked on the ones before it, and
 //!   whether they sum to the master.
@@ -21,8 +22,12 @@
 //! it, a [`MasterMove`]. Moves are deliberately small (EQ at most 3 dB, Q 0.7 to 1.4, shelves for broad tilts) so
 //! that applying them and checking again converges instead of overshooting, and nothing inside the tolerance gets
 //! a move. The tonal moves come from an EQ fitted to the whole correction (at most four bands); a region it leaves
-//! out gets one band across it. A region more than 6 dB past its tolerance is more than the master should fix: its
-//! message sends the agent to `mix_check`, whose `regions` name the tracks playing there.
+//! out gets one band across it. A region that is too loud only some of the time gets a dynamic EQ band instead, one
+//! too loud only in the sides a cut on the side signal, and missing air above a cut-off top the exciter. A region
+//! more than 6 dB past its tolerance is more than the master should fix: its message sends the agent to
+//! `mix_check`, whose `regions` name the tracks playing there. Between them the moves reach every stage of the
+//! master: its EQ (stereo, mid or side bands, a high-pass), dynamic EQ, de-esser, exciter, imager, mono bass, width,
+//! loudness and limiter.
 //!
 //! # Target curves
 //!
@@ -60,6 +65,34 @@
 //! within a style, and a missing low end is a fault, not a style. Even so the styles overlap: balanced and electronic
 //! are 1.8 dB RMS apart from 100 Hz up, and a corpus track's own style is the closest for about three in five.
 //!
+//! # The other checks
+//!
+//! The stereo, dynamic and technical limits come from the same corpus, grown to 297 tracks, and were checked against
+//! it: 140 of its masters raise no warning at all (leaving out loudness and peaks, since they weren't made for this
+//! target), and 84 raise one.
+//!
+//! - **Phase**: each band's left/right correlation has a warning and a problem limit, lower the higher the band
+//!   (reverb and wide synths decorrelate the highs): 0.1 and -0.1 under 150 Hz, down to -0.35 and -0.6 above 5 kHz.
+//!   One master in twelve goes under a warning limit and one in thirty under a problem's, most of those recordings
+//!   with a channel's polarity flipped. The low band's move is mono bass; the others' an imager band narrowed to a
+//!   correlation of 0.2.
+//! - **Width**: the low end's side over mid that 85 and 95 % of each style's masters stay under is a note and a
+//!   warning (-13 and -6 dB for balanced masters, -2 and -1 for cinematic ones), never closer than -1 dB, where the
+//!   bass loses over 2 dB in mono. Each band's side over mid is held to the style's median within one spread (at
+//!   least 2 dB), or to the reference's within 3 dB; past it a band gets an imager move. A whole master whose
+//!   correlation falls under 0 or whose mono fold-down loses over 3.5 LU is too wide: one in twenty of the corpus.
+//! - **Coming and going**: a region whose loud moments stand further over its usual level than three in four of
+//!   the corpus' masters' do gets a dynamic EQ band rather than a cut. Measured on 99 of them, a band from 4 dB under
+//!   the region's loud level, ratio 3, brings the region's average down by a third of its range.
+//! - **Sibilance**: bursts whose 99th percentile stands 12 dB over their median and 15 dB over the target's share of
+//!   5 to 10 kHz are noted (one master in fourteen), 17 dB over it a warning (one in thirty). The de-esser a move
+//!   adds catches only the loudest moments (see [`DEESS_THRESHOLD_DB`]), since on a whole mix it dulls the air about
+//!   twice as much as it tames the bursts.
+//! - **Technical**: a DC offset over -40 dBFS (the corpus' largest is -44), power under 20 Hz less than 12 dB under
+//!   the rest (the corpus stays under -16, most under -40), and a top end that drops 30 dB within a third of an
+//!   octave: a warning under 15 kHz, a note under 17 kHz. Seven corpus masters stop between 15.6 and 19.8 kHz; a
+//!   dark master that rolls off steeply is not cut off.
+//!
 //! # Score
 //!
 //! `score` is 100 less the points each finding costs, clamped to 0..100; every lost point has an issue saying why.
@@ -76,6 +109,8 @@
 //! | phase trouble | 15 (problem) or 6 (warning) |
 //! | wide low end | 6 (warning) or 2 (info) |
 //! | too wide | 5 |
+//! | a band wider than the target's | 2 |
+//! | a DC offset, rumble under 20 Hz, a top end cut off under 15 kHz | 3 each |
 //! | sibilance bursts | 5 (warning) |
 //! | squashed transients | 5 |
 //! | a loud passage, a dense passage | 3 each |
@@ -86,7 +121,7 @@ use crate::audio::AudioRef;
 use crate::loudness::{LoudnessStats, SeamReport, loop_seam, loudness_stats};
 use crate::matcheq::{EqBand, EqShape, FitOptions, LongTermSpectrum, fit_eq, log_grid};
 use crate::num::{hann_periodic, median, percentile, rfft};
-use crate::profile::{LOW_END_MATTERS_DB, Profile, SPECTRUM_N, pink_level_db, profile};
+use crate::profile::{LOW_END_HZ, LOW_END_MATTERS_DB, Profile, SPECTRUM_N, pink_level_db, profile};
 use crate::spectral::{StereoSpectrum, third_octave_centres, third_octave_edges, third_octave_label};
 use anyhow::{Context, Result, anyhow, ensure};
 use rayon::prelude::*;
@@ -166,6 +201,16 @@ struct Measured {
     band_spread: [f64; 29],
     /// The same for each region's mean deviation, as [`check_master`] computes it.
     region_spread: [f64; 9],
+    /// Side over mid power in the low-mid, mid and high stereo bands ([`STEREO_BANDS`] after the low one): the
+    /// artist-weighted median and spread, dB.
+    width_median: [f64; 3],
+    width_spread: [f64; 3],
+    /// The same in each tonal region.
+    side_median: [f64; 9],
+    side_spread: [f64; 9],
+    /// The low end's side over mid (under [`LOW_END_HZ`]) that 85 and 95 % of the masters stay under, dB: over the
+    /// first the low end is noted as wide, over the second it is a warning. At most [`LOW_SIDE_CAP_DB`].
+    low_side_db: [f64; 2],
 }
 
 const BALANCED: Measured = Measured {
@@ -178,6 +223,11 @@ const BALANCED: Measured = Measured {
         3.2, 3.7, 4.3, 5.1, 6.0, 6.8,
     ],
     region_spread: [7.4, 4.4, 2.5, 2.7, 2.9, 2.8, 2.7, 3.6, 6.0],
+    width_median: [-5.3, -4.1, -4.0],
+    width_spread: [3.7, 3.2, 4.0],
+    side_median: [-19.2, -17.5, -11.1, -5.3, -5.0, -4.2, -3.3, -4.2, -3.5],
+    side_spread: [9.7, 9.9, 5.4, 3.8, 3.2, 3.2, 4.1, 4.1, 4.2],
+    low_side_db: [-13.0, -6.0],
 };
 
 const CINEMATIC: Measured = Measured {
@@ -190,6 +240,11 @@ const CINEMATIC: Measured = Measured {
         3.5, 4.4, 5.5, 6.2, 6.4, 6.5,
     ],
     region_spread: [10.4, 5.3, 3.1, 3.2, 2.3, 2.2, 2.5, 4.2, 7.1],
+    width_median: [-1.7, -0.9, -1.5],
+    width_spread: [1.8, 1.8, 3.0],
+    side_median: [-9.7, -5.2, -2.8, -1.7, -1.1, -1.2, -1.1, -1.4, -1.8],
+    side_spread: [8.3, 6.6, 2.5, 2.0, 1.8, 1.8, 2.3, 2.9, 3.7],
+    low_side_db: [-2.0, -1.0],
 };
 
 const ELECTRONIC: Measured = Measured {
@@ -202,6 +257,11 @@ const ELECTRONIC: Measured = Measured {
         4.5, 4.6, 4.5, 5.0, 5.8, 6.2,
     ],
     region_spread: [7.0, 2.9, 2.5, 2.9, 2.7, 2.3, 3.0, 4.8, 5.7],
+    width_median: [-4.7, -3.2, -5.3],
+    width_spread: [4.3, 4.6, 5.8],
+    side_median: [-20.4, -20.2, -9.8, -5.0, -3.3, -3.0, -4.7, -5.4, -5.9],
+    side_spread: [12.8, 11.4, 6.7, 4.4, 4.0, 4.4, 5.6, 6.1, 5.2],
+    low_side_db: [-8.5, -4.0],
 };
 
 const ACOUSTIC: Measured = Measured {
@@ -214,6 +274,11 @@ const ACOUSTIC: Measured = Measured {
         7.5, 8.8, 9.6, 10.1, 9.9, 9.4, 9.6,
     ],
     region_spread: [11.2, 11.1, 8.9, 4.7, 4.9, 3.9, 5.1, 9.9, 10.7],
+    width_median: [-3.4, -2.5, -1.1],
+    width_spread: [6.0, 4.7, 4.4],
+    side_median: [-9.0, -10.1, -6.7, -3.8, -2.5, -2.3, -2.1, -1.3, -0.5],
+    side_spread: [7.4, 7.9, 6.1, 6.0, 5.4, 4.7, 4.4, 4.7, 4.8],
+    low_side_db: [-3.0, -1.0],
 };
 
 /// How many of the corpus' standard deviations a band or region may sit from the median before it is outside.
@@ -295,39 +360,33 @@ impl Default for MasterOptions<'_> {
     }
 }
 
-/// The bands of Flux's multiband compressor with its default crossovers (150 Hz, 2.5 kHz, 8 kHz).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Which part of the stereo signal an EQ move works on (as the `channel` of Flux's EQ bands).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MultibandRegion {
-    Low,
-    LowMid,
-    HighMid,
-    High,
+pub enum Part {
+    /// Both channels alike.
+    #[default]
+    Stereo,
+    /// The mid signal: the centre of the image.
+    Mid,
+    /// The side signal: the edges of the image.
+    Side,
 }
 
-impl MultibandRegion {
-    pub fn name(self) -> &'static str {
-        match self {
-            MultibandRegion::Low => "low",
-            MultibandRegion::LowMid => "low_mid",
-            MultibandRegion::HighMid => "high_mid",
-            MultibandRegion::High => "high",
-        }
+impl Part {
+    pub fn is_stereo(&self) -> bool {
+        *self == Part::Stereo
     }
+}
 
-    /// The band that holds most of `lo..hi` Hz.
-    fn of(lo: f64, hi: f64) -> MultibandRegion {
-        let c = (lo * hi).sqrt();
-        if c < 150.0 {
-            MultibandRegion::Low
-        } else if c < 2500.0 {
-            MultibandRegion::LowMid
-        } else if c < 8000.0 {
-            MultibandRegion::HighMid
-        } else {
-            MultibandRegion::High
-        }
-    }
+/// The curve of an exciter band (as the `mode` of Flux's exciter bands).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Saturation {
+    /// Odd harmonics: clear and bright.
+    Tape,
+    /// Even and odd harmonics: warmer.
+    Tube,
 }
 
 /// A change to Flux's master that addresses an issue. Each is one setting, small enough that applying it and
@@ -335,20 +394,37 @@ impl MultibandRegion {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MasterMove {
-    /// Add this band to the master EQ (gain at most 3 dB).
-    Eq { shape: EqShape, hz: f64, db: f64, q: f64 },
+    /// Add this band to the master EQ (gain at most 3 dB, 4.5 on the side signal), on `part` of the stereo signal
+    /// (left out: both channels).
+    Eq {
+        shape: EqShape,
+        hz: f64,
+        db: f64,
+        q: f64,
+        #[serde(default, skip_serializing_if = "Part::is_stereo")]
+        part: Part,
+    },
+    /// Add a high-pass at `hz` to the master EQ, falling `slope` dB per octave (or raise the one there to `hz`).
+    HighPass { hz: f64, slope: u32 },
     /// Make the master mono below `hz` (the master's `mono_below_hz`).
     MonoBelow { hz: f64 },
     /// Scale the master's stereo width by this factor (0.8: 20 % narrower than it is now). The report cannot see
     /// the current setting, so the move is relative: multiply the master's `width` by it.
     Width { width: f64 },
-    /// Tame the sibilance on the master: the band above `hz` turned down by at most `range_db` (negative) while
-    /// loud. The master has no de-esser of its own, so Flux does it with the multiband compressor's top band, its
-    /// crossover at `hz`; a de-esser on the tracks that carry it (mix_check's regions name them) is better still.
+    /// Turn on the master's de-esser, or deepen it: the band above `hz` turned down by at most `range_db` (negative)
+    /// while it's louder than its loud level (a new one starts at [`DEESS_THRESHOLD_DB`]). A de-esser on the tracks
+    /// that carry the sibilance (mix_check's regions name them) is better still.
     DeEss { hz: f64, range_db: f64 },
-    /// Let the multiband compressor's `band` take about `reduce_db` off `hz_lo..hz_hi` when that region comes up:
-    /// for a region that is too loud only some of the time, which a static EQ would thin out the rest of the time.
-    Multiband { band: MultibandRegion, hz_lo: f64, hz_hi: f64, reduce_db: f64 },
+    /// Add a band to the master's dynamic EQ: `shape` at `hz` (Q `q`), turned down by at most `range_db` (negative)
+    /// while the range is loud. For a range that is too loud only some of the time, which a static cut would thin
+    /// out the rest of the time.
+    DynEq { shape: EqShape, hz: f64, q: f64, range_db: f64 },
+    /// Saturate `hz_lo..hz_hi` in the master's exciter, blending in at least `mix` of it on `mode`'s curve: the
+    /// harmonics it adds above a cut-off top end bring back some of the air an EQ can't.
+    Exciter { hz_lo: f64, hz_hi: f64, mix: f64, mode: Saturation },
+    /// Scale the width of `hz_lo..hz_hi` in the master's imager by `width`. Relative, as `Width` is: 0.8 makes the
+    /// band 20 % narrower than it is now.
+    Imager { hz_lo: f64, hz_hi: f64, width: f64 },
     /// Set the master's loudness target, LUFS.
     Loudness { target_lufs: f64 },
     /// Change the final limiter: `release_ms` (its recovery) and `clip_db` (how much the soft-clip stage takes off
@@ -432,6 +508,8 @@ pub struct TonalRegion {
     pub code: Option<&'static str>,
     /// 90th minus 50th percentile of the region's share of each 170 ms frame, dB: how much it comes and goes.
     pub variability_db: Option<f64>,
+    /// Side over mid power in the region, dB: how wide it is.
+    pub side_mid_db: Option<f64>,
 }
 
 /// Short bursts of 5-10 kHz (sibilants, splashes), measured in 21 ms frames of the mid signal.
@@ -575,6 +653,18 @@ pub struct MasterLayers {
     pub sums_to_master: Option<bool>,
 }
 
+/// Faults a master shouldn't have whatever its style: a DC offset, rumble under hearing, a cut-off top end.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct MasterTechnical {
+    /// The larger of the two channels' DC offsets (their mean), dBFS (-120 for none).
+    pub dc_offset_dbfs: f64,
+    /// Power from 5 to 20 Hz against the power above 20 Hz, dB: rumble no speaker plays that still costs headroom.
+    pub subsonic_db: Option<f64>,
+    /// Where the top end is cut off, Hz: above it everything sits 30 dB under the octave below, as after a low-pass
+    /// or a low-bitrate encode. `None` when the spectrum runs on to 20 kHz (or near the Nyquist frequency).
+    pub band_limit_hz: Option<f64>,
+}
+
 /// The result of [`check_master`].
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MasterReport {
@@ -587,6 +677,7 @@ pub struct MasterReport {
     pub duration_s: f64,
     pub sample_rate: u32,
     pub loudness: MasterLoudness,
+    pub technical: MasterTechnical,
     pub tonal: Option<TonalBalance>,
     pub stereo: MasterStereo,
     pub dynamics: MasterDynamics,
@@ -682,24 +773,39 @@ impl Findings {
 
 /// A move in words, for the issue's message.
 fn describe(m: &MasterMove) -> String {
+    let shape_name = |s: EqShape| match s {
+        EqShape::Peak => "peak",
+        EqShape::LowShelf => "low shelf",
+        EqShape::HighShelf => "high shelf",
+    };
     match *m {
-        MasterMove::Eq { shape, hz, db, q } => {
-            let s = match shape {
-                EqShape::Peak => "peak",
-                EqShape::LowShelf => "low shelf",
-                EqShape::HighShelf => "high shelf",
+        MasterMove::Eq { shape, hz, db, q, part } => {
+            let on = match part {
+                Part::Stereo => "",
+                Part::Mid => " on the mid signal",
+                Part::Side => " on the side signal",
             };
-            format!("a master EQ {s} of {db:+.1} dB at {} Hz, Q {q:.2}", hz_text(hz))
+            format!("a master EQ {} of {db:+.1} dB at {} Hz, Q {q:.2}{on}", shape_name(shape), hz_text(hz))
         }
+        MasterMove::HighPass { hz, slope } => format!("a master EQ high-pass at {} Hz, {slope} dB per octave", hz_text(hz)),
         MasterMove::MonoBelow { hz } => format!("make the master mono below {hz:.0} Hz"),
         MasterMove::Width { width } => format!("scale the master's width by {width:.2}"),
-        MasterMove::DeEss { hz, range_db } => format!("turn the band above {} Hz down by up to {:.1} dB while it's loud", hz_text(hz), -range_db),
-        MasterMove::Multiband { band, hz_lo, hz_hi, reduce_db } => format!(
-            "let the multiband's {} band take about {reduce_db:.1} dB off {}-{} Hz when it comes up",
-            band.name(),
-            hz_text(hz_lo),
-            hz_text(hz_hi)
+        MasterMove::DeEss { hz, range_db } => {
+            format!("the master's de-esser on the band above {} Hz, turning it down by up to {:.1} dB while it's loud", hz_text(hz), -range_db)
+        }
+        MasterMove::DynEq { shape, hz, q, range_db } => format!(
+            "a master dynamic EQ {} at {} Hz, Q {q:.2}, turning it down by up to {:.1} dB while it's loud",
+            shape_name(shape),
+            hz_text(hz),
+            -range_db
         ),
+        MasterMove::Exciter { hz_lo, hz_hi, mix, mode } => format!(
+            "the master's exciter on {}-{} Hz, {} curve, mix {mix:.2}",
+            hz_text(hz_lo),
+            hz_text(hz_hi),
+            if mode == Saturation::Tape { "tape" } else { "tube" }
+        ),
+        MasterMove::Imager { hz_lo, hz_hi, width } => format!("scale the width of {}-{} Hz in the master's imager by {width:.2}", hz_text(hz_lo), hz_text(hz_hi)),
         MasterMove::Loudness { target_lufs } => format!("set the master's loudness target to {target_lufs:.1} LUFS"),
         MasterMove::Limiter { release_ms, clip_db } => {
             let mut parts = vec![];
@@ -735,7 +841,7 @@ pub fn check_master(a: AudioRef, o: &MasterOptions) -> Result<MasterReport> {
         || rayon::join(|| profile(a), || loudness_series(a, o.looped)),
         || {
             rayon::join(
-                || (StereoSpectrum::new(a, SPECTRUM_N), o.reference.map(LongTermSpectrum::new).transpose()),
+                || (StereoSpectrum::new(a, SPECTRUM_N), o.reference.map(|r| StereoSpectrum::new(r, SPECTRUM_N))),
                 || {
                     rayon::join(
                         || (region_variability(a), sibilance_bursts(a)),
@@ -750,16 +856,19 @@ pub fn check_master(a: AudioRef, o: &MasterOptions) -> Result<MasterReport> {
     );
     let prof = prof.context("profile")?;
     let series = series.context("loudness series")?;
-    let refspec = refspec.context("the reference")?;
+    let refmix = refspec.as_ref().map(LongTermSpectrum::from_stereo).transpose().context("the reference")?;
     let seam = seam.context("loop seam")?;
     let mut f = Findings::default();
 
     let loudness = loudness_part(&stats, Some(&series), o);
     loudness_issues(&loudness, &mut f);
-    let tonal = LongTermSpectrum::from_stereo(&spec)
-        .ok()
-        .map(|mix| tonal(&mix, refspec.as_ref(), o.style, &variability, bursts.as_ref(), &mut f));
-    let stereo = stereo(&spec, &prof, &mut f);
+    let technical = technical(a, &spec);
+    technical_issues(&technical, &mut f);
+    let tonal = LongTermSpectrum::from_stereo(&spec).ok().map(|mix| {
+        let reference = refmix.as_ref().zip(refspec.as_ref());
+        tonal(&mix, &spec, reference, o.style, &variability, bursts.as_ref(), technical.band_limit_hz, &mut f)
+    });
+    let stereo = stereo(&spec, refspec.as_ref(), o.style, &prof, &mut f);
     let dynamics = dynamics(a, o, &stats, &prof, &series, &mut f);
     if let Some(l) = &layers {
         layer_issues(l, lufs, o.ceiling_dbtp, &mut f);
@@ -777,6 +886,7 @@ pub fn check_master(a: AudioRef, o: &MasterOptions) -> Result<MasterReport> {
         duration_s: r2(a.duration_s()),
         sample_rate: a.sr,
         loudness,
+        technical,
         tonal,
         stereo,
         dynamics,
@@ -828,6 +938,7 @@ fn silent_report(a: AudioRef, o: &MasterOptions, stats: &LoudnessStats) -> Maste
         duration_s: r2(a.duration_s()),
         sample_rate: a.sr,
         loudness: loudness_part(stats, None, o),
+        technical: MasterTechnical { dc_offset_dbfs: -120.0, ..MasterTechnical::default() },
         tonal: None,
         stereo: MasterStereo::default(),
         dynamics: MasterDynamics { plr_verdict: "unknown", lra_verdict: "unknown", ..MasterDynamics::default() },
@@ -978,6 +1089,110 @@ fn loudness_issues(l: &MasterLoudness, f: &mut Findings) {
     }
 }
 
+/// The technical measurements (see [`MasterTechnical`]).
+fn technical(a: AudioRef, spec: &StereoSpectrum) -> MasterTechnical {
+    let dc = |x: &[f32]| (x.iter().map(|&v| v as f64).sum::<f64>() / x.len().max(1) as f64).abs();
+    let dc = dc(a.left).max(dc(a.right));
+    // from the third bin up: the first two hold the DC's own leakage
+    let above = spec.band(20.0, spec.sr as f64 / 2.0).power();
+    let subsonic = spec.band(spec.bin_hz(2), 20.0).power();
+    MasterTechnical {
+        dc_offset_dbfs: r1(db20(dc).max(-120.0)),
+        subsonic_db: (above > 1e-30).then(|| r1(db10(subsonic / above).unwrap_or(-120.0).max(-120.0))),
+        band_limit_hz: band_limit(spec),
+    }
+}
+
+/// Where the top end is cut off (see [`MasterTechnical::band_limit_hz`]): the first 1/6-octave step from 4 kHz up
+/// past which every step stays 30 dB under the loudest step of the third of an octave below it, refined to the
+/// highest bin around it that still reaches that level. A low-pass in a resampler or an encoder falls that far that
+/// fast; a dark mix rolls off over octaves (the corpus' darkest fall about 30 dB per octave) and isn't cut off.
+fn band_limit(spec: &StereoSpectrum) -> Option<f64> {
+    let top = (0.45 * spec.sr as f64).min(20000.0);
+    let step = 2f64.powf(1.0 / 6.0);
+    let mut steps: Vec<(f64, f64)> = vec![];
+    let mut lo = 2000.0;
+    while lo < top {
+        let b = spec.band(lo, (lo * step).min(top));
+        if b.bins > 0 {
+            steps.push((lo, b.power() / b.bins as f64));
+        }
+        lo *= step;
+    }
+    let below = |f: f64| steps.iter().filter(|s| s.0 >= f / CLIFF_OCTAVES.exp2() - 1.0 && s.0 < f).map(|s| s.1).fold(0.0, f64::max);
+    let i = (0..steps.len()).find(|&i| {
+        let f = steps[i].0;
+        let above = steps[i..].iter().map(|s| s.1).fold(0.0, f64::max);
+        f >= 3999.0 && below(f) > 1e-30 && above < below(f) * 1e-3
+    })?;
+    let f = steps[i].0;
+    let floor = below(f) * 1e-3;
+    let k0 = (f / step / spec.bin_hz(1)).floor() as usize;
+    let k1 = ((f * step / spec.bin_hz(1)).ceil() as usize).min(spec.ll.len() - 1);
+    let k = (k0..=k1).rev().find(|&k| spec.power(k) >= floor).unwrap_or(k0);
+    Some((spec.bin_hz(k + 1) / 10.0).round() * 10.0)
+}
+
+/// How quickly the top end has to fall 30 dB to be cut off (octaves).
+const CLIFF_OCTAVES: f64 = 1.0 / 3.0;
+/// A DC offset over this is reported (dBFS): the corpus' largest is -44.
+const DC_OFFSET_DBFS: f64 = -40.0;
+/// Power under 20 Hz over this, against the power above, is reported (dB): the corpus' masters stay under -16, most
+/// under -40.
+const SUBSONIC_DB: f64 = -12.0;
+/// A top end cut off under this is a warning, with the exciter as its move (Hz).
+const BAND_LIMIT_WARN_HZ: f64 = 15000.0;
+/// One cut off under this is noted (Hz): a full-range master reaches 18 to 20 kHz.
+const BAND_LIMIT_NOTE_HZ: f64 = 17000.0;
+
+fn technical_issues(t: &MasterTechnical, f: &mut Findings) {
+    if t.dc_offset_dbfs > DC_OFFSET_DBFS {
+        f.cost(
+            Sev::Warn,
+            "dc_offset",
+            3.0,
+            format!(
+                "The master carries a DC offset ({:.0} dBFS): the waveform sits off centre, which costs headroom and clicks where playback starts and stops",
+                t.dc_offset_dbfs
+            ),
+            Some(MasterMove::HighPass { hz: 10.0, slope: 12 }),
+        );
+    }
+    if let Some(s) = t.subsonic_db
+        && s > SUBSONIC_DB
+    {
+        f.cost(
+            Sev::Warn,
+            "subsonic",
+            3.0,
+            format!("Rumble under 20 Hz sits only {:.0} dB under the rest: no speaker plays it, but it costs headroom and makes the limiter work", -s),
+            Some(MasterMove::HighPass { hz: 20.0, slope: 24 }),
+        );
+    }
+    if let Some(hz) = t.band_limit_hz {
+        let found = format!(
+            "The top end stops at {} Hz: above it the spectrum drops 30 dB within a third of an octave, as after a low-bitrate file or a \
+resampled one (a sample set recorded at a low rate, an MP3 among the clips; spectrogram shows where it starts)",
+            hz_text(hz)
+        );
+        if hz < BAND_LIMIT_WARN_HZ {
+            let mv = MasterMove::Exciter { hz_lo: EXCITER_LO_HZ, hz_hi: EXCITER_HI_HZ, mix: EXCITER_MIX, mode: Saturation::Tube };
+            f.cost(Sev::Warn, "band_limited", 3.0, format!("{found}. Next to full-range songs it sounds muffled; replacing the source is best, the exciter's harmonics bring back some air"), Some(mv));
+        } else if hz < BAND_LIMIT_NOTE_HZ {
+            f.add(Sev::Info, "band_limited", 0.0, format!("{found}. Few listeners hear above it, but a full-range master reaches 18 to 20 kHz"), None);
+        }
+    }
+}
+
+/// The exciter band a cut-off top end gets: its harmonics land above the cut (Hz). On 99 corpus excerpts low-passed
+/// at 11 kHz, half of 2.5-8 kHz through the tube curve brought back about half of what the cut took from 14 to 18 kHz
+/// (20 of 38 dB) for 1 dB off 4-8 kHz, and lifted the cut-off in nine excerpts of ten; the tape curve did a little
+/// less, and the band above 8 kHz little at all (its harmonics fall past the Nyquist frequency).
+const EXCITER_LO_HZ: f64 = 2500.0;
+const EXCITER_HI_HZ: f64 = 8000.0;
+/// How much of that band the exciter saturates.
+const EXCITER_MIX: f64 = 0.5;
+
 /// Tonal regions: (name, low edge, high edge, code when too much, code when too little).
 pub(crate) const REGIONS: [(&str, f64, f64, &str, &str); 9] = [
     ("sub", 20.0, 40.0, "sub_heavy", "sub_light"),
@@ -1027,16 +1242,51 @@ fn region_eq(lo: f64, hi: f64, d: f64, t: f64) -> Option<MasterMove> {
         return None;
     }
     let db = r1(-d.signum() * (d.abs() - t / 2.0).clamp(0.5, 3.0));
-    let (shape, hz, q) = if hi <= 40.0 {
+    let (shape, hz, q) = region_band(lo, hi);
+    Some(MasterMove::Eq { shape, hz, db, q, part: Part::Stereo })
+}
+
+/// A band across the region `lo..hi`: a shelf at either end of the spectrum, else a peak at its centre as wide as
+/// the region (Q = centre / bandwidth, within the moves' 0.7 to 1.4).
+fn region_band(lo: f64, hi: f64) -> (EqShape, f64, f64) {
+    if hi <= 40.0 {
         (EqShape::LowShelf, hi, 0.7)
     } else if lo >= 10000.0 {
         (EqShape::HighShelf, lo, 0.7)
     } else {
-        // as wide as the region: Q = centre / bandwidth, within the moves' 0.7 to 1.4
         let c = (lo * hi).sqrt();
         (EqShape::Peak, if c >= 1000.0 { (c / 10.0).round() * 10.0 } else { c.round() }, r2((c / (hi - lo)).clamp(0.7, 1.4)))
-    };
-    Some(MasterMove::Eq { shape, hz, db, q })
+    }
+}
+
+/// A region whose share of the frames' loudest moments stands this far over its usual (its `variability_db`) is
+/// too loud only some of the time: its move is a dynamic EQ band, not a cut. Per region in [`REGIONS`]' order: what
+/// three in four of the corpus' masters stay under (the bass and the highs come and go far more than the mids).
+const VARIABLE_DB: [f64; 9] = [14.5, 8.5, 4.7, 4.7, 6.2, 7.3, 7.5, 10.3, 12.2];
+/// How far a dynamic EQ band's range has to reach for each dB the region's average should come down: on 99 corpus
+/// excerpts a band from 4 dB under the region's loud level, ratio 3, brought the region's average down by a third of
+/// its range (1.3 dB for 4).
+const DYN_RANGE_PER_DB: f64 = 3.0;
+
+/// The dynamic EQ band for a region `d` dB over the target that comes and goes: across the region, reaching far
+/// enough to bring it back to within half the tolerance `t` (2 to 6 dB).
+fn region_dyn_eq(lo: f64, hi: f64, d: f64, t: f64) -> MasterMove {
+    let (shape, hz, q) = region_band(lo, hi);
+    MasterMove::DynEq { shape, hz, q, range_db: -r1((DYN_RANGE_PER_DB * (d - t / 2.0)).clamp(2.0, 6.0)) }
+}
+
+/// The most a move turns the side signal up or down (dB): it's a part of the region's power, so it takes more.
+const SIDE_MAX_DB: f64 = 4.5;
+
+/// The side-only gain that changes a region's power by `db`, its side `side_mid_db` under its mid; None when even
+/// [`SIDE_MAX_DB`] on the side gets less than half of `db`.
+fn side_gain(db: f64, side_mid_db: f64) -> Option<f64> {
+    let s = 1.0 / (1.0 + 10f64.powf(-side_mid_db / 10.0));
+    let total = |g: f64| 10.0 * (1.0 - s + s * 10f64.powf(g / 10.0)).log10();
+    let want = 10f64.powf(db / 10.0) - 1.0 + s;
+    let g = if want > 0.0 { 10.0 * (want / s).log10() } else { -SIDE_MAX_DB };
+    let g = r1(g.clamp(-SIDE_MAX_DB, SIDE_MAX_DB));
+    (g.abs() >= 0.5 && total(g).abs() >= db.abs() / 2.0).then_some(g)
 }
 
 /// A 1/3-octave band centred on `fc` belongs to the region `lo..hi`.
@@ -1068,14 +1318,18 @@ fn interp(pts: &[(f64, f64)], x: f64) -> f64 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tonal(
     mix: &LongTermSpectrum,
-    reference: Option<&LongTermSpectrum>,
+    spec: &StereoSpectrum,
+    reference: Option<(&LongTermSpectrum, &StereoSpectrum)>,
     style: TonalStyle,
     variability: &[Option<f64>],
     bursts: Option<&Bursts>,
+    band_limit: Option<f64>,
     f: &mut Findings,
 ) -> TonalBalance {
+    let (reference, ref_spec) = (reference.map(|r| r.0), reference.map(|r| r.1));
     let sr = mix.sr as f64;
     let centres: Vec<f64> = third_octave_centres().into_iter().filter(|&fc| third_octave_edges(fc).1 <= sr / 2.0).collect();
     let level: Vec<Option<f64>> = centres
@@ -1179,6 +1433,7 @@ fn tonal(
             verdict,
             code,
             variability_db: variability.get(ri).copied().flatten().map(r1),
+            side_mid_db: side_mid(spec, lo, hi),
         });
     }
     let flagged: Vec<usize> = (0..REGIONS.len()).filter(|&ri| regions[ri].code.is_some()).collect();
@@ -1212,12 +1467,12 @@ fn tonal(
         spike_db: r1(b.spike_db),
         burst_db: r1(b.burst_db),
         expected_db: r1(expected),
-        bursty: b.burst_db >= 9.0 && b.spike_db >= expected + 8.0,
+        bursty: b.burst_db >= BURST_DB && b.spike_db >= expected + SPIKE_DB,
         centre_hz: b.centre_hz.map(|c| c.round()),
     });
     let de_ess = sibilance.as_ref().filter(|s| s.bursty).map(|s| MasterMove::DeEss {
         hz: ((s.centre_hz.unwrap_or(7000.0) * 0.8).clamp(4000.0, 10000.0) / 100.0).round() * 100.0,
-        range_db: -r1((s.spike_db - (s.expected_db + 4.0)).clamp(2.0, 6.0)),
+        range_db: -r1((s.spike_db - (s.expected_db + SPIKE_DB - 3.0)).clamp(3.0, 6.0)),
     });
 
     // the issues, the furthest out first, each taking the correction band that acts on it
@@ -1254,21 +1509,42 @@ fn tonal(
         }
         let weight = 0.6 * members.iter().map(|&i| excess(i)).sum::<f64>();
         let var = regions[ri].variability_db;
+        // a top end that is cut off can't be brought back with EQ: the band_limited issue has the exciter
+        let cut_off = !high && band_limit.is_some_and(|b| b < hi * 0.8);
+        let mut side_note = None;
         let suggestion = if code == "sibilant" && de_ess.is_some() {
             de_ess_used = true;
             de_ess.clone()
-        } else if high && var.is_some_and(|v| v >= 6.0) {
-            Some(MasterMove::Multiband { band: MultibandRegion::of(lo, hi), hz_lo: lo, hz_hi: hi, reduce_db: r1((d - t / 2.0).clamp(1.0, 3.0)) })
+        } else if cut_off {
+            None
+        } else if high && var.is_some_and(|v| v >= VARIABLE_DB[ri]) {
+            Some(region_dyn_eq(lo, hi, d, t))
         } else {
             let pick = (0..correction.len())
                 .filter(|&j| !used[j] && (correction[j].db < 0.0) == high && covers(&correction[j], lo, hi))
                 .max_by(|&x, &y| correction[x].db.abs().total_cmp(&correction[y].db.abs()));
-            pick.map(|j| {
-                used[j] = true;
-                let b = correction[j];
-                MasterMove::Eq { shape: b.shape, hz: b.hz, db: b.db, q: b.q }
-            })
-            .or_else(|| region_eq(lo, hi, d, t))
+            let mv = pick
+                .map(|j| {
+                    used[j] = true;
+                    let b = correction[j];
+                    MasterMove::Eq { shape: b.shape, hz: b.hz, db: b.db, q: b.q, part: Part::Stereo }
+                })
+                .or_else(|| region_eq(lo, hi, d, t));
+            // when the excess or the lack is in the sides, the move works on the side signal and leaves the centre
+            match (mv, regions[ri].side_mid_db, side_target(style, ref_spec, ri)) {
+                (Some(MasterMove::Eq { shape, hz, db, q, .. }), Some(sm), Some((med, tol)))
+                    if (high && sm > med + tol) || (!high && sm < med - tol) =>
+                {
+                    match side_gain(db, sm) {
+                        Some(g) => {
+                            side_note = Some((sm, med));
+                            Some(MasterMove::Eq { shape, hz, db: g, q, part: Part::Side })
+                        }
+                        None => Some(MasterMove::Eq { shape, hz, db, q, part: Part::Stereo }),
+                    }
+                }
+                (mv, ..) => mv,
+            }
         };
         let (what, hears) = region_words(code);
         let hears = if code == "dull" && has("lacks_air") { "dull, and the air above 10 kHz is missing too" } else { hears };
@@ -1277,10 +1553,20 @@ fn tonal(
             hz_text(lo),
             hz_text(hi)
         );
-        if let Some(MasterMove::Multiband { .. }) = &suggestion
+        if let Some(MasterMove::DynEq { .. }) = &suggestion
             && let Some(v) = var
         {
             msg.push_str(&format!("; it comes and goes ({v:.0} dB between its usual and its loud moments), so tame it only when it comes up"));
+        }
+        if let Some((sm, med)) = side_note {
+            let more = if high { "more" } else { "less" };
+            msg.push_str(&format!(
+                "; the sides carry {more} of it than the {target_name} masters do (side {:.1} dB under mid there, against {:.1}), so the move works on the side signal and leaves the centre alone",
+                -sm, -med
+            ));
+        }
+        if cut_off && let Some(b) = band_limit {
+            msg.push_str(&format!("; the top end is cut off at {} Hz (see band_limited), and EQ can't bring back what isn't there", hz_text(b)));
         }
         // past what a few small master moves can bring back, the balance is the arrangement's or the mix's
         if over > FIX_IN_MIX_DB && code != "sub_light" && code != "lacks_air" {
@@ -1295,7 +1581,7 @@ fn tonal(
     }
     f.penalty += points.min(30.0);
     if let Some(s) = sibilance.as_ref().filter(|s| s.bursty && !de_ess_used) {
-        let sev = if s.spike_db >= s.expected_db + 12.0 { Sev::Warn } else { Sev::Info };
+        let sev = if s.spike_db >= s.expected_db + SPIKE_WARN_DB { Sev::Warn } else { Sev::Info };
         let points = if sev == Sev::Warn { 5.0 } else { 0.0 };
         f.cost(
             sev,
@@ -1359,6 +1645,18 @@ fn deviations(raw: &[Option<f64>]) -> (f64, Vec<Option<f64>>) {
         .collect();
     (offset, dev)
 }
+
+/// Sibilance is bursty when its 99th percentile stands this far over its median (dB)...
+const BURST_DB: f64 = 12.0;
+/// ...and this far over the target's share of 5-10 kHz (dB): about one master in fourteen of the corpus.
+const SPIKE_DB: f64 = 15.0;
+/// Bursts this far over the target's share are a warning (dB): about one master in thirty.
+const SPIKE_WARN_DB: f64 = 17.0;
+/// The threshold of a de-esser a [`MasterMove::DeEss`] adds to the master, over its band's loud level (dB): it
+/// catches the loudest moments only. On 99 masters of the corpus a de-esser above 6 kHz with a range of 6 dB took
+/// the bursts down 1.2 dB at this threshold and 2.1 dB at -6 dB, and the air with them by 2.3 and 3.8 dB: a deeper
+/// master de-esser dulls the whole top, so the rest belongs on the tracks.
+pub const DEESS_THRESHOLD_DB: f64 = 0.0;
 
 /// Bursts of 5-10 kHz in 21 ms frames of the mid signal.
 struct Bursts {
@@ -1450,9 +1748,38 @@ fn region_variability(a: AudioRef) -> Vec<Option<f64>> {
 /// The four stereo bands.
 const STEREO_BANDS: [(&str, f64, f64); 4] = [("low", 20.0, 150.0), ("low_mid", 150.0, 800.0), ("mid", 800.0, 5000.0), ("high", 5000.0, 20000.0)];
 
-fn stereo(spec: &StereoSpectrum, prof: &Profile, f: &mut Findings) -> MasterStereo {
+/// The edges between the stereo bands (Hz): an imager split here works on the bands the report measures.
+pub const STEREO_CROSSOVERS_HZ: [f64; 3] = [150.0, 800.0, 5000.0];
+
+/// Side over mid power in `lo..hi` Hz (up to the Nyquist frequency), dB: -120 for a mono band, `None` for silence.
+fn side_mid(spec: &StereoSpectrum, lo: f64, hi: f64) -> Option<f64> {
+    let s = spec.band(lo, hi.min(spec.sr as f64 / 2.0));
+    if s.mid() > 1e-30 { db10(s.side() / s.mid()).map(|x| r1(x.max(-120.0))).or(Some(-120.0)) } else { None }
+}
+
+/// The side over mid a tonal region's side should have, with how far it may stray before a move on the region goes
+/// to the side signal alone (dB): the reference's own and 3 dB, else the style's corpus median and one spread (at
+/// least 2 dB). Not an issue of its own, only where the move goes, so it doesn't wait for 2.5 spreads.
+fn side_target(style: TonalStyle, reference: Option<&StereoSpectrum>, ri: usize) -> Option<(f64, f64)> {
+    let (_, lo, hi, ..) = REGIONS[ri];
+    match reference {
+        Some(r) => side_mid(r, lo, hi).map(|x| (x, REFERENCE_WIDTH_TOLERANCE_DB)),
+        None => {
+            let m = style.measured();
+            Some((m.side_median[ri], m.side_spread[ri].max(2.0)))
+        }
+    }
+}
+
+/// How far a band's side over mid may sit from a reference's (dB).
+const REFERENCE_WIDTH_TOLERANCE_DB: f64 = 3.0;
+/// A band whose side sits further under its mid than this has next to nothing for an imager to widen (dB).
+const WIDEN_FROM_DB: f64 = -24.0;
+
+/// The four stereo bands of a spectrum (those under the Nyquist frequency).
+fn stereo_bands(spec: &StereoSpectrum) -> Vec<StereoRegion> {
     let k_total = spec.k_weighted_power();
-    let bands: Vec<StereoRegion> = STEREO_BANDS
+    STEREO_BANDS
         .iter()
         .filter(|b| b.1 < spec.sr as f64 / 2.0)
         .map(|&(band, lo, hi)| {
@@ -1463,65 +1790,181 @@ fn stereo(spec: &StereoSpectrum, prof: &Profile, f: &mut Findings) -> MasterSter
                 hi_hz: hi,
                 level_db: db10(s.power() / k_total).map(r1),
                 correlation: s.correlation().map(r2),
-                side_mid_db: if s.mid() > 1e-30 { db10(s.side() / s.mid()).map(r1).or(Some(-120.0)) } else { None },
+                side_mid_db: side_mid(spec, lo, hi),
                 width: s.width().map(r2),
             }
         })
-        .collect();
+        .collect()
+}
+
+/// The low-mid, mid and high bands' width against the style's corpus or the reference: an imager move for each band
+/// outside it. Returns whether a band is too wide.
+fn band_widths(bands: &[StereoRegion], reference: Option<&[StereoRegion]>, style: TonalStyle, skip: Option<&str>, f: &mut Findings) -> bool {
+    let mut wide = false;
+    let target_name = if reference.is_some() { "reference" } else { style.name() };
+    for (i, b) in bands.iter().enumerate().skip(1) {
+        let (Some(sm), true) = (b.side_mid_db, b.level_db.is_some_and(|l| l >= -30.0)) else { continue };
+        if skip == Some(b.band) {
+            continue;
+        }
+        let (med, tol) = match reference {
+            // a reference nearly mono in a band says nothing about the width there
+            Some(r) => match r.get(i).and_then(|x| x.side_mid_db) {
+                Some(x) if x > WIDEN_FROM_DB => (x, REFERENCE_WIDTH_TOLERANCE_DB),
+                _ => continue,
+            },
+            None => {
+                let m = style.measured();
+                (m.width_median[i - 1], (TOLERANCE_SPREADS * m.width_spread[i - 1]).max(2.0))
+            }
+        };
+        let name = b.band.replace('_', "-");
+        let range = format!("{}-{} Hz", hz_text(b.lo_hz), hz_text(b.hi_hz));
+        if sm > med + tol {
+            wide = true;
+            // the side scaled by w moves side over mid by 20 log10(w): back to within half the tolerance
+            let w = r2(10f64.powf(-(sm - (med + tol / 2.0)) / 20.0).clamp(0.5, 0.95));
+            f.cost(
+                Sev::Warn,
+                "band_wide",
+                2.0,
+                format!(
+                    "The {name} band ({range}) is wider than the {target_name} masters: its side sits {:.1} dB under its mid, against {:.1} (tolerance +/-{tol:.1} dB). Parts there turn thin and phasey on phones and in mono",
+                    -sm, -med
+                ),
+                Some(MasterMove::Imager { hz_lo: b.lo_hz, hz_hi: b.hi_hz, width: w }),
+            );
+        } else if sm < med - tol && sm > WIDEN_FROM_DB {
+            let w = r2(10f64.powf((med - tol / 2.0 - sm) / 20.0).clamp(1.05, 1.4));
+            f.add(
+                Sev::Info,
+                "band_narrow",
+                0.0,
+                format!(
+                    "The {name} band ({range}) is narrower than the {target_name} masters: its side sits {:.1} dB under its mid, against {:.1} (tolerance +/-{tol:.1} dB), so the song may feel small next to them",
+                    -sm, -med
+                ),
+                Some(MasterMove::Imager { hz_lo: b.lo_hz, hz_hi: b.hi_hz, width: w }),
+            );
+        }
+    }
+    wide
+}
+
+/// Per stereo band, the left/right correlation under which it is a phase warning and a phase problem. Reverb and
+/// wide synths decorrelate the highs, so a band's limits fall the higher it is: about one master in twelve of the
+/// corpus goes under a warning limit somewhere, and one in thirty under a problem's, most of those with a channel's
+/// polarity flipped.
+const PHASE_LIMITS: [(f64, f64); 4] = [(0.1, -0.1), (-0.1, -0.3), (-0.25, -0.5), (-0.35, -0.6)];
+
+/// The phase limits (warning, problem) of the stereo band named `band` (as in [`StereoRegion::band`]): under them its
+/// correlation is a phase warning or problem.
+pub fn phase_limits(band: &str) -> (f64, f64) {
+    PHASE_LIMITS[STEREO_BANDS.iter().position(|x| x.0 == band).unwrap_or(0)]
+}
+/// The correlation a band's imager move narrows a phase band to.
+const PHASE_TARGET: f64 = 0.2;
+/// The whole master is too wide under this correlation or past this mono fold-down (LU): about one master in twenty
+/// of the corpus.
+const TOO_WIDE_CORRELATION: f64 = 0.0;
+const TOO_WIDE_FOLD_DOWN_LU: f64 = -3.5;
+
+/// A low end whose side sits this far under its mid is narrow enough whatever the reference's (dB).
+const LOW_SIDE_FLOOR_DB: f64 = -10.0;
+/// The widest a low end is let be without a warning (side over mid, dB): a correlation of about 0.1, where the bass
+/// loses over 2 dB when the master is played in mono. One cinematic and one acoustic master in twenty go further.
+const LOW_SIDE_CAP_DB: f64 = -1.0;
+
+/// The width that brings a band's correlation from `c` up to `to`: the side scaled by w moves side over mid by
+/// w squared, kept within 0.5 to 0.95 for a move.
+fn narrow_to(c: f64, to: f64) -> f64 {
+    let r = (1.0 - c) / (1.0 + c).max(1e-3);
+    let w = ((1.0 - to) / ((1.0 + to) * r)).sqrt();
+    r2(w.clamp(0.5, 0.95))
+}
+
+fn stereo(spec: &StereoSpectrum, reference: Option<&StereoSpectrum>, style: TonalStyle, prof: &Profile, f: &mut Findings) -> MasterStereo {
+    let bands = stereo_bands(spec);
     let m = &prof.mono;
-    // phase: the band that matters with the lowest correlation
+    // phase: the band that matters furthest under its warning limit
+    let limits = |b: &StereoRegion| phase_limits(b.band);
     let worst = bands
         .iter()
-        .filter(|b| b.level_db.is_some_and(|l| l >= -30.0) && b.correlation.is_some_and(|c| c < 0.1))
-        .min_by(|a, b| a.correlation.unwrap_or(1.0).total_cmp(&b.correlation.unwrap_or(1.0)));
+        .filter(|b| b.level_db.is_some_and(|l| l >= -30.0) && b.correlation.is_some_and(|c| c < limits(b).0))
+        .min_by(|a, b| (a.correlation.unwrap_or(1.0) - limits(a).0).total_cmp(&(b.correlation.unwrap_or(1.0) - limits(b).0)));
     let mut phase_band = None;
     if let Some(b) = worst {
         let c = b.correlation.unwrap_or(0.0);
-        let sev = if c < -0.1 { Sev::Problem } else { Sev::Warn };
+        let sev = if c < limits(b).1 { Sev::Problem } else { Sev::Warn };
         let points = if sev == Sev::Problem { 15.0 } else { 6.0 };
-        let mv = if b.band == "low" { MasterMove::MonoBelow { hz: 150.0 } } else { MasterMove::Width { width: 0.8 } };
+        let mv = if b.band == "low" {
+            MasterMove::MonoBelow { hz: 150.0 }
+        } else {
+            MasterMove::Imager { hz_lo: b.lo_hz, hz_hi: b.hi_hz, width: narrow_to(c, PHASE_TARGET) }
+        };
         f.cost(
             sev,
             "phase",
             points,
             format!(
-                "The {} band ({}-{} Hz) has a left/right correlation of {c:.2}{}: in mono it cancels and gets thin or disappears",
+                "The {} band ({}-{} Hz) has a left/right correlation of {c:.2}{}: in mono it cancels and gets thin or disappears{}",
                 b.band.replace('_', "-"),
                 hz_text(b.lo_hz),
                 hz_text(b.hi_hz),
-                m.fold_down_lu.map(|d| format!(" (the mono fold-down is {d:+.1} LU)")).unwrap_or_default()
+                m.fold_down_lu.map(|d| format!(" (the mono fold-down is {d:+.1} LU)")).unwrap_or_default(),
+                if c < -0.8 { ". Near -1 a channel's polarity is flipped: find the track or insert that inverts it (narrowing only softens it)" } else { "" }
             ),
             Some(mv),
         );
         phase_band = Some(b.band);
     }
     let low_matters = m.low_end_db.is_some_and(|l| l > LOW_END_MATTERS_DB);
+    // the reference's own low end, else what most of the style's masters stay under
+    let (note, warn, against) = match reference.map(|r| side_mid(r, 0.0, LOW_END_HZ)) {
+        Some(Some(r)) => (f64::INFINITY, (r + REFERENCE_WIDTH_TOLERANCE_DB).max(LOW_SIDE_FLOOR_DB), format!("the reference's is {:.1} dB under", -r)),
+        _ => {
+            let [n, w] = style.measured().low_side_db;
+            let against = if w >= LOW_SIDE_CAP_DB {
+                format!("it needs to be at least {:.0} dB under, or the bass loses over 2 dB in mono", -LOW_SIDE_CAP_DB)
+            } else {
+                format!("19 in 20 of the {} masters keep it {:.1} dB or more under", style.name(), -w)
+            };
+            (n, w, against)
+        }
+    };
     if phase_band != Some("low")
         && low_matters
         && let Some(s) = m.low_end_side_db
-        && s > -16.0
+        && (s > note || s > warn)
     {
-        let (sev, points, hz) = if s > -10.0 { (Sev::Warn, 6.0, 120.0) } else { (Sev::Info, 2.0, 100.0) };
+        let (sev, points, hz) = if s > warn { (Sev::Warn, 6.0, 120.0) } else { (Sev::Info, 2.0, 100.0) };
         f.cost(
             sev,
             "low_end_wide",
             points,
-            format!("The low end under 120 Hz has its side {s:.1} dB under its mid: a wide low end wanders between speakers, loses punch in mono and wastes headroom"),
+            format!(
+                "The low end under {LOW_END_HZ:.0} Hz has its side {:.1} dB under its mid ({against}): a wide low end wanders between speakers, loses punch in mono and wastes headroom",
+                -s
+            ),
             Some(MasterMove::MonoBelow { hz }),
         );
     }
-    let too_wide = m.correlation.is_some_and(|c| c < 0.15) || m.fold_down_lu.is_some_and(|d| d < -3.0);
+    let ref_bands = reference.map(stereo_bands);
+    let wide_bands = band_widths(&bands, ref_bands.as_deref(), style, phase_band, f);
+    let too_wide = m.correlation.is_some_and(|c| c < TOO_WIDE_CORRELATION) || m.fold_down_lu.is_some_and(|d| d < TOO_WIDE_FOLD_DOWN_LU);
     if too_wide && phase_band.is_none() {
+        // the bands that are too wide have imager moves of their own
+        let (then, mv) = if wide_bands { (": the band_wide moves narrow it where it's widest", None) } else { ("", Some(MasterMove::Width { width: 0.85 })) };
         f.cost(
             Sev::Warn,
             "too_wide",
             5.0,
             format!(
-                "The master is very wide (correlation {}, mono fold-down {} LU): on phones and in mono parts drop out",
+                "The master is very wide (correlation {}, mono fold-down {} LU): on phones and in mono parts drop out{then}",
                 m.correlation.map(|c| format!("{c:.2}")).unwrap_or_else(|| "-".into()),
                 m.fold_down_lu.map(|d| format!("{d:+.1}")).unwrap_or_else(|| "-".into())
             ),
-            Some(MasterMove::Width { width: 0.85 }),
+            mv,
         );
     }
     if m.correlation.is_some_and(|c| c > 0.98) {
@@ -1918,7 +2361,7 @@ mod tests {
         let (l, r) = (engine_eq(&l, SR as f64, &bump), engine_eq(&r, SR as f64, &bump));
         let rep = check(&l, &r, &o);
         let mud = issue(&rep, "muddy").unwrap_or_else(|| panic!("{:#?} {:#?}", rep.issues, rep.tonal.as_ref().unwrap().regions));
-        let Some(MasterMove::Eq { shape, hz, db, q }) = mud.suggestion else { panic!("{mud:?}") };
+        let Some(MasterMove::Eq { shape, hz, db, q, .. }) = mud.suggestion else { panic!("{mud:?}") };
         assert!(shape == EqShape::Peak && (200.0..=450.0).contains(&hz) && (-3.0..-1.0).contains(&db) && (0.7..=1.4).contains(&q), "{mud:?}");
         assert!(mud.message.contains("Try:"), "{}", mud.message);
         assert!(rep.score < 95, "{}", rep.summary);
@@ -1962,7 +2405,7 @@ mod tests {
     #[test]
     fn a_region_the_fitted_eq_leaves_out_still_gets_one_band() {
         // too little bass: a boost across 40-100 Hz, as far as a move goes
-        let Some(MasterMove::Eq { shape, hz, db, q }) = region_eq(40.0, 100.0, -9.0, 3.3) else { panic!() };
+        let Some(MasterMove::Eq { shape, hz, db, q, .. }) = region_eq(40.0, 100.0, -9.0, 3.3) else { panic!() };
         assert!(shape == EqShape::Peak && (60.0..=66.0).contains(&hz) && db == 3.0 && (0.7..=1.4).contains(&q), "{hz} {db} {q}");
         // just outside: back to within half the tolerance, no further
         let Some(MasterMove::Eq { db, .. }) = region_eq(500.0, 1000.0, 3.0, 2.5) else { panic!() };
@@ -2131,12 +2574,142 @@ mod tests {
         assert!(check_master(a.slice(0, 100), &MasterOptions::default()).is_err());
     }
 
+    fn rms(x: &[f32]) -> f64 {
+        (x.iter().map(|&v| v as f64 * v as f64).sum::<f64>() / x.len() as f64).sqrt()
+    }
+
+    /// `x` scaled to `db` dB of `to`'s RMS.
+    fn rms_like(x: &[f32], to: &[f32], db: f64) -> Vec<f32> {
+        gain(x, db + 20.0 * (rms(to) / rms(x)).log10())
+    }
+
+    /// A master of the same mid as [`good_master`] with `side` as its side signal.
+    fn with_side(side: &[f32], lufs: f64) -> (Vec<f32>, Vec<f32>) {
+        let x = on_target(TonalStyle::Balanced, 3);
+        let l: Vec<f32> = x.iter().zip(side).map(|(a, b)| a - b).collect();
+        let r: Vec<f32> = x.iter().zip(side).map(|(a, b)| a + b).collect();
+        at_lufs(&l, &r, lufs)
+    }
+
+    #[test]
+    fn technical_faults_get_a_high_pass_and_a_cut_off_top_the_exciter() {
+        let o = MasterOptions { target_lufs: -18.0, ..MasterOptions::default() };
+        let (l, r) = good_master(TonalStyle::Balanced, -18.0);
+        let rep = check(&l, &r, &o);
+        assert!(rep.technical.dc_offset_dbfs < -80.0 && rep.technical.subsonic_db.unwrap() < -30.0, "{:?}", rep.technical);
+        assert_eq!(rep.technical.band_limit_hz, None);
+        assert!(["dc_offset", "subsonic", "band_limited"].iter().all(|c| issue(&rep, c).is_none()), "{:#?}", rep.issues);
+
+        // a DC offset of 0.02 (-34 dBFS) and rumble under 20 Hz 6 dB under the rest
+        let rumble = rms_like(&band(&noise(1 << 20, 21), 6.0, 16.0), &l, -6.0);
+        let (l2, r2): (Vec<f32>, Vec<f32>) = (l.iter().zip(&rumble).map(|(a, b)| a + b + 0.02).collect(), r.iter().zip(&rumble).map(|(a, b)| a + b + 0.02).collect());
+        let rep = check(&l2, &r2, &o);
+        assert!((rep.technical.dc_offset_dbfs + 34.0).abs() < 1.0, "{:?}", rep.technical);
+        let dc = issue(&rep, "dc_offset").unwrap_or_else(|| panic!("{:#?}", rep.issues));
+        assert_eq!(dc.suggestion, Some(MasterMove::HighPass { hz: 10.0, slope: 12 }));
+        let sub = issue(&rep, "subsonic").unwrap_or_else(|| panic!("{:#?}", rep.issues));
+        assert_eq!(sub.suggestion, Some(MasterMove::HighPass { hz: 20.0, slope: 24 }));
+
+        // a brick wall at 11 kHz is cut off, and the missing air gets the exciter rather than an EQ boost
+        let wall = |x: &[f32]| shaped(x, |f| if f > 11000.0 { 0.0 } else { 1.0 });
+        let rep = check(&wall(&l), &wall(&r), &o);
+        let hz = rep.technical.band_limit_hz.unwrap_or_else(|| panic!("{:?}", rep.technical));
+        assert!((10800.0..=11200.0).contains(&hz), "{hz}");
+        let b = issue(&rep, "band_limited").unwrap_or_else(|| panic!("{:#?}", rep.issues));
+        assert_eq!((b.severity, &b.suggestion), ("warn", &Some(MasterMove::Exciter { hz_lo: 2500.0, hz_hi: 8000.0, mix: 0.5, mode: Saturation::Tube })));
+        if let Some(air) = issue(&rep, "lacks_air") {
+            assert!(air.suggestion.is_none() && air.message.contains("cut off at"), "{air:?}");
+        }
+        // a dark master that rolls off 36 dB per octave above 3 kHz is not cut off
+        let dark = |x: &[f32]| shaped(x, |f| if f > 3000.0 { (f / 3000.0).powf(-6.0) } else { 1.0 });
+        let rep = check(&dark(&l), &dark(&r), &o);
+        assert_eq!(rep.technical.band_limit_hz, None, "{:#?}", rep.issues);
+    }
+
+    #[test]
+    fn stereo_bands_against_a_reference_get_imager_moves() {
+        let reference = good_master(TonalStyle::Balanced, -18.0);
+        let o = MasterOptions { target_lufs: -18.0, reference: Some(AudioRef::new(SR, &reference.0, &reference.1).unwrap()), ..MasterOptions::default() };
+        let base = gain(&band(&on_target(TonalStyle::Balanced, 4), 300.0, 24000.0), -10.0);
+        // the mid band 6 dB wider than the reference's, the high band 10 dB narrower
+        let side: Vec<f32> = base
+            .iter()
+            .zip(band(&base, 800.0, 5000.0))
+            .zip(band(&base, 5000.0, 24000.0))
+            .map(|((s, m), h)| s + m * (10f32.powf(6.0 / 20.0) - 1.0) + h * (10f32.powf(-10.0 / 20.0) - 1.0))
+            .collect();
+        let (l, r) = with_side(&side, -18.0);
+        let rep = check(&l, &r, &o);
+        let wide = issue(&rep, "band_wide").unwrap_or_else(|| panic!("{:#?} {:#?}", rep.issues, rep.stereo.bands));
+        let Some(MasterMove::Imager { hz_lo, hz_hi, width }) = wide.suggestion else { panic!("{wide:?}") };
+        assert!((hz_lo, hz_hi) == (800.0, 5000.0) && (0.5..0.8).contains(&width), "{wide:?}");
+        let narrow = issue(&rep, "band_narrow").unwrap_or_else(|| panic!("{:#?}", rep.issues));
+        let Some(MasterMove::Imager { hz_lo, width, .. }) = narrow.suggestion else { panic!("{narrow:?}") };
+        assert!(hz_lo == 5000.0 && width > 1.0, "{narrow:?}");
+        assert!(issue(&rep, "phase").is_none(), "{:#?}", rep.issues);
+    }
+
+    #[test]
+    fn a_phase_band_above_the_bass_is_narrowed_with_the_imager() {
+        // 800 Hz to 5 kHz: the side twice the mid, a correlation of -1/3
+        let x = on_target(TonalStyle::Balanced, 3);
+        let side = rms_like(&band(&on_target(TonalStyle::Balanced, 14), 800.0, 5000.0), &band(&x, 800.0, 5000.0), 3.0);
+        let (l, r) = with_side(&side, -18.0);
+        let rep = check(&l, &r, &MasterOptions { target_lufs: -18.0, ..MasterOptions::default() });
+        let p = issue(&rep, "phase").unwrap_or_else(|| panic!("{:#?} {:#?}", rep.issues, rep.stereo.bands));
+        let Some(MasterMove::Imager { hz_lo, width, .. }) = p.suggestion else { panic!("{p:?}") };
+        assert!(p.severity == "warn" && hz_lo == 800.0 && (0.5..0.7).contains(&width), "{p:?}");
+        assert!((narrow_to(-1.0 / 3.0, PHASE_TARGET) - 0.58).abs() < 0.011 && narrow_to(0.9, 0.2) == 0.95 && narrow_to(-0.99, 0.2) == 0.5);
+    }
+
+    #[test]
+    fn a_region_loud_only_at_times_gets_a_dynamic_eq_band() {
+        // 2-5 kHz 16 dB up for 200 ms of every second
+        let (mut l, mut r) = good_master(TonalStyle::Balanced, -20.0);
+        let h = gain(&band(&l, 2000.0, 5000.0), 20.0 * (10f64.powf(16.0 / 20.0) - 1.0).log10());
+        for (i, v) in h.iter().enumerate() {
+            if i % (SR as usize) < SR as usize / 5 {
+                l[i] += v;
+                r[i] += v;
+            }
+        }
+        let rep = check(&l, &r, &MasterOptions { target_lufs: -18.0, ..MasterOptions::default() });
+        let harsh = issue(&rep, "harsh").unwrap_or_else(|| panic!("{:#?} {:#?}", rep.issues, rep.tonal.as_ref().unwrap().regions));
+        let Some(MasterMove::DynEq { shape, hz, range_db, .. }) = harsh.suggestion else { panic!("{harsh:?}") };
+        assert!(shape == EqShape::Peak && (2500.0..=4000.0).contains(&hz) && (-6.0..=-2.0).contains(&range_db), "{harsh:?}");
+        assert!(harsh.message.contains("comes and goes"), "{}", harsh.message);
+        assert!(region(&rep, "harsh").variability_db.unwrap() >= VARIABLE_DB[6], "{:?}", region(&rep, "harsh"));
+    }
+
+    #[test]
+    fn a_region_too_loud_in_the_sides_is_cut_on_the_side() {
+        let reference = good_master(TonalStyle::Balanced, -18.0);
+        let o = MasterOptions { target_lufs: -18.0, reference: Some(AudioRef::new(SR, &reference.0, &reference.1).unwrap()), ..MasterOptions::default() };
+        // the reference's side is 10 dB under its mid; this one's is 2 dB over it from 2 to 5 kHz
+        let x = on_target(TonalStyle::Balanced, 3);
+        let base = gain(&band(&on_target(TonalStyle::Balanced, 4), 300.0, 24000.0), -10.0);
+        let extra = rms_like(&band(&on_target(TonalStyle::Balanced, 13), 2000.0, 5000.0), &band(&x, 2000.0, 5000.0), 2.0);
+        let side: Vec<f32> = base.iter().zip(&extra).map(|(a, b)| a + b).collect();
+        let (l, r) = with_side(&side, -18.0);
+        let rep = check(&l, &r, &o);
+        let harsh = issue(&rep, "harsh").unwrap_or_else(|| panic!("{:#?} {:#?}", rep.issues, rep.tonal.as_ref().unwrap().regions));
+        let Some(MasterMove::Eq { db, part, .. }) = harsh.suggestion else { panic!("{harsh:?}") };
+        assert!(part == Part::Side && (-4.5..-0.5).contains(&db), "{harsh:?}");
+        assert!(harsh.message.contains("side signal"), "{}", harsh.message);
+        assert!(side_gain(-2.0, 0.0).is_some_and(|g| g < -2.0) && side_gain(-2.0, -30.0).is_none());
+    }
+
     #[test]
     fn targets_moves_and_styles_serialise_plainly() {
-        let m = MasterMove::Eq { shape: EqShape::LowShelf, hz: 120.0, db: -2.0, q: 0.7 };
+        let m = MasterMove::Eq { shape: EqShape::LowShelf, hz: 120.0, db: -2.0, q: 0.7, part: Part::Stereo };
         assert_eq!(serde_json::to_value(&m).unwrap(), serde_json::json!({"kind": "eq", "shape": "low_shelf", "hz": 120.0, "db": -2.0, "q": 0.7}));
-        let m = MasterMove::Multiband { band: MultibandRegion::LowMid, hz_lo: 200.0, hz_hi: 500.0, reduce_db: 2.0 };
-        assert_eq!(serde_json::to_value(&m).unwrap()["band"], "low_mid");
+        let m = MasterMove::Eq { shape: EqShape::HighShelf, hz: 8000.0, db: -3.0, q: 0.7, part: Part::Side };
+        assert_eq!(serde_json::to_value(&m).unwrap()["part"], "side");
+        let m = MasterMove::Exciter { hz_lo: 2500.0, hz_hi: 8000.0, mix: 0.5, mode: Saturation::Tape };
+        assert_eq!(serde_json::to_value(&m).unwrap(), serde_json::json!({"kind": "exciter", "hz_lo": 2500.0, "hz_hi": 8000.0, "mix": 0.5, "mode": "tape"}));
+        let m: MasterMove = serde_json::from_str(r#"{"kind":"dyn_eq","shape":"peak","hz":3000,"q":1,"range_db":-4}"#).unwrap();
+        assert_eq!(m, MasterMove::DynEq { shape: EqShape::Peak, hz: 3000.0, q: 1.0, range_db: -4.0 });
+        assert_eq!(serde_json::to_value(MasterMove::HighPass { hz: 20.0, slope: 24 }).unwrap()["kind"], "high_pass");
         let m: MasterMove = serde_json::from_str(r#"{"kind":"limiter","release_ms":null,"clip_db":1.5}"#).unwrap();
         assert_eq!(m, MasterMove::Limiter { release_ms: None, clip_db: Some(1.5) });
         assert_eq!(serde_json::to_value(MasterMove::MonoBelow { hz: 120.0 }).unwrap(), serde_json::json!({"kind": "mono_below", "hz": 120.0}));
@@ -2165,7 +2738,11 @@ mod tests {
             assert!(target_db(s, 20.0) < target_db(s, 80.0), "{s:?}");
         }
         assert!(target_db(TonalStyle::Electronic, 30.0) > target_db(TonalStyle::Acoustic, 30.0) + 6.0);
-        assert_eq!(MultibandRegion::of(200.0, 500.0), MultibandRegion::LowMid);
-        assert_eq!(MultibandRegion::of(5000.0, 10000.0), MultibandRegion::HighMid);
+        // the stereo tables
+        for s in TonalStyle::ALL {
+            let [note, warn] = s.measured().low_side_db;
+            assert!(note <= warn && warn <= LOW_SIDE_CAP_DB, "{s:?}");
+        }
+        assert_eq!(STEREO_BANDS[1..].iter().map(|b| b.1).collect::<Vec<_>>(), STEREO_CROSSOVERS_HZ);
     }
 }

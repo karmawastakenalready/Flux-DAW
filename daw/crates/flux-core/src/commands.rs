@@ -153,8 +153,16 @@ pub struct MasterPatch {
     pub tail_s: Option<f64>,
     /// The whole limiter: settings left out take their defaults.
     pub limiter: Option<Limiter>,
+    pub eq_phase: Option<EqPhase>,
+    pub dyn_eq: Option<Vec<DynBand>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub deess: Option<Option<DeEss>>,
     #[serde(default, deserialize_with = "double_option")]
     pub multiband: Option<Option<Multiband>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub exciter: Option<Option<Exciter>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub imager: Option<Option<Imager>>,
     pub mono_below_hz: Option<f64>,
     pub width: Option<f64>,
 }
@@ -773,6 +781,23 @@ fn check_comp(c: &Comp) -> Comp {
     }
 }
 
+/// EQ bands brought into range; a high- or low-pass needs one of the [`FILTER_SLOPES`].
+fn check_eq(bands: &[EqBand]) -> Result<Vec<EqBand>> {
+    bands
+        .iter()
+        .map(|b| {
+            if b.kind.is_pass() && !FILTER_SLOPES.contains(&b.slope) {
+                bail!("an EQ slope of {} dB/octave: it can be 12, 24, 36 or 48", b.slope);
+            }
+            Ok(EqBand { hz: b.hz.clamp(10.0, 22000.0), db: b.db.clamp(-30.0, 30.0), q: b.q.clamp(0.1, 30.0), ..*b })
+        })
+        .collect()
+}
+
+fn check_deess(d: &DeEss) -> DeEss {
+    DeEss { hz: d.hz.clamp(1000.0, 16000.0), threshold_db: d.threshold_db, range_db: d.range_db.clamp(-24.0, 0.0) }
+}
+
 fn check_dyn_band(b: &DynBand) -> Result<DynBand> {
     if !matches!(b.kind, EqKind::Peak | EqKind::LowShelf | EqKind::HighShelf) {
         bail!("a dynamic EQ band is a peak, low_shelf or high_shelf");
@@ -799,17 +824,22 @@ fn check_reverb(r: &ReverbParams) -> ReverbParams {
     }
 }
 
-fn check_multiband(mb: &Multiband) -> Result<Multiband> {
-    let x = &mb.crossovers_hz;
-    if x.is_empty() || x.len() > 3 {
-        bail!("a multiband compressor has 1 to 3 crossovers (2 to 4 bands)");
+/// Checks the crossovers of a band-split effect (`what`, with at least `min` of them) against its `bands` settings.
+fn check_crossovers(x: &[f64], min: usize, bands: usize, what: &str) -> Result<()> {
+    if x.len() < min || x.len() > 3 {
+        bail!("{what} has {min} to 3 crossovers ({} to 4 bands)", min + 1);
     }
     if x.windows(2).any(|w| w[1] <= w[0] * 1.5) || x.iter().any(|&f| !(30.0..=16000.0).contains(&f)) {
         bail!("crossovers go up from 30 Hz to 16 kHz, each at least half an octave above the last");
     }
-    if mb.bands.len() != x.len() + 1 {
+    if bands != x.len() + 1 {
         bail!("{} crossovers make {} bands: give one setting per band, low to high", x.len(), x.len() + 1);
     }
+    Ok(())
+}
+
+fn check_multiband(mb: &Multiband) -> Result<Multiband> {
+    check_crossovers(&mb.crossovers_hz, 1, mb.bands.len(), "a multiband compressor")?;
     let bands = mb
         .bands
         .iter()
@@ -818,10 +848,23 @@ fn check_multiband(mb: &Multiband) -> Result<Multiband> {
             attack_ms: b.attack_ms.clamp(0.1, 1000.0),
             release_ms: b.release_ms.clamp(5.0, 5000.0),
             gain_db: b.gain_db.clamp(-12.0, 12.0),
+            knee_db: b.knee_db.clamp(0.0, 24.0),
+            mix: b.mix.clamp(0.0, 1.0),
             ..*b
         })
         .collect();
-    Ok(Multiband { crossovers_hz: x.clone(), bands })
+    Ok(Multiband { crossovers_hz: mb.crossovers_hz.clone(), bands })
+}
+
+fn check_exciter(e: &Exciter) -> Result<Exciter> {
+    check_crossovers(&e.crossovers_hz, 0, e.bands.len(), "an exciter")?;
+    let bands = e.bands.iter().map(|b| ExciterBand { drive_db: b.drive_db.clamp(-12.0, 24.0), mix: b.mix.clamp(0.0, 1.0), ..*b }).collect();
+    Ok(Exciter { crossovers_hz: e.crossovers_hz.clone(), bands })
+}
+
+fn check_imager(im: &Imager) -> Result<Imager> {
+    check_crossovers(&im.crossovers_hz, 1, im.widths.len(), "an imager")?;
+    Ok(Imager { crossovers_hz: im.crossovers_hz.clone(), widths: im.widths.iter().map(|w| w.clamp(0.0, 2.0)).collect() })
 }
 
 fn track_mut<'a>(p: &'a mut Project, r: &TrackRef) -> Result<&'a mut Track> {
@@ -1141,6 +1184,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
                 Some(bands) => Some(bands.iter().map(check_dyn_band).collect::<Result<Vec<_>>>()?),
                 None => None,
             };
+            let eq = m.eq.as_deref().map(check_eq).transpose()?;
             let t = track_mut(p, track)?;
             let x = &mut t.mixer;
             if let Some(v) = m.gain_db {
@@ -1173,8 +1217,8 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
             if let Some(v) = m.mono_below_hz {
                 x.mono_below_hz = v.clamp(0.0, 1000.0);
             }
-            if let Some(v) = &m.eq {
-                x.eq = v.clone();
+            if let Some(v) = eq {
+                x.eq = v;
             }
             if let Some(v) = m.drive_db {
                 x.drive_db = v.max(0.0);
@@ -1213,7 +1257,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
                 x.dyn_eq = v;
             }
             if let Some(v) = m.deess {
-                x.deess = v.map(|d| DeEss { hz: d.hz.clamp(1000.0, 16000.0), threshold_db: d.threshold_db, range_db: d.range_db.clamp(-24.0, 0.0) });
+                x.deess = v.map(|d| check_deess(&d));
             }
             if let Some(v) = m.reverb {
                 x.reverb = v.map(|r| ReverbFx { params: check_reverb(&r.params), mix: r.mix.clamp(0.0, 1.0) });
@@ -1232,12 +1276,42 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Value> {
                 Some(None) => Some(None),
                 None => None,
             };
+            let exciter = match &m.exciter {
+                Some(Some(e)) => Some(Some(check_exciter(e)?)),
+                Some(None) => Some(None),
+                None => None,
+            };
+            let imager = match &m.imager {
+                Some(Some(im)) => Some(Some(check_imager(im)?)),
+                Some(None) => Some(None),
+                None => None,
+            };
+            let eq = m.eq.as_deref().map(check_eq).transpose()?;
+            let dyn_eq = match &m.dyn_eq {
+                Some(bands) => Some(bands.iter().map(check_dyn_band).collect::<Result<Vec<_>>>()?),
+                None => None,
+            };
             let x = &mut p.master;
             if let Some(v) = m.glue {
                 x.glue = v.map(|c| check_comp(&c));
             }
-            if let Some(v) = &m.eq {
-                x.eq = v.clone();
+            if let Some(v) = eq {
+                x.eq = v;
+            }
+            if let Some(v) = m.eq_phase {
+                x.eq_phase = v;
+            }
+            if let Some(v) = dyn_eq {
+                x.dyn_eq = v;
+            }
+            if let Some(v) = m.deess {
+                x.deess = v.map(|d| check_deess(&d));
+            }
+            if let Some(v) = exciter {
+                x.exciter = v;
+            }
+            if let Some(v) = imager {
+                x.imager = v;
             }
             if let Some(v) = m.target_lufs {
                 x.target_lufs = v;
@@ -1820,6 +1894,54 @@ mod tests {
         assert_eq!(old.tracks[0].mixer.mono_below_hz, 0.0);
         run(&mut p, json!({"op": "set_mixer", "track": "glass", "mixer": {"mono_below_hz": 120}}))?;
         assert_eq!(p.tracks[0].mixer.mono_below_hz, 120.0);
+        Ok(())
+    }
+
+    /// The master's newer stages: set, brought into range, refused with a reason when their bands don't fit their
+    /// crossovers, and cleared with null; a project saved before them opens without them.
+    #[test]
+    fn master_stages() -> Result<()> {
+        let mut p = Project::new("t", 120.0, 4);
+        run(&mut p, json!({"op": "set_master", "master": {
+            "eq": [{"kind": "high_pass", "hz": 30, "db": 0, "slope": 24}, {"kind": "high_shelf", "hz": 9000, "db": 1, "channel": "side"}],
+            "eq_phase": "linear",
+            "dyn_eq": [{"kind": "peak", "hz": 3150, "q": 1.2, "threshold_db": -4, "ratio": 3, "range_db": -40}],
+            "deess": {"hz": 6500, "threshold_db": 0, "range_db": -4},
+            "exciter": {"crossovers_hz": [2500], "bands": [{"drive_db": 3, "mix": 0}, {"drive_db": 40, "mix": 2, "mode": "tube"}]},
+            "imager": {"crossovers_hz": [150, 800], "widths": [0.6, 1.0, 3.0]}}}))?;
+        let m = &p.master;
+        assert_eq!((m.eq_phase, m.eq[0].kind, m.eq[0].slope, m.eq[1].channel), (EqPhase::Linear, EqKind::HighPass, 24, Channel::Side));
+        assert_eq!(m.dyn_eq[0].range_db, -24.0);
+        let ex = m.exciter.as_ref().unwrap();
+        assert_eq!((ex.bands[1].drive_db, ex.bands[1].mix, ex.bands[1].mode), (24.0, 1.0, SatMode::Tube));
+        assert_eq!(m.imager.as_ref().unwrap().widths, [0.6, 1.0, 2.0]);
+
+        // bands that don't fit their crossovers change nothing
+        let refused = |p: &mut Project, master: Value| run(p, json!({"op": "set_master", "master": master})).unwrap_err().to_string();
+        let e = refused(&mut p, json!({"width": 0.5, "exciter": {"crossovers_hz": [2500, 3000], "bands": [{"drive_db": 3, "mix": 0.2}, {"drive_db": 3, "mix": 0.2}, {"drive_db": 3, "mix": 0.2}]}}));
+        assert!(e.contains("half an octave"), "{e}");
+        let e = refused(&mut p, json!({"imager": {"crossovers_hz": [], "widths": [1.0]}}));
+        assert!(e.contains("1 to 3 crossovers"), "{e}");
+        let e = refused(&mut p, json!({"imager": {"crossovers_hz": [150, 800], "widths": [1.0, 1.2]}}));
+        assert!(e.contains("one setting per band"), "{e}");
+        let e = refused(&mut p, json!({"eq": [{"kind": "low_pass", "hz": 18000, "slope": 18}]}));
+        assert!(e.contains("12, 24, 36 or 48"), "{e}");
+        assert_eq!(p.master.width, Project::new("t", 120.0, 4).master.width);
+        // an exciter needs no crossover: one band saturates the whole range
+        run(&mut p, json!({"op": "set_master", "master": {"exciter": {"crossovers_hz": [], "bands": [{"drive_db": 6, "mix": 0.2}]}}}))?;
+        assert_eq!(p.master.exciter.as_ref().unwrap().bands.len(), 1);
+
+        run(&mut p, json!({"op": "set_master", "master": {"exciter": null, "imager": null, "deess": null, "dyn_eq": [], "eq_phase": "minimum"}}))?;
+        let m = &p.master;
+        assert!(m.exciter.is_none() && m.imager.is_none() && m.deess.is_none() && m.dyn_eq.is_empty() && m.eq_phase == EqPhase::Minimum);
+        assert_eq!(m.eq.len(), 2, "what isn't given stays");
+
+        let mut v = serde_json::to_value(&p)?;
+        for k in ["eq_phase", "dyn_eq", "deess", "exciter", "imager"] {
+            v["master"].as_object_mut().unwrap().remove(k);
+        }
+        let old: Project = serde_json::from_value(v)?;
+        assert!(old.master.exciter.is_none() && old.master.imager.is_none() && old.master.eq_phase == EqPhase::Minimum);
         Ok(())
     }
 
